@@ -29,7 +29,7 @@
 ### Step 1. 마켓플레이스 등록
 
 ```bash
-/plugin marketplace add https://github.com/jongik-sv/dev-plugin.git
+/plugin marketplace add jongik-sv/dev-plugin
 ```
 
 ### Step 2. 플러그인 설치
