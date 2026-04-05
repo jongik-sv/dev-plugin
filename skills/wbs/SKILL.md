@@ -1,0 +1,230 @@
+---
+name: wbs
+description: "PRD/TRD를 기반으로 WBS를 생성한다. 프로젝트 규모에 따라 4단계(대규모)/3단계(중소규모) 구조를 자동 선택. 사용법: /wbs [--scale large|medium] [--start-date YYYY-MM-DD] [--estimate-only]"
+---
+
+# /wbs - PRD/TRD 기반 WBS 생성
+
+> **PRD/TRD → WBS 자동 변환**: `docs/PRD.md`, `docs/TRD.md`를 분석하여 계층적 WBS를 `docs/wbs.md`로 생성한다.
+
+인자: `$ARGUMENTS` (옵션)
+- `--scale [large|medium]`: 프로젝트 규모 강제 지정 (기본: 자동 산정)
+- `--start-date YYYY-MM-DD`: 프로젝트 시작일 (기본: 오늘)
+- `--estimate-only`: 규모 산정만 실행, WBS 생성 안 함
+
+## 입력 파일 (자동 감지)
+
+- **PRD**: `docs/PRD.md`
+- **TRD**: `docs/TRD.md`
+
+두 파일이 없으면 에러를 보고하고 중단한다.
+
+---
+
+## 계층 구조
+
+```
+Project
+├── Work Package (WP) — 주요 기능 묶음 (1~3개월)
+│   ├── Activity (ACT) — 세부 활동 (1~4주)        ← 4단계(대규모)만
+│   │   └── Task (TSK) — 실제 작업 (1일~1주)
+│   └── Task (TSK) — 실제 작업 (1일~1주)           ← 3단계(중소규모)
+```
+
+### 규모 판별 기준
+
+| 기준 | 대규모 (4단계) | 중소규모 (3단계) |
+|------|---------------|-----------------|
+| 예상 기간 | 12개월+ | 12개월 미만 |
+| 팀 규모 | 10명+ | 10명 미만 |
+| 기능 영역 수 | 5개+ | 5개 미만 |
+| 예상 Task 수 | 50개+ | 50개 미만 |
+
+### ID 패턴
+
+| 레벨 | 4단계 | 3단계 |
+|------|-------|-------|
+| WP | `## WP-XX:` | `## WP-XX:` |
+| ACT | `### ACT-XX-XX:` | — |
+| TSK | `#### TSK-XX-XX-XX:` | `### TSK-XX-XX:` |
+
+- `WP-00`은 프로젝트 초기화용으로 예약
+
+### Task category
+
+| category | 설명 | 워크플로우 |
+|----------|------|------------|
+| `development` | 신규 기능 개발 | `[ ]` → `[dd]` → `[im]` → `[xx]` |
+| `defect` | 결함 수정 | `[ ]` → `[dd]` → `[im]` → `[xx]` |
+| `infrastructure` | 인프라/기술 작업 | `[ ]` → `[dd]` → `[im]` → `[xx]` |
+
+### Task domain
+
+| domain | 설명 |
+|--------|------|
+| `frontend` | 클라이언트 UI/UX |
+| `backend` | 서버 비즈니스 로직 |
+| `database` | 데이터 계층 |
+| `infra` | 인프라/DevOps |
+| `sidecar` | Python 사이드카 |
+| `fullstack` | 전체 스택 |
+| `docs` | 문서화 |
+| `test` | 테스트 전용 |
+
+---
+
+## 실행 플로우
+
+### 1단계: PRD/TRD 분석 및 규모 산정
+
+1. `docs/PRD.md` 읽기 — 기능 요구사항, 마일스톤, 우선순위 파악
+2. `docs/TRD.md` 읽기 — 기술 스택, API 설계, 데이터 모델 파악
+3. 규모 판별 기준에 따라 4단계/3단계 결정 (`--scale` 지정 시 해당 값 사용)
+4. `--estimate-only`이면 규모 산정 결과만 출력하고 종료
+
+### 2단계: PRD → Work Package 매핑
+
+| PRD 섹션 | WP 매핑 |
+|----------|---------|
+| 프로젝트 초기화 | WP-00 |
+| MVP 핵심 기능 (P0) | WP-01 ~ WP-0N |
+| MVP 중요 기능 (P1) | WP-0N+1 ~ WP-0M |
+| Phase 2+ (P2~P3) | 참고용 WP (상세 분해 미실시) |
+
+### 3단계: WP → Activity 분해 (4단계만)
+
+- 사용자 관점 기능 단위로 분해
+- 1~4주 규모 검증
+- MECE 원칙 (상호 배타적 + 전체 포괄)
+
+### 4단계: Task 분해 및 category/domain 분류
+
+**Task 크기 검증**:
+- 최소: 4시간 / 권장: 1~3일 / 최대: 1주 (초과 시 분할)
+
+### 5단계: PRD/TRD 컨텍스트 주입
+
+각 Task에 관련 정보를 직접 포함하여 **자기 완결적**으로 만든다.
+
+**PRD → Task**:
+
+| PRD 섹션 | Task 속성 |
+|----------|----------|
+| 기능 요구사항 | prd-ref, requirements |
+| 인수 조건 | acceptance |
+| 비기능 요구사항 | constraints |
+
+**TRD → Task**:
+
+| TRD 섹션 | Task 속성 |
+|----------|----------|
+| 기술 스택 | tech-spec |
+| API 설계 | api-spec |
+| 데이터 모델 | data-model |
+| UI 컴포넌트 | ui-spec |
+
+**상세도 레벨**:
+
+| Task 특성 | 레벨 |
+|----------|------|
+| 인프라/설정 | minimal |
+| 단순 CRUD | standard |
+| 비즈니스 로직 | detailed |
+| 핵심/신규 개발 | full |
+
+### 6단계: 일정 계산
+
+| category | 기본 기간 | 범위 |
+|----------|----------|------|
+| development | 10일 | 5~15일 |
+| defect | 3일 | 2~5일 |
+| infrastructure | 5일 | 2~10일 |
+
+의존성(`depends`) 기반으로 시작일/종료일 산출.
+
+### 7단계: wbs.md 생성
+
+`docs/wbs.md` 파일을 생성한다.
+
+---
+
+## 출력 형식
+
+```markdown
+# WBS - {프로젝트명}
+
+> version: 1.0
+> depth: {3 또는 4}
+> updated: {날짜}
+
+---
+
+## WP-00: 프로젝트 초기화
+- status: planned
+- priority: critical
+- schedule: {시작일} ~ {종료일}
+- progress: 0%
+
+### TSK-00-01: {Task명}
+- category: infrastructure
+- domain: infra
+- status: [ ]
+- priority: critical
+- assignee: -
+- schedule: {시작일} ~ {종료일}
+- tags: setup, init
+- depends: -
+
+---
+
+## WP-01: {Work Package명}
+- status: planned
+- priority: high
+- schedule: {시작일} ~ {종료일}
+- progress: 0%
+
+### TSK-01-01: {Task명}
+- category: development
+- domain: backend
+- status: [ ]
+- priority: high
+- assignee: -
+- schedule: {시작일} ~ {종료일}
+- tags: {관련 태그}
+- depends: -
+
+#### PRD 요구사항
+- prd-ref: {PRD 섹션 참조}
+- requirements:
+  - {요구사항 1}
+  - {요구사항 2}
+- acceptance:
+  - {인수조건 1}
+  - {인수조건 2}
+- constraints:
+  - {제약사항}
+
+#### 기술 스펙 (TRD)
+- tech-spec:
+  - {기술 스택}
+- api-spec:
+  - {API 엔드포인트, 스키마}
+- data-model:
+  - {엔티티, 필드, 관계}
+```
+
+### Task 속성 목록
+
+- **기본**: category, domain, status, priority, assignee, schedule, tags, depends, blocked-by, note
+- **PRD 연동**: prd-ref, requirements, acceptance, constraints, test-criteria
+- **TRD 연동**: tech-spec, api-spec, data-model, ui-spec
+
+---
+
+## 성공 기준
+
+- **요구사항 커버리지**: PRD 모든 기능이 Task로 분해됨
+- **적정 규모**: 모든 Task가 1일~1주 범위 내
+- **추적성**: 각 Task에 prd-ref 연결
+- **컨텍스트 완전성**: 개발 Task는 requirements, acceptance, tech-spec 필수 포함
+- **자기 완결성**: Task만 보고 개발 착수 가능한 수준
