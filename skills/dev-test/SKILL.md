@@ -23,6 +23,9 @@ Agent 도구로 서브에이전트를 실행한다 (mode: "auto"):
 Task: {TSK-ID}
 Domain: {domain}
 
+## QA 체크리스트
+docs/tasks/{TSK-ID}/design.md의 "QA 체크리스트" 섹션을 읽고, 각 항목을 테스트로 검증한다.
+
 ## 절차
 1. domain에 맞는 테스트 실행:
    - backend: `bundle exec rspec`
@@ -36,6 +39,7 @@ Domain: {domain}
 3. 다시 테스트 실행
 4. 최대 3회 반복. 3회 후에도 실패하면 실패 내역을 보고
    - 실패 보고 시 pass/fail/unverified 항목으로 구분하여 기록
+5. QA 체크리스트의 각 항목에 대해 pass/fail 판정을 기록
 
 ## 결과 작성
 docs/tasks/{TSK-ID}/test-report.md 파일에 작성한다.
