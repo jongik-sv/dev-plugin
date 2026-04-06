@@ -5,6 +5,7 @@
 ## 목차
 
 - [Features](#features)
+- [사전 요구사항](#사전-요구사항)
 - [설치](#설치)
 - [포함된 스킬](#포함된-스킬)
 - [사용법](#사용법)
@@ -21,6 +22,43 @@
 - **TDD by default** — 테스트를 먼저 작성하고 구현하여 통과시키는 TDD 워크플로우
 - **Team parallel execution** — tmux 기반 다중 세션으로 Work Package 단위 병렬 개발
 - **Agent pool** — tmux 없이도 서브에이전트 슬롯 풀 패턴으로 병렬 실행 가능
+
+---
+
+## 사전 요구사항
+
+### Claude Code CLI
+
+`claude` CLI가 설치되어 있어야 합니다. 팀 병렬 실행 시 `claude --dangerously-skip-permissions`로 worker를 생성합니다.
+
+### tmux / psmux (team-mode, dev-team 사용 시 필수)
+
+`team-mode`와 `dev-team`은 tmux 세션 안에서 실행해야 합니다. tmux 없이 병렬 실행이 필요하면 `agent-pool`을 사용하세요.
+
+#### 설치 방법
+
+| 플랫폼 | 설치 명령 |
+|--------|-----------|
+| **macOS** | `brew install tmux` |
+| **Ubuntu / Debian** | `sudo apt install tmux` |
+| **Fedora / RHEL** | `sudo dnf install tmux` |
+| **Arch Linux** | `sudo pacman -S tmux` |
+| **Windows** | [psmux](https://github.com/psmux/psmux) — tmux 호환 Windows 구현 |
+
+#### 설치 확인 및 세션 시작
+
+```bash
+# 설치 확인
+tmux -V
+
+# 새 세션 시작
+tmux new-session -s dev
+
+# 세션 안에서 Claude Code 실행
+claude
+```
+
+> **Windows(psmux) 참고**: psmux는 현재 세션을 자동 추론하지 않으므로, 플러그인 내부에서 모든 tmux 명령에 세션 이름을 명시합니다. 별도 설정은 필요 없습니다.
 
 ---
 
@@ -87,6 +125,22 @@
 ---
 
 ## 사용법
+
+### WBS 생성 — `/wbs`
+
+PRD/TRD 문서로부터 WBS를 생성합니다.
+
+```bash
+# 규모 자동 판단
+/wbs
+
+# 규모 지정
+/wbs --scale large        # 4단계: Phase → WP → Task → SubTask
+/wbs --scale medium       # 3단계: WP → Task → SubTask
+
+# 일정 추정만
+/wbs --estimate-only
+```
 
 ### 단일 Task 개발 — `/dev`
 
@@ -159,6 +213,24 @@ tmux 환경에서 WP 리더 + 팀원 pane 구조로 동작합니다.
      └─ ... (동일 구조)
 ```
 
+> tmux가 없으면 Agent 도구 백그라운드 모드(`isolation: "worktree"`)로 자동 전환됩니다.
+
+### 범용 병렬 실행 — `/agent-pool`, `/team-mode`
+
+WBS와 무관하게 임의의 작업을 병렬로 실행합니다.
+
+```bash
+# agent-pool: tmux 불필요, 서브에이전트 슬롯 풀
+/agent-pool --pool-size 4
+# 또는 task 파일 지정
+/agent-pool tasks.md --pool-size 3
+
+# team-mode: tmux 기반 독립 세션
+/team-mode --team-size 3
+# 또는 manifest 파일 지정
+/team-mode manifest.md --team-size 5
+```
+
 ---
 
 ## 프로젝트 요구사항
@@ -214,11 +286,6 @@ tmux 환경에서 WP 리더 + 팀원 pane 구조로 동작합니다.
 | sidecar | pytest | `uv run pytest` |
 | fullstack | 위 전부 | 순차 실행 |
 
-### dev-team 추가 요구사항
-
-- **tmux**: 팀 병렬 개발 시 필수 (tmux 세션 내에서 실행)
-- **claude CLI**: `claude --dangerously-skip-permissions` 실행 가능해야 함
-
 ---
 
 ## Architecture
@@ -239,15 +306,17 @@ dev-plugin/
 │   ├── dev-refactor/            # Layer 2: 리팩토링 단계
 │   ├── dev-team/                # Layer 3: 팀 병렬 개발
 │   └── dev-help/                # 사용법 안내
-└── CLAUDE.md                    # Claude Code 프로젝트 지침
+├── CLAUDE.md                    # Claude Code 프로젝트 지침
+└── README.md
 ```
 
 ### Key Patterns
 
-- **Signal files** — 에이전트 간 통신은 파일 기반 시그널(`.done` 파일) 사용. worktree에서는 절대경로 필수.
-- **Pane recycling** — 팀원이 Task 완료 후 `/clear` → 다음 Task 할당 (prompt 파일 경유)
+- **Signal files** — 에이전트 간 통신은 파일 기반 시그널(`.done`, `.running`, `.failed`) 사용. worktree에서는 절대경로 필수.
+- **Pane recycling** — 팀원이 Task 완료 후 `/clear` → 다음 Task 할당 (prompt 파일 경유, tmux send-keys 길이 제한 회피)
 - **Slot pool** — 정확히 N개의 동시 에이전트 유지; 슬롯이 비면 다음 Task 즉시 실행
 - **Git worktrees** — `dev-team`은 WP별 격리된 worktree 생성, 완료 시 main에 머지
+- **Heartbeat** — worker가 주기적으로 `.running` 파일을 touch, 리더가 stale 감지
 
 ---
 
@@ -276,6 +345,30 @@ dev-plugin/
 
 ## 문제 해결
 
+### tmux가 설치되어 있지 않음
+
+`team-mode` 또는 `dev-team` 실행 시 tmux가 없으면 설치 안내가 표시됩니다.
+
+| 플랫폼 | 설치 명령 |
+|--------|-----------|
+| macOS | `brew install tmux` |
+| Ubuntu / Debian | `sudo apt install tmux` |
+| Fedora / RHEL | `sudo dnf install tmux` |
+| Arch Linux | `sudo pacman -S tmux` |
+| Windows | [psmux](https://github.com/psmux/psmux) 설치 |
+
+tmux 없이 병렬 실행이 필요하면 `/agent-pool`을 사용하세요.
+
+### tmux 세션 밖에서 실행
+
+```bash
+# 세션 시작 후 Claude Code 실행
+tmux new-session -s dev
+claude
+```
+
+`dev-team`은 tmux 없이 실행하면 Agent 도구 백그라운드 모드로 자동 전환됩니다.
+
 ### 스킬이 `/skills` 목록에 표시되지 않음
 
 1. `/plugin list`에서 설치 여부 확인
@@ -298,16 +391,6 @@ rm -rf .claude/skills/dev-team
 1. 프로젝트 스킬 (`.claude/skills/`)
 2. 사용자 스킬 (`~/.claude/skills/`)
 3. 플러그인 스킬
-
-### dev-team이 tmux 없이 실행됨
-
-tmux 세션 밖에서 `/dev-team`을 실행하면 Agent 도구 백그라운드 모드로 전환됩니다.
-최적 성능을 위해 tmux 세션 내에서 실행하세요:
-
-```bash
-tmux new-session -s dev
-# 이후 Claude Code 실행
-```
 
 ---
 
