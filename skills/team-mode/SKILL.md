@@ -198,7 +198,7 @@ mkdir -p {SIGNAL_DIR}/discoveries
 
 3. **pane 생성 검증**:
    ```bash
-   ACTUAL_PANES=$(tmux list-panes -t "${SESSION}:{window_name}" | wc -l | tr -d ' ')
+   ACTUAL_PANES=$(tmux list-panes -t "${SESSION}:{window_name}" -F '#{pane_id}' | grep -c .)
    if [ "$ACTUAL_PANES" -ne "$TEAM_SIZE" ]; then
      echo "ERROR: expected ${TEAM_SIZE} panes, got ${ACTUAL_PANES}"
      # 부족한 pane 재생성 시도
@@ -252,7 +252,7 @@ pane 0은 리더(호출자)용 빈 셸이다. `WORKER_OFFSET = 1`.
 3. **pane 생성 검증**:
    ```bash
    EXPECTED_PANES=$((TEAM_SIZE + 1))  # 리더 + worker
-   ACTUAL_PANES=$(tmux list-panes -t "${SESSION}:{window_name}" | wc -l | tr -d ' ')
+   ACTUAL_PANES=$(tmux list-panes -t "${SESSION}:{window_name}" -F '#{pane_id}' | grep -c .)
    if [ "$ACTUAL_PANES" -ne "$EXPECTED_PANES" ]; then
      echo "ERROR: expected ${EXPECTED_PANES} panes, got ${ACTUAL_PANES}"
      for i in $(seq $((ACTUAL_PANES)) ${TEAM_SIZE}); do
@@ -301,7 +301,8 @@ tmux send-keys -t {paneId} '{prompt_file} 파일을 Read 도구로 읽고 그 �
 
 # 3단계: 할당 수신 검증 (15초 후)
 sleep 15
-PANE_OUTPUT=$(tmux capture-pane -t {paneId} -p -S -5 2>/dev/null)
+# 전체 캡처 후 빈 줄 제거 + tail (psmux에서 -S -N 부분 캡처가 빈 줄만 반환하는 문제 회피)
+PANE_OUTPUT=$(tmux capture-pane -t {paneId} -p 2>/dev/null | grep -v "^$" | tail -5)
 if echo "$PANE_OUTPUT" | grep -qE '(Musing|Thinking|Drizzling|Running|⏺)'; then
   echo "worker 활성 확인"
 else
