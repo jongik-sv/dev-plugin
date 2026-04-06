@@ -7,6 +7,7 @@
 
 ⚠️ 중요: 팀원은 반드시 tmux pane으로만 생성하라. Agent 도구로 팀원을 생성하지 마라.
 ⚠️ 중요: 가장 먼저 아래 "초기화" 섹션을 실행하여 tmux pane을 생성하라.
+⚠️ 중요: tmux 명령에 반드시 세션 prefix(`${SESSION}:{window_name}`)를 사용하라. pane 식별은 pane_id(`%N`)를 사용하라.
 
 개발팀원 {TEAM_SIZE}명을 tmux pane으로 스폰하고, Task를 1건씩 할당하여 개발을 관리하라.
 **리더는 직접 개발하지 않는다. 모든 Task는 팀원에게 위임한다.**
@@ -26,7 +27,7 @@
 | team-mode 절차 | 적용 |
 |----------------|------|
 | 2. 환경 구성 → tmux 창 및 pane 생성 | 팀원 pane 생성 (window_name={WP-ID}) |
-| 3. Task 할당 프로토콜 | 3단계 파일 기반 할당 (prompt_file=/tmp/task-{TSK-ID}.txt) |
+| 3. Task 할당 프로토콜 | 3단계 파일 기반 할당 (prompt_file={TEMP_DIR}/task-{TSK-ID}.txt) |
 | 4. 모니터링 및 재활용 | 시그널 감지(.done 또는 .failed) → /clear → 다음 Task 할당 |
 | 5. 완료 처리 → Worker 종료 | 팀원 전원 종료 |
 
