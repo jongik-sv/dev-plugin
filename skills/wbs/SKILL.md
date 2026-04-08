@@ -1,21 +1,35 @@
 ---
 name: wbs
-description: "PRD/TRD를 기반으로 WBS를 생성한다. 프로젝트 규모에 따라 4단계(대규모)/3단계(중소규모) 구조를 자동 선택. 사용법: /wbs [--scale large|medium] [--start-date YYYY-MM-DD] [--estimate-only]"
+description: "PRD/TRD를 기반으로 WBS를 생성한다. 프로젝트 규모에 따라 4단계(대규모)/3단계(중소규모) 구조를 자동 선택. 사용법: /wbs [SUBPROJECT] [--scale large|medium] [--start-date YYYY-MM-DD] [--estimate-only]"
 ---
 
 # /wbs - PRD/TRD 기반 WBS 생성
 
-> **PRD/TRD → WBS 자동 변환**: `docs/PRD.md`, `docs/TRD.md`를 분석하여 계층적 WBS를 `docs/wbs.md`로 생성한다.
+> **PRD/TRD → WBS 자동 변환**: `{DOCS_DIR}/PRD.md`, `{DOCS_DIR}/TRD.md`를 분석하여 계층적 WBS를 `{DOCS_DIR}/wbs.md`로 생성한다.
 
 인자: `$ARGUMENTS` (옵션)
+- `SUBPROJECT`: (옵션) 하위 프로젝트 폴더 이름. 예: `p1` → `docs/p1/` 하위에서 동작
 - `--scale [large|medium]`: 프로젝트 규모 강제 지정 (기본: 자동 산정)
 - `--start-date YYYY-MM-DD`: 프로젝트 시작일 (기본: 오늘)
 - `--estimate-only`: 규모 산정만 실행, WBS 생성 안 함
 
+## 0. 인자 파싱 — 서브프로젝트 감지 (공통 규칙)
+
+`$ARGUMENTS`를 공백으로 토큰화하여 첫 번째 토큰을 검사한다:
+
+1. 토큰이 없거나 `--`로 시작 → 서브프로젝트 없음, `DOCS_DIR=docs`
+2. `^(WP|TSK)-` 패턴 → 서브프로젝트 없음, `DOCS_DIR=docs` (토큰은 그대로 유지)
+3. 그 외 문자열 → 서브프로젝트 이름 후보
+   - `docs/{토큰}/` 디렉토리가 존재하면: `SUBPROJECT={토큰}`, `DOCS_DIR=docs/{토큰}`, 해당 토큰을 `$ARGUMENTS`에서 제거
+   - 존재하지 않고 `--estimate-only`도 아니면: 사용자에게 "`docs/{토큰}/`가 없습니다. 생성하시겠습니까?" 확인 후 `mkdir -p docs/{토큰}` 생성 후 진행
+   - 혹은 단순 오타일 수 있으므로 에러 보고 후 종료
+
+이후 모든 경로는 하드코딩된 `docs` 대신 `{DOCS_DIR}`을 사용한다.
+
 ## 입력 파일 (자동 감지)
 
-- **PRD**: `docs/PRD.md`
-- **TRD**: `docs/TRD.md`
+- **PRD**: `{DOCS_DIR}/PRD.md`
+- **TRD**: `{DOCS_DIR}/TRD.md`
 
 두 파일이 없으면 에러를 보고하고 중단한다.
 
@@ -77,8 +91,8 @@ Project
 
 ### 1단계: PRD/TRD 분석 및 규모 산정
 
-1. `docs/PRD.md` 읽기 — 기능 요구사항, 마일스톤, 우선순위 파악
-2. `docs/TRD.md` 읽기 — 기술 스택, API 설계, 데이터 모델 파악
+1. `{DOCS_DIR}/PRD.md` 읽기 — 기능 요구사항, 마일스톤, 우선순위 파악
+2. `{DOCS_DIR}/TRD.md` 읽기 — 기술 스택, API 설계, 데이터 모델 파악
 3. 규모 판별 기준에 따라 4단계/3단계 결정 (`--scale` 지정 시 해당 값 사용)
 4. `--estimate-only`이면 규모 산정 결과만 출력하고 종료
 
@@ -144,7 +158,7 @@ Project
 
 ### 7단계: wbs.md 생성
 
-`docs/wbs.md` 파일을 생성한다.
+`{DOCS_DIR}/wbs.md` 파일을 생성한다.
 
 ---
 

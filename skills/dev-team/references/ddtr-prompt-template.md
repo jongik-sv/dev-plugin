@@ -7,6 +7,10 @@
 
 아래 Task를 개발하라. 각 단계를 서브에이전트(Agent 도구)로 실행하라.
 
+## 경로 변수
+- DOCS_DIR = {DOCS_DIR}
+  (서브프로젝트가 없으면 `docs`, 있으면 `docs/{SUBPROJECT}`. 모든 wbs/PRD/TRD/tasks 경로는 이 변수 기준)
+
 ## 시작 처리 (가장 먼저 실행)
 echo 'started' > {SHARED_SIGNAL_DIR}/{TSK-ID}.running
 
@@ -24,30 +28,30 @@ touch {SHARED_SIGNAL_DIR}/{TSK-ID}.running
 
 1. **설계 (서브에이전트)**:
    Agent 도구로 실행 (mode: "auto")
-   - /dev-design 스킬의 절차를 따른다
-   - docs/PRD.md, docs/TRD.md를 참조하여 구현 설계
-   - docs/tasks/{TSK-ID}/design.md 생성 (.claude/skills/dev-design/template.md 양식)
-   - docs/wbs.md에서 status를 [dd]로 변경
+   - /dev-design 스킬의 절차를 따른다. 프롬프트에 `DOCS_DIR={DOCS_DIR}` 명시
+   - {DOCS_DIR}/PRD.md, {DOCS_DIR}/TRD.md를 참조하여 구현 설계
+   - {DOCS_DIR}/tasks/{TSK-ID}/design.md 생성 (.claude/skills/dev-design/template.md 양식)
+   - {DOCS_DIR}/wbs.md에서 status를 [dd]로 변경
 
 2. **TDD 구현 (서브에이전트)**:
    Agent 도구로 실행 (mode: "auto")
-   - /dev-build 스킬의 절차를 따른다
+   - /dev-build 스킬의 절차를 따른다. 프롬프트에 `DOCS_DIR={DOCS_DIR}` 명시
    - design.md를 참조하여 테스트 먼저 작성 → 구현 → 테스트 통과 확인
    - domain별 테스트: backend=RSpec, frontend=Vitest, sidecar=pytest
-   - docs/wbs.md에서 status를 [im]로 변경
+   - {DOCS_DIR}/wbs.md에서 status를 [im]로 변경
 
 3. **테스트 (서브에이전트)**:
    Agent 도구로 실행 (mode: "auto")
-   - /dev-test 스킬의 절차를 따른다
+   - /dev-test 스킬의 절차를 따른다. 프롬프트에 `DOCS_DIR={DOCS_DIR}` 명시
    - 전체 테스트 실행, 실패 시 경계 교차 검증(producer↔consumer 양쪽 동시 읽기) 후 수정 (최대 3회)
-   - docs/tasks/{TSK-ID}/test-report.md 생성 (.claude/skills/dev-test/template.md 양식)
+   - {DOCS_DIR}/tasks/{TSK-ID}/test-report.md 생성 (.claude/skills/dev-test/template.md 양식)
 
 4. **리팩토링 (서브에이전트)**:
    Agent 도구로 실행 (mode: "auto")
-   - /dev-refactor 스킬의 절차를 따른다
+   - /dev-refactor 스킬의 절차를 따른다. 프롬프트에 `DOCS_DIR={DOCS_DIR}` 명시
    - 코드 품질 개선 → 테스트 재실행
-   - docs/tasks/{TSK-ID}/refactor.md 생성 (.claude/skills/dev-refactor/template.md 양식)
-   - docs/wbs.md에서 status를 [xx]로 변경
+   - {DOCS_DIR}/tasks/{TSK-ID}/refactor.md 생성 (.claude/skills/dev-refactor/template.md 양식)
+   - {DOCS_DIR}/wbs.md에서 status를 [xx]로 변경
 
 ## 완료 처리 — 성공 시 반드시 실행 (건너뛰기 금지)
 ⚠️ 위 4단계를 모두 마친 뒤 아래 3개를 **직접** 실행하라 (서브에이전트 아님):

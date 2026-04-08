@@ -1,17 +1,29 @@
 ---
 name: dev-refactor
-description: "WBS Task 리팩토링 단계. 코드 품질 개선 후 테스트 확인. 사용법: /dev-refactor TSK-00-01"
+description: "WBS Task 리팩토링 단계. 코드 품질 개선 후 테스트 확인. 사용법: /dev-refactor [SUBPROJECT] TSK-00-01"
 ---
 
 # /dev-refactor - 코드 리팩토링
 
-인자: `$ARGUMENTS` (TSK-ID, 예: TSK-00-01)
+인자: `$ARGUMENTS` ([SUBPROJECT] + TSK-ID)
+- 예: `TSK-00-01`, `p1 TSK-00-01`
+
+## 0. 인자 파싱 — 서브프로젝트 감지 (공통 규칙)
+
+`$ARGUMENTS`를 공백으로 토큰화한 뒤 첫 번째 토큰을 검사한다:
+
+1. `^(WP|TSK)-` 패턴이거나 `--`로 시작 → 서브프로젝트 없음, `DOCS_DIR=docs`
+2. 그 외 문자열 → 서브프로젝트 이름 후보
+   - `docs/{토큰}/` 존재 → `SUBPROJECT={토큰}`, `DOCS_DIR=docs/{토큰}`, `$ARGUMENTS`에서 제거
+   - 존재하지 않음 → 에러 보고 후 종료
+
+호출자(예: `/dev`)로부터 `DOCS_DIR`이 이미 명시적으로 전달된 경우 해당 값을 그대로 사용한다.
 
 ## 실행 절차
 
 ### 1. Task 정보 수집
-- `docs/wbs.md`에서 `### $ARGUMENTS:` 헤딩을 찾아 domain 확인
-- `docs/tasks/{TSK-ID}/design.md`에서 관련 파일 목록 파악
+- `{DOCS_DIR}/wbs.md`에서 `### {TSK-ID}:` 헤딩을 찾아 domain 확인
+- `{DOCS_DIR}/tasks/{TSK-ID}/design.md`에서 관련 파일 목록 파악
 
 ### 2. 리팩토링 (서브에이전트 위임)
 Agent 도구로 서브에이전트를 실행한다 (mode: "auto"):
@@ -39,12 +51,12 @@ Domain: {domain}
 - 테스트 실패 시 수정을 되돌린다
 
 ## 결과 작성
-docs/tasks/{TSK-ID}/refactor.md 파일에 작성한다.
+{DOCS_DIR}/tasks/{TSK-ID}/refactor.md 파일에 작성한다.
 양식은 .claude/skills/dev-refactor/template.md를 따른다.
 ```
 
 ### 3. WBS 상태 업데이트
-- `docs/wbs.md`에서 해당 Task의 `- status: [im]`를 `- status: [xx]`로 변경
+- `{DOCS_DIR}/wbs.md`에서 해당 Task의 `- status: [im]`를 `- status: [xx]`로 변경
 
 ### 4. 완료 보고
 - 리팩토링 내역 요약과 Task 완료를 사용자에게 출력
