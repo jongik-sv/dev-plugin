@@ -132,6 +132,7 @@ rm -rf {SIGNAL_DIR} && mkdir -p {SIGNAL_DIR}
 
 > 시그널 파일 생성/확인은 `signal-helper.sh`로 간소화할 수 있다:
 > `bash ${CLAUDE_PLUGIN_ROOT}/scripts/signal-helper.sh done {task-id} {SIGNAL_DIR} "message"`
+> ⚠️ signal-helper.sh는 시그널 파일 내용을 최대 50줄로 자동 절삭한다. 대량 출력(스택 트레이스 등)은 별도 파일에 기록하라.
 
 ### 초기 launch
 

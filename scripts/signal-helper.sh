@@ -42,14 +42,14 @@ case "$CMD" in
     ;;
 
   done)
-    printf '%s\n' "${MSG:-완료}" > "${DIR}/${ID}.done.tmp"
+    printf '%s\n' "${MSG:-완료}" | head -50 > "${DIR}/${ID}.done.tmp"
     mv "${DIR}/${ID}.done.tmp" "${DIR}/${ID}.done"
     rm -f "${DIR}/${ID}.running"
     echo "OK:done"
     ;;
 
   fail)
-    printf '%s\n' "${MSG:-실패}" > "${DIR}/${ID}.failed.tmp"
+    printf '%s\n' "${MSG:-실패}" | head -50 > "${DIR}/${ID}.failed.tmp"
     mv "${DIR}/${ID}.failed.tmp" "${DIR}/${ID}.failed"
     rm -f "${DIR}/${ID}.running"
     echo "OK:failed"
@@ -58,10 +58,10 @@ case "$CMD" in
   check)
     if [ -f "${DIR}/${ID}.done" ]; then
       echo "done"
-      cat "${DIR}/${ID}.done"
+      head -50 "${DIR}/${ID}.done"
     elif [ -f "${DIR}/${ID}.failed" ]; then
       echo "failed"
-      cat "${DIR}/${ID}.failed"
+      head -50 "${DIR}/${ID}.failed"
     elif [ -f "${DIR}/${ID}.running" ]; then
       echo "running"
     else
@@ -86,10 +86,10 @@ case "$CMD" in
     done
     if [ -f "${DIR}/${ID}.done" ]; then
       echo "DONE:${ID}"
-      cat "${DIR}/${ID}.done"
+      head -50 "${DIR}/${ID}.done"
     else
       echo "FAILED:${ID}"
-      cat "${DIR}/${ID}.failed"
+      head -50 "${DIR}/${ID}.failed"
     fi
     ;;
 

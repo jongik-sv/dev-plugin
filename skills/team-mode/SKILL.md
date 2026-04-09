@@ -386,8 +386,8 @@ bash ${CLAUDE_PLUGIN_ROOT}/scripts/signal-helper.sh wait {task-id} {SIGNAL_DIR}
 또는 직접 폴링:
 ```bash
 while [ ! -f {SIGNAL_DIR}/{task-id}.done ] && [ ! -f {SIGNAL_DIR}/{task-id}.failed ]; do sleep 10; done
-if [ -f {SIGNAL_DIR}/{task-id}.done ]; then echo "DONE:{task-id}"; cat {SIGNAL_DIR}/{task-id}.done
-elif [ -f {SIGNAL_DIR}/{task-id}.failed ]; then echo "FAILED:{task-id}"; cat {SIGNAL_DIR}/{task-id}.failed
+if [ -f {SIGNAL_DIR}/{task-id}.done ]; then echo "DONE:{task-id}"; head -50 {SIGNAL_DIR}/{task-id}.done
+elif [ -f {SIGNAL_DIR}/{task-id}.failed ]; then echo "FAILED:{task-id}"; head -50 {SIGNAL_DIR}/{task-id}.failed
 fi
 ```
 
@@ -396,7 +396,7 @@ fi
 시그널 파일 감지 후 아래 순서를 **정확히** 따른다:
 
 #### DONE 시그널인 경우
-1. **시그널 내용 확인**: `cat {SIGNAL_DIR}/{task-id}.done`
+1. **시그널 내용 확인**: `head -50 {SIGNAL_DIR}/{task-id}.done`
 2. **컨텍스트 초기화**:
    ```bash
    tmux send-keys -t {paneId} Escape
@@ -409,7 +409,7 @@ fi
 4. **모든 task 완료 시**: "5. 완료 처리"로 이동
 
 #### FAILED 시그널인 경우
-1. **시그널 내용 확인**: `cat {SIGNAL_DIR}/{task-id}.failed`
+1. **시그널 내용 확인**: `head -50 {SIGNAL_DIR}/{task-id}.failed`
 2. **재시도 판단**: 해당 task의 재시도 횟수 < `MAX_RETRIES`이면:
    - `.failed` 파일 삭제
    - 컨텍스트 초기화 후 **같은 task를 다시 할당** (재시도 횟수 +1)

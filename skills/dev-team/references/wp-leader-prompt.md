@@ -149,7 +149,7 @@ fi
 ```
 
 **DONE → pane 재활용**:
-1. 시그널 내용 확인: `cat {SHARED_SIGNAL_DIR}/{task-id}.done`
+1. 시그널 내용 확인: `head -50 {SHARED_SIGNAL_DIR}/{task-id}.done`
 2. 컨텍스트 초기화:
    ```bash
    tmux send-keys -t {paneId} Escape; sleep 1
@@ -159,7 +159,7 @@ fi
 3. 의존성 해소된 다음 task를 위 "할당 — 3단계"로 1건 할당
 
 **FAILED → 재시도 또는 확정**:
-1. 시그널 내용 확인: `cat {SHARED_SIGNAL_DIR}/{task-id}.failed`
+1. 시그널 내용 확인: `head -50 {SHARED_SIGNAL_DIR}/{task-id}.failed`
 2. 재시도 횟수 < MAX_RETRIES: `.failed` 삭제 → 컨텍스트 초기화 → 같은 task 재할당
 3. 재시도 초과: task를 실패로 확정, 의존 task 스킵 → 다음 task 할당
 

@@ -80,7 +80,7 @@ touch {SHARED_SIGNAL_DIR}/{TSK-ID}.running
 3. **테스트 (서브에이전트)**:
    Agent 도구로 실행 (model: MODEL_OVERRIDE 또는 `"haiku"`, mode: "auto")
    - /dev-test 스킬의 절차를 따른다. 프롬프트에 `DOCS_DIR={DOCS_DIR}` 명시
-   - 전체 테스트 실행, 실패 시 경계 교차 검증(producer↔consumer 양쪽 동시 읽기) 후 수정 (최대 3회)
+   - 전체 테스트 실행 (출력 `2>&1 | tail -200`으로 제한), 실패 시 경계 교차 검증(producer↔consumer 양쪽 동시 읽기) 후 수정. 서브에이전트 내부 수정-재실행은 1회만. 상위(dev-test)에서 최대 3회 재시도 관리.
    - {DOCS_DIR}/tasks/{TSK-ID}/test-report.md 생성 (.claude/skills/dev-test/template.md 양식)
 
    **Phase 3 완료 직후 직접 실행 (서브에이전트 아님)**:
@@ -115,7 +115,7 @@ touch {SHARED_SIGNAL_DIR}/{TSK-ID}.running
 
 ## 실패 처리 — 복구 불가능한 에러 시 반드시 실행 (건너뛰기 금지)
 ⚠️ 아래 상황에서는 완료 처리 대신 이 섹션을 실행하라:
-- 테스트가 3회 재시도 후에도 실패
+- 테스트가 재시도(dev-test의 에스컬레이션) 후에도 실패
 - 서브에이전트가 반복적으로 에러 발생
 - git commit이 실패하여 복구할 수 없음
 - 기타 진행 불가능한 상황
@@ -123,6 +123,7 @@ touch {SHARED_SIGNAL_DIR}/{TSK-ID}.running
 1. 가능한 범위까지 git add + commit (부분 커밋이라도 보존)
 2. 실패 시그널 생성 (반드시 Bash 도구로 실행, **절대 경로 사용**):
    echo '실패 Phase: {phase}\n에러: {에러 내용}\n마지막 성공 Phase: {phase}\n특이사항: {내용}' > {SHARED_SIGNAL_DIR}/{TSK-ID}.failed.tmp && mv {SHARED_SIGNAL_DIR}/{TSK-ID}.failed.tmp {SHARED_SIGNAL_DIR}/{TSK-ID}.failed
+   ⚠️ 에러 내용은 5줄 이내로 요약하라. 전체 스택 트레이스를 포함하지 마라. 상세 에러는 test-report.md에 기록한다.
 3. 다음 지시가 올 때까지 대기.
 
 ⚠️ 성공이든 실패든, 반드시 .done 또는 .failed 시그널 파일을 생성하라. 시그널 없이 종료하면 리더가 무한 대기한다.

@@ -86,7 +86,7 @@ bash ${CLAUDE_PLUGIN_ROOT}/scripts/wbs-parse.sh {DOCS_DIR}/wbs.md {TSK-ID} --blo
 - **model**: `options.model` 또는 `"haiku"` (기본)
 - **prompt**: dev-test 스킬의 절차를 따른다. `DOCS_DIR={DOCS_DIR}` 포함.
   1. 전체 테스트 실행
-  2. 실패 시 수정 → 재실행 (최대 3회, 3회차는 Sonnet 자동 승격)
+  2. 실패 시 수정 → 재실행 (최대 3회, 3회차는 Sonnet 자동 승격). 테스트 출력은 `tail -200`으로 제한. 재시도 시 이전 실패 요약만 전달 (전체 로그 전달 금지).
   3. `{DOCS_DIR}/tasks/{TSK-ID}/test-report.md` 생성
 - **mode**: "auto"
 

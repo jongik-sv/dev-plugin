@@ -308,18 +308,53 @@ sleep 2
 tmux kill-window -t "${SESSION}:${WT_NAME}" 2>/dev/null
 ```
 
-2. main에 미커밋 변경이 있으면 먼저 커밋
-3. 머지 실행:
+2. **코드 리뷰** (merge 전 품질 게이트 — Codex 활용):
+
+   **2-1. Codex 리뷰 실행**:
+   worktree로 이동하여 `codex:review`를 실행한다:
+   ```bash
+   cd .claude/worktrees/${WT_NAME}
+   ```
+   Skill 도구로 실행:
+   - skill: `codex:review`
+   - args: `--base main --scope branch --wait`
+
+   Codex 리뷰 결과를 `{DOCS_DIR}/tasks/{WP-ID}-review.md`에 기록한다.
+
+   **2-2. Critical/High 이슈 수정** (이슈가 있을 때만):
+   Codex가 Critical 또는 High severity 이슈를 보고한 경우, Agent 도구로 서브에이전트를 실행한다 (model: `"sonnet"`, mode: "auto"):
+   ```
+   Codex 코드 리뷰에서 아래 이슈가 발견되었다. worktree에서 수정하라.
+
+   Worktree: .claude/worktrees/{WT_NAME}
+   이슈 목록:
+   {Codex 리뷰에서 Critical/High 항목만 발췌}
+
+   ## 절차
+   1. 각 이슈를 worktree에서 수정한다
+   2. 수정 후 domain별 테스트를 실행하여 리그레션이 없는지 확인 (출력 `2>&1 | tail -200`)
+   3. 커밋: `git add -A && git commit -m "review: {수정 요약}"`
+   ```
+
+   Codex 리뷰에 이슈가 없거나 Low/Info만 있으면 이 단계를 **스킵**한다.
+
+   **2-3. 판정**:
+   - 이슈 없음 / Low만 → **PASS** — merge 진행
+   - 수정 완료 → **PASS WITH FIXES** — merge 진행
+   - 수정 불가한 Critical → **FAIL** — 사용자에게 보고하고 merge 중단
+
+3. main에 미커밋 변경이 있으면 먼저 커밋
+5. 머지 실행:
 ```bash
 git merge --no-ff dev/${WT_NAME} -m "Merge dev/${WT_NAME}: {WP 제목} ({TSK-ID 목록})"
 ```
-4. 충돌 발생 시: 수동 해결 후 `git add` + `git commit --no-edit`
-5. worktree + 브랜치 정리:
+6. 충돌 발생 시: 수동 해결 후 `git add` + `git commit --no-edit`
+7. worktree + 브랜치 정리:
 ```bash
 git worktree remove --force .claude/worktrees/${WT_NAME}
 git branch -d dev/${WT_NAME}
 ```
-6. `{DOCS_DIR}/wbs.md`에서 해당 WP의 `- progress:` 값 업데이트
+8. `{DOCS_DIR}/wbs.md`에서 해당 WP의 `- progress:` 값 업데이트
 
 #### (B) 전체 완료 머지 — 모든 WP 완료 후 실행
 
