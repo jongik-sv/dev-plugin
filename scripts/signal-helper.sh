@@ -76,8 +76,11 @@ case "$CMD" in
     while [ ! -f "${DIR}/${ID}.done" ] && [ ! -f "${DIR}/${ID}.failed" ]; do
       sleep "$INTERVAL"
       ELAPSED=$((ELAPSED + INTERVAL))
+      if [ $((ELAPSED % 300)) -eq 0 ]; then
+        echo "waiting:${ID} (${ELAPSED}s elapsed)"
+      fi
       if [ "$TIMEOUT" -gt 0 ] && [ "$ELAPSED" -ge "$TIMEOUT" ]; then
-        echo "timeout"
+        echo "timeout:${ID} (${ELAPSED}s)"
         exit 1
       fi
     done

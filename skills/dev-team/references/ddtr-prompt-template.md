@@ -58,6 +58,12 @@ touch {SHARED_SIGNAL_DIR}/{TSK-ID}.running
    - {DOCS_DIR}/tasks/{TSK-ID}/design.md 생성 (.claude/skills/dev-design/template.md 양식)
    - {DOCS_DIR}/wbs.md에서 status를 [dd]로 변경
 
+   **Phase 1 완료 직후 직접 실행 (서브에이전트 아님)**:
+   ```bash
+   git add {DOCS_DIR}/tasks/{TSK-ID}/design.md {DOCS_DIR}/wbs.md
+   git commit -m "feat: {TSK-ID} [dd] 설계 완료" 2>/dev/null || true
+   ```
+
 2. **TDD 구현 (서브에이전트)**:
    Agent 도구로 실행 (model: MODEL_OVERRIDE 또는 `"sonnet"`, mode: "auto")
    - /dev-build 스킬의 절차를 따른다. 프롬프트에 `DOCS_DIR={DOCS_DIR}` 명시
@@ -65,11 +71,23 @@ touch {SHARED_SIGNAL_DIR}/{TSK-ID}.running
    - domain별 테스트: backend=RSpec, frontend=Vitest, sidecar=pytest
    - {DOCS_DIR}/wbs.md에서 status를 [im]로 변경
 
+   **Phase 2 완료 직후 직접 실행 (서브에이전트 아님)**:
+   ```bash
+   git add -A
+   git commit -m "feat: {TSK-ID} [im] TDD 구현 완료" 2>/dev/null || true
+   ```
+
 3. **테스트 (서브에이전트)**:
    Agent 도구로 실행 (model: MODEL_OVERRIDE 또는 `"haiku"`, mode: "auto")
    - /dev-test 스킬의 절차를 따른다. 프롬프트에 `DOCS_DIR={DOCS_DIR}` 명시
    - 전체 테스트 실행, 실패 시 경계 교차 검증(producer↔consumer 양쪽 동시 읽기) 후 수정 (최대 3회)
    - {DOCS_DIR}/tasks/{TSK-ID}/test-report.md 생성 (.claude/skills/dev-test/template.md 양식)
+
+   **Phase 3 완료 직후 직접 실행 (서브에이전트 아님)**:
+   ```bash
+   git add {DOCS_DIR}/tasks/{TSK-ID}/test-report.md
+   git commit -m "feat: {TSK-ID} 테스트 완료" 2>/dev/null || true
+   ```
 
 4. **리팩토링 (서브에이전트)**:
    Agent 도구로 실행 (model: MODEL_OVERRIDE 또는 `"sonnet"`, mode: "auto")
@@ -78,10 +96,19 @@ touch {SHARED_SIGNAL_DIR}/{TSK-ID}.running
    - {DOCS_DIR}/tasks/{TSK-ID}/refactor.md 생성 (.claude/skills/dev-refactor/template.md 양식)
    - {DOCS_DIR}/wbs.md에서 status를 [xx]로 변경
 
+   **Phase 4 완료 직후 직접 실행 (서브에이전트 아님)**:
+   ```bash
+   git add {DOCS_DIR}/tasks/{TSK-ID}/refactor.md {DOCS_DIR}/wbs.md
+   git commit -m "feat: {TSK-ID} [xx] 리팩토링 완료" 2>/dev/null || true
+   ```
+
 ## 완료 처리 — 성공 시 반드시 실행 (건너뛰기 금지)
 ⚠️ 위 4단계를 모두 마친 뒤 아래 3개를 **직접** 실행하라 (서브에이전트 아님):
 
-1. git add -A && git commit -m "feat: {TSK-ID} 구현 완료"
+1. 잔여 미커밋 변경 정리:
+   ```bash
+   git diff --quiet HEAD && git diff --cached --quiet || { git add -A && git commit -m "feat: {TSK-ID} 잔여 변경 커밋" 2>/dev/null || true; }
+   ```
 2. 시그널 파일 생성 (반드시 Bash 도구로 실행, **절대 경로 사용**):
    echo '테스트: {통과수}/{전체수}\n커밋: {해시}\n특이사항: {내용}' > {SHARED_SIGNAL_DIR}/{TSK-ID}.done.tmp && mv {SHARED_SIGNAL_DIR}/{TSK-ID}.done.tmp {SHARED_SIGNAL_DIR}/{TSK-ID}.done
 3. 다음 지시가 올 때까지 대기. 추가 Task를 스스로 시작하지 마라.

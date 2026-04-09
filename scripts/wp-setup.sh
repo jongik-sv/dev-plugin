@@ -179,16 +179,19 @@ for ((i=0; i<WP_COUNT; i++)); do
 
     ALL_TASK_BLOCKS+="${TASK_BLOCK}"$'\n\n'
 
-    # DDTR 프롬프트 생성
+    # DDTR 프롬프트 생성 (기존 파일 있으면 재사용)
     DDTR_OUT="${TEMP_DIR}/task-${TSK_ID}.txt"
-    TB_TMP="${TEMP_DIR}/.tb-${TSK_ID}.tmp"
-    printf '%s\n' "$TASK_BLOCK" > "$TB_TMP"
-
-    printf '%s%s\n' "$DDTR_PREFIX" "$DDTR_RAW" | \
-      substitute_vars "$WP_ID" "$TEAM_SIZE" "$WT_NAME" "$TSK_ID" | \
-      insert_blocks "{단일 Task 블록" "$TB_TMP" > "${DDTR_OUT}.tmp"
-    mv "${DDTR_OUT}.tmp" "$DDTR_OUT"
-    rm -f "$TB_TMP"
+    if [ -f "$DDTR_OUT" ]; then
+      echo "[${WP_ID}] ddtr: ${TSK_ID} 재사용 (${DDTR_OUT})"
+    else
+      TB_TMP="${TEMP_DIR}/.tb-${TSK_ID}.tmp"
+      printf '%s\n' "$TASK_BLOCK" > "$TB_TMP"
+      printf '%s%s\n' "$DDTR_PREFIX" "$DDTR_RAW" | \
+        substitute_vars "$WP_ID" "$TEAM_SIZE" "$WT_NAME" "$TSK_ID" | \
+        insert_blocks "{단일 Task 블록" "$TB_TMP" > "${DDTR_OUT}.tmp"
+      mv "${DDTR_OUT}.tmp" "$DDTR_OUT"
+      rm -f "$TB_TMP"
+    fi
 
     DDTR_FILES+=("${TSK_ID}")
 
@@ -226,22 +229,26 @@ ${MANIFEST_TASKS}
 MANIFEST_EOF
   echo "[${WP_ID}] manifest: ${MANIFEST_PATH}"
 
-  # --- 5. WP 리더 프롬프트 ---
+  # --- 5. WP 리더 프롬프트 (기존 파일 있으면 재사용) ---
   WP_LEADER_OUT=".claude/worktrees/${WT_NAME}-prompt.txt"
-  TASKS_TMP="${TEMP_DIR}/.tasks-${WT_NAME}.tmp"
-  PLAN_TMP="${TEMP_DIR}/.plan-${WT_NAME}.tmp"
-  printf '%s\n' "$ALL_TASK_BLOCKS" > "$TASKS_TMP"
-  printf '%s\n' "$EXECUTION_PLAN" > "$PLAN_TMP"
+  if [ -f "$WP_LEADER_OUT" ]; then
+    echo "[${WP_ID}] leader: 재사용 (${WP_LEADER_OUT})"
+  else
+    TASKS_TMP="${TEMP_DIR}/.tasks-${WT_NAME}.tmp"
+    PLAN_TMP="${TEMP_DIR}/.plan-${WT_NAME}.tmp"
+    printf '%s\n' "$ALL_TASK_BLOCKS" > "$TASKS_TMP"
+    printf '%s\n' "$EXECUTION_PLAN" > "$PLAN_TMP"
 
-  printf '%s\n' "$WP_LEADER_RAW" | \
-    substitute_vars "$WP_ID" "$TEAM_SIZE" "$WT_NAME" "" | \
-    insert_blocks \
-      "[WP 내 모든 Task 블록" "$TASKS_TMP" \
-      "[팀리더가 산출한 레벨별 실행 계획]" "$PLAN_TMP" \
-    > "${WP_LEADER_OUT}.tmp"
-  mv "${WP_LEADER_OUT}.tmp" "$WP_LEADER_OUT"
-  rm -f "$TASKS_TMP" "$PLAN_TMP"
-  echo "[${WP_ID}] leader: ${WP_LEADER_OUT}"
+    printf '%s\n' "$WP_LEADER_RAW" | \
+      substitute_vars "$WP_ID" "$TEAM_SIZE" "$WT_NAME" "" | \
+      insert_blocks \
+        "[WP 내 모든 Task 블록" "$TASKS_TMP" \
+        "[팀리더가 산출한 레벨별 실행 계획]" "$PLAN_TMP" \
+      > "${WP_LEADER_OUT}.tmp"
+    mv "${WP_LEADER_OUT}.tmp" "$WP_LEADER_OUT"
+    rm -f "$TASKS_TMP" "$PLAN_TMP"
+    echo "[${WP_ID}] leader: ${WP_LEADER_OUT}"
+  fi
 
   # --- 6. Runner + tmux spawn ---
   RUNNER=".claude/worktrees/${WT_NAME}-run.sh"

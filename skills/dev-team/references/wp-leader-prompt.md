@@ -113,16 +113,26 @@ tmux send-keys -t {paneId} Escape
 sleep 1
 tmux send-keys -t {paneId} '{prompt_file} 파일을 Read 도구로 읽고 그 안의 작업을 수행하라.' Enter
 
-# 3단계: 할당 수신 검증 (15초 후)
-sleep 15
-PANE_OUTPUT=$(tmux capture-pane -t {paneId} -p 2>/dev/null | grep -v "^$" | tail -5)
-if echo "$PANE_OUTPUT" | grep -qE '(Musing|Thinking|Drizzling|Running|⏺)'; then
-  echo "worker 활성 확인"
-else
-  echo "worker 미응답 — 재전송"
-  tmux send-keys -t {paneId} Escape; sleep 1
-  tmux send-keys -t {paneId} i; sleep 1
-  tmux send-keys -t {paneId} '{prompt_file} 파일을 Read 도구로 읽고 그 안의 작업을 수행하라.' Enter
+# 3단계: 할당 수신 검증 — .running 시그널 파일 기반 (최대 60초)
+# DDTR 워커는 시작 직후 {task-id}.running 파일을 생성한다. 이를 1차 기준으로 사용.
+WAIT=0; ACCEPTED=false
+while [ $WAIT -lt 60 ]; do
+  sleep 5; WAIT=$((WAIT + 5))
+  if [ -f "{SHARED_SIGNAL_DIR}/{task-id}.running" ]; then
+    echo "worker 활성 확인 (시그널)"; ACCEPTED=true; break
+  fi
+done
+if [ "$ACCEPTED" = false ]; then
+  # 폴백: pane 출력 확인 (장시간 bash 실행 중이면 키워드 없을 수 있음)
+  PANE_OUTPUT=$(tmux capture-pane -t {paneId} -p 2>/dev/null | grep -v "^$" | tail -5)
+  if echo "$PANE_OUTPUT" | grep -qE '(Musing|Thinking|Drizzling|Running|⏺)'; then
+    echo "worker 활성 확인 (pane)"
+  else
+    echo "worker 미응답 — 재전송"
+    tmux send-keys -t {paneId} Escape; sleep 1
+    tmux send-keys -t {paneId} i; sleep 1
+    tmux send-keys -t {paneId} '{prompt_file} 파일을 Read 도구로 읽고 그 안의 작업을 수행하라.' Enter
+  fi
 fi
 ```
 
