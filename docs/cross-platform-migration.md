@@ -1,8 +1,10 @@
-# Cross-Platform Migration Plan: Bash → Python
+# Cross-Platform Migration: Bash → Python (완료)
 
 ## 목표
 
 현재 bash 전용 helper scripts를 Python으로 전환하여 Mac/Linux/Windows 단일 소스 지원.
+
+> **Status: DONE** (v1.0.9) — 모든 스크립트 전환 완료. `.sh` 파일은 호환성을 위해 유지.
 
 ## 배경
 

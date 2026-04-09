@@ -66,7 +66,7 @@ Task를 할당하기 전에 worktree 내 {DOCS_DIR}/wbs.md를 읽어 각 Task의
 - SIGNAL_DIR = {SHARED_SIGNAL_DIR} (**team-mode 기본값 사용 금지**)
 - MAX_RETRIES = 1
 
-**pane 존재 확인** (wp-setup.sh가 사전 생성한 경우 건너뜀):
+**pane 존재 확인** (wp-setup.py가 사전 생성한 경우 건너뜀):
 ```bash
 ACTUAL=$(tmux list-panes -t "{SESSION}:{WT_NAME}" -F '#{pane_id}' | wc -l | tr -d ' ')
 EXPECTED=$(({TEAM_SIZE} + 1))

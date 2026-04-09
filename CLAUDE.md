@@ -17,17 +17,18 @@ README.md                # User-facing documentation
 
 ### Helper Scripts (Token Optimization)
 
-Skills delegate deterministic work to bash scripts to reduce LLM token consumption:
+Skills delegate deterministic work to Python scripts (cross-platform: Mac/Linux/Windows) to reduce LLM token consumption:
 
 | Script | Purpose | Used by |
 |--------|---------|---------|
-| `scripts/wbs-parse.sh` | WBS task/WP extraction → JSON output | dev, dev-design/build/test/refactor, dev-team, wp-setup.sh |
-| `scripts/args-parse.sh` | Argument parsing + subproject detection → JSON | dev, dev-design/build/test/refactor, dev-team |
-| `scripts/dep-analysis.sh` | Dependency level calculation (topological sort) → JSON | dev-team, agent-pool, team-mode |
-| `scripts/signal-helper.sh` | Atomic signal file create/check/wait | dev-team, team-mode, agent-pool, DDTR workers |
-| `scripts/wp-setup.sh` | Worktree + prompt + tmux setup (existing) | dev-team |
+| `scripts/wbs-parse.py` | WBS task/WP extraction → JSON output | dev, dev-design/build/test/refactor, dev-team, wp-setup.py |
+| `scripts/args-parse.py` | Argument parsing + subproject detection → JSON | dev, dev-design/build/test/refactor, dev-team |
+| `scripts/dep-analysis.py` | Dependency level calculation (topological sort) → JSON | dev-team, agent-pool, team-mode |
+| `scripts/signal-helper.py` | Atomic signal file create/check/wait | dev-team, team-mode, agent-pool, DDTR workers |
+| `scripts/wp-setup.py` | Worktree + prompt + tmux setup | dev-team |
+| `scripts/_platform.py` | Cross-platform utilities (temp dir, JSON escape) | all scripts |
 
-All scripts use `${CLAUDE_PLUGIN_ROOT}/scripts/` as base path.
+All scripts use `${CLAUDE_PLUGIN_ROOT}/scripts/` as base path. Python 3 standard library only — no pip dependencies.
 
 ### Skill Layers
 
