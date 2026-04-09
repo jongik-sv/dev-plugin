@@ -7,7 +7,7 @@
 
 ⚠️ 중요: 팀원은 반드시 tmux pane으로만 생성하라. Agent 도구로 팀원을 생성하지 마라.
 ⚠️ 중요: 가장 먼저 아래 "초기화" 섹션을 실행하여 tmux pane을 생성하라.
-⚠️ 중요: tmux 명령에 반드시 세션 prefix(`${SESSION}:{window_name}`)를 사용하라. pane 식별은 pane_id(`%N`)를 사용하라.
+⚠️ 중요: tmux 명령에 반드시 세션 prefix(`{SESSION}:{WT_NAME}`)를 사용하라. pane 식별은 pane_id(`%N`)를 사용하라.
 
 ## 경로 변수
 - DOCS_DIR = {DOCS_DIR}
@@ -31,24 +31,120 @@
 
 Task를 할당하기 전에 worktree 내 {DOCS_DIR}/wbs.md를 읽어 각 Task의 status를 확인한다:
 - `[xx]` 상태: 할당하지 않는다. `.done` 시그널이 없으면 생성한다:
-  `echo "resumed" > {SHARED_SIGNAL_DIR}/{TSK-ID}.done`
+  `echo "resumed" > {SHARED_SIGNAL_DIR}/<해당-TSK-ID>.done`
 - `[dd]`, `[im]` 상태: 팀원에게 할당한다. DDTR 프롬프트의 "상태 확인 및 Phase 재개" 로직이 중간 Phase부터 재개한다.
 - `[ ]` 상태: 정상 할당.
 
 모든 Task가 이미 `[xx]`이면 즉시 완료 보고(시그널) 후 종료한다.
 
-## WP 리더 역할
+## WP 리더 역할 — 팀원 관리 절차
 
-/team-mode 스킬의 절차를 따라 팀원을 관리하라.
-구체적으로: team-mode SKILL.md 파일을 Read 도구로 읽고, 아래 매핑에 따라 적용한다.
+### 1. 초기화 — 팀원 pane 생성
 
-| team-mode 절차 | 적용 |
-|----------------|------|
-| **변수 `SIGNAL_DIR`** | **`{SHARED_SIGNAL_DIR}` 사용 (team-mode 기본값 `claude-signals/{window_name}` 사용 금지)** |
-| 2. 환경 구성 → tmux 창 및 pane 생성 | 팀원 pane 생성 (window_name={WT_NAME}) |
-| 3. Task 할당 프로토콜 | 3단계 파일 기반 할당 (prompt_file={TEMP_DIR}/task-{TSK-ID}.txt) |
-| 4. 모니터링 및 재활용 | 시그널 감지(.done 또는 .failed) → /clear → 다음 Task 할당 |
-| 5. 완료 처리 → Worker 종료 | 팀원 전원 종료 |
+⚠️ 가장 먼저 이 섹션을 실행하라. 팀원은 tmux pane으로만 생성한다.
+
+**변수 확인**:
+- SESSION = {SESSION}
+- WORKER_MODEL = {WORKER_MODEL}
+- SIGNAL_DIR = {SHARED_SIGNAL_DIR} (**team-mode 기본값 사용 금지**)
+- MAX_RETRIES = 1
+
+**pane 생성** ({TEAM_SIZE}명):
+```bash
+for i in $(seq 1 {TEAM_SIZE}); do
+  tmux split-window -t "{SESSION}:{WT_NAME}" -h \
+    "cd $(pwd) && claude --dangerously-skip-permissions --model {WORKER_MODEL}"
+done
+tmux select-layout -t "{SESSION}:{WT_NAME}" tiled
+```
+
+**pane 생성 검증**:
+```bash
+ACTUAL=$(tmux list-panes -t "{SESSION}:{WT_NAME}" -F '#{pane_id}' | wc -l | tr -d ' ')
+EXPECTED=$(({TEAM_SIZE} + 1))
+if [ "$ACTUAL" -lt "$EXPECTED" ]; then
+  NEED=$(($EXPECTED - $ACTUAL))
+  for i in $(seq 1 $NEED); do
+    tmux split-window -t "{SESSION}:{WT_NAME}" -h \
+      "cd $(pwd) && claude --dangerously-skip-permissions --model {WORKER_MODEL}"
+  done
+  tmux select-layout -t "{SESSION}:{WT_NAME}" tiled
+fi
+```
+
+**pane ID 수집** (이후 모든 명령에 pane_id 사용):
+```bash
+PANE_IDS=($(tmux list-panes -t "{SESSION}:{WT_NAME}" -F '#{pane_id}'))
+# PANE_IDS[0]=리더(자신), PANE_IDS[1~]=worker
+```
+
+### 2. Task 할당 — 3단계 파일 기반
+
+⚠️ tmux send-keys는 긴 문자열을 잘라버린다. 프롬프트를 반드시 파일로 전달한다.
+⚠️ pane 식별은 반드시 pane_id(`%N` 형식, 예: `%7`)를 사용한다.
+
+**할당 절차** (각 task에 대해):
+```bash
+# 1단계: pane 라벨 업데이트
+tmux set-option -p -t {paneId} @label "worker{N} {task-id}"
+
+# 2단계: Escape로 깨운 뒤 짧은 지시 전송
+tmux send-keys -t {paneId} Escape
+sleep 1
+tmux send-keys -t {paneId} '{prompt_file} 파일을 Read 도구로 읽고 그 안의 작업을 수행하라.' Enter
+
+# 3단계: 할당 수신 검증 (15초 후)
+sleep 15
+PANE_OUTPUT=$(tmux capture-pane -t {paneId} -p 2>/dev/null | grep -v "^$" | tail -5)
+if echo "$PANE_OUTPUT" | grep -qE '(Musing|Thinking|Drizzling|Running|⏺)'; then
+  echo "worker 활성 확인"
+else
+  echo "worker 미응답 — 재전송"
+  tmux send-keys -t {paneId} Escape; sleep 1
+  tmux send-keys -t {paneId} i; sleep 1
+  tmux send-keys -t {paneId} '{prompt_file} 파일을 Read 도구로 읽고 그 안의 작업을 수행하라.' Enter
+fi
+```
+
+**초기 할당**: Level 0 task부터 worker에게 각 1건씩 할당. prompt_file은 실행 계획에 기재된 경로(예: `{TEMP_DIR}/task-<각 TSK-ID>.txt`).
+
+### 3. 모니터링 및 pane 재활용
+
+**시그널 감지** — 각 task별로 Bash `run_in_background`로 감시:
+```bash
+while [ ! -f {SHARED_SIGNAL_DIR}/{task-id}.done ] && [ ! -f {SHARED_SIGNAL_DIR}/{task-id}.failed ]; do sleep 10; done
+if [ -f {SHARED_SIGNAL_DIR}/{task-id}.done ]; then echo "DONE:{task-id}"
+elif [ -f {SHARED_SIGNAL_DIR}/{task-id}.failed ]; then echo "FAILED:{task-id}"
+fi
+```
+
+**DONE → pane 재활용**:
+1. 시그널 내용 확인: `cat {SHARED_SIGNAL_DIR}/{task-id}.done`
+2. 컨텍스트 초기화:
+   ```bash
+   tmux send-keys -t {paneId} Escape; sleep 1
+   tmux send-keys -t {paneId} '/clear' Enter; sleep 10
+   tmux send-keys -t {paneId} Enter
+   ```
+3. 의존성 해소된 다음 task를 위 "할당 — 3단계"로 1건 할당
+
+**FAILED → 재시도 또는 확정**:
+1. 시그널 내용 확인: `cat {SHARED_SIGNAL_DIR}/{task-id}.failed`
+2. 재시도 횟수 < MAX_RETRIES: `.failed` 삭제 → 컨텍스트 초기화 → 같은 task 재할당
+3. 재시도 초과: task를 실패로 확정, 의존 task 스킵 → 다음 task 할당
+
+⚠️ **필수 규칙**: 1건씩 할당 (복수 할당 금지). 시그널 감지 전 /clear 금지. 흐름: 1건 할당 → 시그널 대기 → /clear → 다음 1건.
+
+### 4. Worker 종료
+
+모든 task 완료/실패 처리 후:
+```bash
+for pane in "${PANE_IDS[@]:1}"; do
+  tmux send-keys -t "$pane" Escape 2>/dev/null; sleep 1
+  tmux send-keys -t "$pane" '/exit' Enter 2>/dev/null
+done
+sleep 5
+```
 
 ### 팀원 실패 처리
 
@@ -109,7 +205,7 @@ while [ ! -f {SHARED_SIGNAL_DIR}/{의존-TSK-ID}.done ]; do sleep 10; done
    > ⚠️ `{SHARED_SIGNAL_DIR}`은 팀리더가 프롬프트에 포함시킨 절대 경로이다. 상대 경로(`../.signals/`) 사용 금지.
    > ⚠️ 실패 Task가 있더라도 반드시 `.done` 시그널을 생성하라. 팀리더가 무한 대기하는 것을 방지한다.
 
-3. **팀원 종료 및 리더 자신 종료**: team-mode의 "5. 완료 처리" 절차를 따른다
+3. **팀원 종료 및 리더 자신 종료**: 위 "Worker 종료" 절차를 따른다
 
 **⚠️ 금지사항**:
 - 시그널 파일 생성 후 추가 입력을 기다리지 마라

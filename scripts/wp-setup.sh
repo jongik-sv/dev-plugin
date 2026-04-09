@@ -23,7 +23,7 @@ WBS_PATH=$(rc '.wbs_path')
 SESSION=$(rc '.session')
 MODEL_OVERRIDE=$(rc '.model_override // ""')
 WORKER_MODEL=$(rc '.worker_model // "sonnet"')
-WP_LEADER_MODEL=$(rc '.wp_leader_model // "haiku"')
+WP_LEADER_MODEL=$(rc '.wp_leader_model // "sonnet"')
 PLUGIN_ROOT=$(rc '.plugin_root')
 
 DDTR_TEMPLATE="${PLUGIN_ROOT}/skills/dev-team/references/ddtr-prompt-template.md"
@@ -32,6 +32,9 @@ WP_COUNT=$(jq '.wps | length' "$CONFIG_FILE")
 
 # === Utility functions ===
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+WBS_PARSE="${SCRIPT_DIR}/wbs-parse.sh"
+
 # 템플릿 파일에서 외부 ``` 마커 사이의 내용을 추출
 extract_template() {
   local file="$1"
@@ -39,26 +42,21 @@ extract_template() {
   first=$(grep -n '^```$' "$file" | head -1 | cut -d: -f1)
   last=$(grep -n '^```$' "$file" | tail -1 | cut -d: -f1)
   if [ -z "$first" ] || [ -z "$last" ] || [ "$first" -eq "$last" ]; then
-    echo "ERROR: 템플릿 ``` 마커 없음: $file" >&2; return 1
+    echo 'ERROR: 템플릿 ``` 마커 없음:' "$file" >&2; return 1
   fi
   sed -n "$((first+1)),$((last-1))p" "$file"
 }
 
-# wbs.md에서 task 블록 추출 (### TSK-XX-XX: ~ 다음 ### 또는 ##)
+# wbs-parse.sh 위임: task 블록 추출
 extract_task_block() {
   local wbs="$1" tsk="$2"
-  awk -v tsk="$tsk" '
-    $0 ~ "^### " tsk ":" { found=1 }
-    found && /^### / && !($0 ~ "^### " tsk ":") { exit }
-    found && /^## / { exit }
-    found { print }
-  ' "$wbs"
+  bash "$WBS_PARSE" "$wbs" "$tsk" --block
 }
 
-# wbs.md에서 task 필드 값 추출
+# wbs-parse.sh 위임: task 필드 값 추출
 get_task_field() {
   local wbs="$1" tsk="$2" field="$3"
-  extract_task_block "$wbs" "$tsk" | grep -m1 "^- ${field}:" | sed "s/^- ${field}:[[:space:]]*//" || true
+  bash "$WBS_PARSE" "$wbs" "$tsk" --field "$field"
 }
 
 # {VAR} 플레이스홀더 치환 (awk)
@@ -77,6 +75,8 @@ substitute_vars() {
     -v DOC_DIR="$DOCS_DIR" \
     -v TSK_ID="$tsk_id" \
     -v MODEL_DISPLAY="$model_display" \
+    -v SESSION_NAME="$SESSION" \
+    -v WORKER_MDL="$WORKER_MODEL" \
     '{
       gsub(/{WP-ID}/, WP_ID)
       gsub(/{TEAM_SIZE}/, TEAM_SIZE)
@@ -85,6 +85,8 @@ substitute_vars() {
       gsub(/{TEMP_DIR}/, TMP_DIR)
       gsub(/{DOCS_DIR}/, DOC_DIR)
       gsub(/{TSK-ID}/, TSK_ID)
+      gsub(/{SESSION}/, SESSION_NAME)
+      gsub(/{WORKER_MODEL}/, WORKER_MDL)
       if (index($0, "{MODEL_OVERRIDE") > 0)
         gsub(/{MODEL_OVERRIDE 또는 "없음"}/, MODEL_DISPLAY)
       print
@@ -250,7 +252,7 @@ RUNNER_EOF
   chmod +x "$RUNNER"
 
   if [ -n "${SESSION:-}" ] && [ -n "$TMUX" ]; then
-    tmux new-window -t "${SESSION}" -n "${WT_NAME}" "$RUNNER"
+    tmux new-window -t "${SESSION}:" -n "${WT_NAME}" "$RUNNER"
     tmux set-option -w -t "${SESSION}:${WT_NAME}" automatic-rename off
     tmux set-option -w -t "${SESSION}:${WT_NAME}" allow-rename off
     tmux set-option -w -t "${SESSION}:${WT_NAME}" pane-border-status top

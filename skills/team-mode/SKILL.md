@@ -175,8 +175,15 @@ manifest 파일을 Read 도구로 읽는다.
 
 ### 의존성 분석
 
-depends 기반으로 실행 레벨을 산출한다:
+manifest의 task 목록을 JSON 변환 후 dep-analysis.sh로 레벨을 산출할 수 있다:
 
+```bash
+# manifest의 task를 JSON으로 변환 후 파이프
+echo '[{"tsk_id":"task-1","depends":"-","status":"[ ]"},...]' | \
+  bash ${CLAUDE_PLUGIN_ROOT}/scripts/dep-analysis.sh
+```
+
+또는 수동으로 depends 기반 실행 레벨을 산출한다:
 ```
 Level 0: depends가 없거나 모두 완료 (즉시 시작 가능)
 Level 1: Level 0 task에 의존
@@ -370,8 +377,13 @@ Level 0 task부터 최대 TEAM_SIZE개에게 각 1건씩 할당한다.
 
 ### 시그널 파일 감지
 
-각 task별로 Bash `run_in_background`로 폴링한다:
+각 task별로 Bash `run_in_background`로 감시한다:
 
+```bash
+bash ${CLAUDE_PLUGIN_ROOT}/scripts/signal-helper.sh wait {task-id} {SIGNAL_DIR}
+```
+
+또는 직접 폴링:
 ```bash
 while [ ! -f {SIGNAL_DIR}/{task-id}.done ] && [ ! -f {SIGNAL_DIR}/{task-id}.failed ]; do sleep 10; done
 if [ -f {SIGNAL_DIR}/{task-id}.done ]; then echo "DONE:{task-id}"; cat {SIGNAL_DIR}/{task-id}.done

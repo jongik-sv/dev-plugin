@@ -9,7 +9,7 @@
       "name": "dev",
       "source": "./",
       "description": "WBS 기반 TDD 개발 자동화 플러그인 (설계→TDD구현→테스트→리팩토링, 팀 병렬 개발)",
-      "version": "1.0.4"
+      "version": "1.0.5"
     }
   ]
 }

@@ -8,15 +8,13 @@ description: "WBS Task 설계 단계. wbs.md에서 Task를 읽고 구현 설계 
 인자: `$ARGUMENTS` ([SUBPROJECT] + TSK-ID)
 - 예: `TSK-00-01`, `p1 TSK-00-01`
 
-## 0. 인자 파싱 — 서브프로젝트 감지 (공통 규칙)
+## 0. 인자 파싱
 
-`$ARGUMENTS`를 공백으로 토큰화한 뒤 첫 번째 토큰을 검사한다:
-
-1. `^(WP|TSK)-` 패턴이거나 `--`로 시작 → 서브프로젝트 없음, `DOCS_DIR=docs`
-2. 그 외 문자열 → 서브프로젝트 이름 후보
-   - `docs/{토큰}/` 존재 → `SUBPROJECT={토큰}`, `DOCS_DIR=docs/{토큰}`, `$ARGUMENTS`에서 제거
-   - 존재하지 않음 → 에러 보고 후 종료
-
+Bash 도구로 실행:
+```bash
+bash ${CLAUDE_PLUGIN_ROOT}/scripts/args-parse.sh dev-design $ARGUMENTS
+```
+JSON 출력에서 `docs_dir`, `tsk_id`를 확인한다. 에러 시 사용자에게 보고 후 종료.
 호출자(예: `/dev`)로부터 `DOCS_DIR`이 이미 명시적으로 전달된 경우 해당 값을 그대로 사용한다.
 
 ## 모델 선택
@@ -32,9 +30,18 @@ description: "WBS Task 설계 단계. wbs.md에서 Task를 읽고 구현 설계 
 ## 실행 절차
 
 ### 1. Task 정보 추출
-- `{DOCS_DIR}/wbs.md`에서 `### {TSK-ID}:` 헤딩을 찾아 Task 블록 전체를 읽는다
-- 추출 항목: category, domain, status, requirements, acceptance, tech-spec, api-spec, data-model, ui-spec
+
+Bash 도구로 실행:
+```bash
+bash ${CLAUDE_PLUGIN_ROOT}/scripts/wbs-parse.sh {DOCS_DIR}/wbs.md {TSK-ID}
+```
+JSON 출력에서 status, category, domain 등을 확인한다.
 - status가 `[ ]`이 아니면 이미 진행 중인 Task이므로 사용자에게 확인 후 진행
+
+Task 블록 원문이 필요하면:
+```bash
+bash ${CLAUDE_PLUGIN_ROOT}/scripts/wbs-parse.sh {DOCS_DIR}/wbs.md {TSK-ID} --block
+```
 
 ### 2. 설계 (서브에이전트 위임)
 Agent 도구로 서브에이전트를 실행한다 (model: 호출자 지정값 또는 `"sonnet"`, mode: "auto"):

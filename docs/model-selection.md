@@ -200,9 +200,9 @@ claude --model sonnet
 `.claude/worktrees/{WP-ID}-run.sh` 생성 시 WP 리더/팀원별로 별도 모델 지정:
 
 ```bash
-# WP Leader — 오케스트레이션만 하므로 Haiku
+# WP Leader — 오케스트레이션 + 스케줄링이므로 Sonnet
 tmux new-window -t "$SESSION" -n "$WP_ID" \
-  claude --dangerously-skip-permissions --model haiku \
+  claude --dangerously-skip-permissions --model sonnet \
          "$(cat ${WP_ID}-prompt.txt)"
 
 # 팀원 pane — 개발 중심이므로 Sonnet 기본

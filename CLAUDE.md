@@ -11,8 +11,23 @@ A Claude Code plugin (`dev`) that automates WBS-based TDD development cycles. It
 ```
 .claude-plugin/          # Plugin metadata (plugin.json, marketplace.json)
 skills/                  # Each subdirectory = one skill (SKILL.md is the entry point)
+scripts/                 # Token-saving helper scripts (bash)
 README.md                # User-facing documentation
 ```
+
+### Helper Scripts (Token Optimization)
+
+Skills delegate deterministic work to bash scripts to reduce LLM token consumption:
+
+| Script | Purpose | Used by |
+|--------|---------|---------|
+| `scripts/wbs-parse.sh` | WBS task/WP extraction → JSON output | dev, dev-design/build/test/refactor, dev-team, wp-setup.sh |
+| `scripts/args-parse.sh` | Argument parsing + subproject detection → JSON | dev, dev-design/build/test/refactor, dev-team |
+| `scripts/dep-analysis.sh` | Dependency level calculation (topological sort) → JSON | dev-team, agent-pool, team-mode |
+| `scripts/signal-helper.sh` | Atomic signal file create/check/wait | dev-team, team-mode, agent-pool, DDTR workers |
+| `scripts/wp-setup.sh` | Worktree + prompt + tmux setup (existing) | dev-team |
+
+All scripts use `${CLAUDE_PLUGIN_ROOT}/scripts/` as base path.
 
 ### Skill Layers
 
