@@ -14,6 +14,8 @@
   (서브프로젝트가 없으면 `docs`, 있으면 `docs/{SUBPROJECT}`. 모든 wbs/PRD/TRD/tasks 경로는 이 변수 기준)
 - WT_NAME = {WP-ID}{WINDOW_SUFFIX}
   (tmux window 이름, signal key, worktree 식별자)
+- MODEL_OVERRIDE = {MODEL_OVERRIDE 또는 "없음"}
+  (`--model opus` 지정 시 `"opus"`. 없으면 DDTR 프롬프트에서 Phase별 기본 모델 적용: 설계/개발/리팩토링=sonnet, 테스트=haiku)
 
 개발팀원 {TEAM_SIZE}명을 tmux pane으로 스폰하고, Task를 1건씩 할당하여 개발을 관리하라.
 **리더는 직접 개발하지 않는다. 모든 Task는 팀원에게 위임한다.**
@@ -25,6 +27,16 @@
 ## 실행 계획
 [팀리더가 산출한 레벨별 실행 계획]
 
+## 재개 모드 처리
+
+Task를 할당하기 전에 worktree 내 {DOCS_DIR}/wbs.md를 읽어 각 Task의 status를 확인한다:
+- `[xx]` 상태: 할당하지 않는다. `.done` 시그널이 없으면 생성한다:
+  `echo "resumed" > {SHARED_SIGNAL_DIR}/{TSK-ID}.done`
+- `[dd]`, `[im]` 상태: 팀원에게 할당한다. DDTR 프롬프트의 "상태 확인 및 Phase 재개" 로직이 중간 Phase부터 재개한다.
+- `[ ]` 상태: 정상 할당.
+
+모든 Task가 이미 `[xx]`이면 즉시 완료 보고(시그널) 후 종료한다.
+
 ## WP 리더 역할
 
 /team-mode 스킬의 절차를 따라 팀원을 관리하라.
@@ -32,6 +44,7 @@
 
 | team-mode 절차 | 적용 |
 |----------------|------|
+| **변수 `SIGNAL_DIR`** | **`{SHARED_SIGNAL_DIR}` 사용 (team-mode 기본값 `claude-signals/{window_name}` 사용 금지)** |
 | 2. 환경 구성 → tmux 창 및 pane 생성 | 팀원 pane 생성 (window_name={WT_NAME}) |
 | 3. Task 할당 프로토콜 | 3단계 파일 기반 할당 (prompt_file={TEMP_DIR}/task-{TSK-ID}.txt) |
 | 4. 모니터링 및 재활용 | 시그널 감지(.done 또는 .failed) → /clear → 다음 Task 할당 |

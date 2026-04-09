@@ -19,6 +19,16 @@ description: "WBS Task 설계 단계. wbs.md에서 Task를 읽고 구현 설계 
 
 호출자(예: `/dev`)로부터 `DOCS_DIR`이 이미 명시적으로 전달된 경우 해당 값을 그대로 사용한다.
 
+## 모델 선택
+
+이 Phase의 **기본 모델은 Sonnet** (`"sonnet"`)이다.
+
+- 호출자(`/dev`, DDTR 등)가 `model` 파라미터를 명시하면 해당 모델을 사용
+- 직접 실행(`/dev-design TSK-XX-XX`) 시 Sonnet 기본 적용
+- 설계는 판단이 필요하므로 **Haiku 금지**. 보안/동시성/분산 경계 Task는 Opus 고려
+
+서브에이전트 실행 시 Agent 도구의 `model` 파라미터에 해당 모델 값을 지정한다.
+
 ## 실행 절차
 
 ### 1. Task 정보 추출
@@ -27,7 +37,7 @@ description: "WBS Task 설계 단계. wbs.md에서 Task를 읽고 구현 설계 
 - status가 `[ ]`이 아니면 이미 진행 중인 Task이므로 사용자에게 확인 후 진행
 
 ### 2. 설계 (서브에이전트 위임)
-Agent 도구로 서브에이전트를 실행한다:
+Agent 도구로 서브에이전트를 실행한다 (model: 호출자 지정값 또는 `"sonnet"`, mode: "auto"):
 
 **프롬프트 구성**:
 ```
