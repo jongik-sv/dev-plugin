@@ -9,6 +9,23 @@
 ⚠️ 중요: 가장 먼저 아래 "초기화" 섹션을 실행하여 tmux pane을 생성하라.
 ⚠️ 중요: tmux 명령에 반드시 세션 prefix(`{SESSION}:{WT_NAME}`)를 사용하라. pane 식별은 pane_id(`%N`)를 사용하라.
 
+## 상태 자가 진단 (매 응답 시작 시 반드시 실행)
+
+⚠️ 이 섹션은 최초 실행과 interrupt 후 재개 모두에서 실행한다. 어떤 작업보다 먼저 실행하라.
+
+**1단계: Pane 상태 확인**:
+```bash
+PANE_COUNT=$(tmux list-panes -t "{SESSION}:{WT_NAME}" -F '#{pane_id}' | wc -l | tr -d ' ')
+EXPECTED=$(({TEAM_SIZE} + 1))
+echo "PANE_CHECK: actual=${PANE_COUNT}, expected=${EXPECTED}"
+```
+
+**2단계: 판단**:
+- `PANE_COUNT >= EXPECTED` → 초기화 완료. "pane ID 수집"으로 직행.
+- `PANE_COUNT < EXPECTED` → **WORKER_MISSING**. "1. 초기화" 섹션에서 부족분 생성.
+
+⚠️ **절대 규칙**: WORKER_MISSING이면 절대 직접 개발(코딩)하지 마라. 초기화를 완료하라.
+
 ## 경로 변수
 - DOCS_DIR = {DOCS_DIR}
   (서브프로젝트가 없으면 `docs`, 있으면 `docs/{SUBPROJECT}`. 모든 wbs/PRD/TRD/tasks 경로는 이 변수 기준)
@@ -39,7 +56,7 @@ Task를 할당하기 전에 worktree 내 {DOCS_DIR}/wbs.md를 읽어 각 Task의
 
 ## WP 리더 역할 — 팀원 관리 절차
 
-### 1. 초기화 — 팀원 pane 생성
+### 1. 초기화 — 팀원 pane 확인 및 생성
 
 ⚠️ 가장 먼저 이 섹션을 실행하라. 팀원은 tmux pane으로만 생성한다.
 
@@ -49,33 +66,36 @@ Task를 할당하기 전에 worktree 내 {DOCS_DIR}/wbs.md를 읽어 각 Task의
 - SIGNAL_DIR = {SHARED_SIGNAL_DIR} (**team-mode 기본값 사용 금지**)
 - MAX_RETRIES = 1
 
-**pane 생성** ({TEAM_SIZE}명):
+**pane 존재 확인** (wp-setup.sh가 사전 생성한 경우 건너뜀):
 ```bash
-for i in $(seq 1 {TEAM_SIZE}); do
+ACTUAL=$(tmux list-panes -t "{SESSION}:{WT_NAME}" -F '#{pane_id}' | wc -l | tr -d ' ')
+EXPECTED=$(({TEAM_SIZE} + 1))
+echo "현재 pane: ${ACTUAL}, 필요: ${EXPECTED}"
+```
+
+- `ACTUAL >= EXPECTED` → pane 이미 충분. **pane 생성을 건너뛰고** "pane ID 수집"으로 진행.
+- `ACTUAL < EXPECTED` → 부족분만 생성:
+
+**pane 생성** (부족분만):
+```bash
+NEED=$(($EXPECTED - $ACTUAL))
+for i in $(seq 1 $NEED); do
   tmux split-window -t "{SESSION}:{WT_NAME}" -h \
     "cd $(pwd) && claude --dangerously-skip-permissions --model {WORKER_MODEL}"
 done
 tmux select-layout -t "{SESSION}:{WT_NAME}" tiled
 ```
 
-**pane 생성 검증**:
-```bash
-ACTUAL=$(tmux list-panes -t "{SESSION}:{WT_NAME}" -F '#{pane_id}' | wc -l | tr -d ' ')
-EXPECTED=$(({TEAM_SIZE} + 1))
-if [ "$ACTUAL" -lt "$EXPECTED" ]; then
-  NEED=$(($EXPECTED - $ACTUAL))
-  for i in $(seq 1 $NEED); do
-    tmux split-window -t "{SESSION}:{WT_NAME}" -h \
-      "cd $(pwd) && claude --dangerously-skip-permissions --model {WORKER_MODEL}"
-  done
-  tmux select-layout -t "{SESSION}:{WT_NAME}" tiled
-fi
-```
-
 **pane ID 수집** (이후 모든 명령에 pane_id 사용):
 ```bash
 PANE_IDS=($(tmux list-panes -t "{SESSION}:{WT_NAME}" -F '#{pane_id}'))
 # PANE_IDS[0]=리더(자신), PANE_IDS[1~]=worker
+```
+
+**초기화 완료 시그널 생성**:
+```bash
+echo "initialized at $(date)" > {SHARED_SIGNAL_DIR}/{WT_NAME}.initialized.tmp
+mv {SHARED_SIGNAL_DIR}/{WT_NAME}.initialized.tmp {SHARED_SIGNAL_DIR}/{WT_NAME}.initialized
 ```
 
 ### 2. Task 할당 — 3단계 파일 기반
@@ -85,8 +105,8 @@ PANE_IDS=($(tmux list-panes -t "{SESSION}:{WT_NAME}" -F '#{pane_id}'))
 
 **할당 절차** (각 task에 대해):
 ```bash
-# 1단계: pane 라벨 업데이트
-tmux set-option -p -t {paneId} @label "worker{N} {task-id}"
+# 1단계: pane 타이틀 업데이트
+tmux select-pane -t {paneId} -T "worker{N} {task-id}"
 
 # 2단계: Escape로 깨운 뒤 짧은 지시 전송
 tmux send-keys -t {paneId} Escape
@@ -140,6 +160,12 @@ fi
 모든 task 완료/실패 처리 후:
 ```bash
 for pane in "${PANE_IDS[@]:1}"; do
+  PANE_PID=$(tmux display-message -t "$pane" -p '#{pane_pid}')
+  if command -v pkill &>/dev/null; then
+    pkill -TERM -P "$PANE_PID" 2>/dev/null; sleep 1
+  else
+    taskkill /PID "$PANE_PID" /T /F 2>/dev/null
+  fi
   tmux send-keys -t "$pane" Escape 2>/dev/null; sleep 1
   tmux send-keys -t "$pane" '/exit' Enter 2>/dev/null
 done
@@ -168,6 +194,11 @@ while [ ! -f {SHARED_SIGNAL_DIR}/{의존-TSK-ID}.done ]; do sleep 10; done
 ⚠️ **필수**: 모든 Task 완료 후 반드시 아래 순서대로 실행하라. 대기하거나 사용자 입력을 기다리지 마라.
 
 모든 Task의 시그널 파일을 확인한 후:
+
+0. **초기화 시그널 정리**:
+   ```bash
+   rm -f {SHARED_SIGNAL_DIR}/{WT_NAME}.initialized
+   ```
 
 1. **미커밋 변경 확인 및 커밋**:
    ```bash

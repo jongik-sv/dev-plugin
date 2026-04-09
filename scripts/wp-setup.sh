@@ -160,6 +160,7 @@ for ((i=0; i<WP_COUNT; i++)); do
     for f in "${SHARED_SIGNAL_DIR}"/*.running; do
       [ -f "$f" ] && rm -f "$f"
     done
+    rm -f "${SHARED_SIGNAL_DIR}/${WT_NAME}.initialized"
     echo "[${WP_ID}] signals: 복원 완료 (${SHARED_SIGNAL_DIR})"
   fi
 
@@ -256,8 +257,29 @@ RUNNER_EOF
     tmux set-option -w -t "${SESSION}:${WT_NAME}" automatic-rename off
     tmux set-option -w -t "${SESSION}:${WT_NAME}" allow-rename off
     tmux set-option -w -t "${SESSION}:${WT_NAME}" pane-border-status top
-    tmux set-option -w -t "${SESSION}:${WT_NAME}" pane-border-format " #{pane_index}: #{@label} "
-    echo "[${WP_ID}] spawn: tmux window ${WT_NAME}"
+    tmux set-option -w -t "${SESSION}:${WT_NAME}" pane-border-format " #{pane_title} "
+
+    # Worker pane 사전 생성 (리더 초기화 부담 제거 + interrupt 취약점 해소)
+    WT_ABS_PATH="$(pwd)/.claude/worktrees/${WT_NAME}"
+    for wi in $(seq 1 ${TEAM_SIZE}); do
+      tmux split-window -t "${SESSION}:${WT_NAME}" -h \
+        "cd '${WT_ABS_PATH}' && claude --dangerously-skip-permissions --model ${WORKER_MODEL}"
+    done
+    tmux select-layout -t "${SESSION}:${WT_NAME}" tiled
+
+    # Pane ID 파일 생성 (리더가 참조)
+    PANE_IDS_FILE="${TEMP_DIR}/pane-ids-${WT_NAME}.txt"
+    tmux list-panes -t "${SESSION}:${WT_NAME}" -F '#{pane_index}:#{pane_id}' > "${PANE_IDS_FILE}"
+
+    # Pane 타이틀 설정
+    PANE0_ID=$(awk -F: '$1=="0" {print $2}' "${PANE_IDS_FILE}")
+    tmux select-pane -t "${PANE0_ID}" -T "${WP_ID} Leader"
+    for wi in $(seq 1 ${TEAM_SIZE}); do
+      WI_PANE_ID=$(awk -F: -v idx="$wi" '$1==idx {print $2}' "${PANE_IDS_FILE}")
+      [ -n "${WI_PANE_ID}" ] && tmux select-pane -t "${WI_PANE_ID}" -T "worker${wi} idle"
+    done
+
+    echo "[${WP_ID}] spawn: tmux window ${WT_NAME} (leader + ${TEAM_SIZE} workers)"
   else
     echo "[${WP_ID}] runner: ${RUNNER} (tmux 없음 — 수동 실행 필요)"
   fi

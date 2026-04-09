@@ -286,6 +286,16 @@ for PANE_ID in $(tmux list-panes -t "${SESSION}:${WT_NAME}" -F '#{pane_id}'); do
   tmux send-keys -t "${PANE_ID}" '/exit' Enter 2>/dev/null
 done
 sleep 3
+# 자식 프로세스 트리 정리 (고아 프로세스 방지, macOS/Linux: pkill, Windows/psmux: taskkill)
+for PANE_ID in $(tmux list-panes -t "${SESSION}:${WT_NAME}" -F '#{pane_id}'); do
+  PANE_PID=$(tmux display-message -t "$PANE_ID" -p '#{pane_pid}')
+  if command -v pkill &>/dev/null; then
+    pkill -TERM -P "$PANE_PID" 2>/dev/null; sleep 1; pkill -9 -P "$PANE_PID" 2>/dev/null
+  else
+    taskkill /PID "$PANE_PID" /T /F 2>/dev/null
+  fi
+done
+sleep 2
 tmux kill-window -t "${SESSION}:${WT_NAME}" 2>/dev/null
 ```
 
