@@ -34,6 +34,25 @@ def get_active_worktrees() -> list[str] | None:
         return None
 
 
+_CLAUDE_CODE_PATTERNS = (
+    "/claude",       # claude binary (e.g. /opt/homebrew/bin/claude)
+    ".claude/",      # claude config/plugin paths
+    "claude-code",   # @anthropic-ai/claude-code
+    "anthropic",     # anthropic SDK paths
+)
+
+
+def _is_claude_code_process(cmd: str) -> bool:
+    """Return True if the command line belongs to a Claude Code process."""
+    cmd_lower = cmd.lower()
+    # Check: command itself is 'claude' (standalone binary)
+    cmd_parts = cmd.strip().split()
+    if cmd_parts and os.path.basename(cmd_parts[0]).lower() == "claude":
+        return True
+    # Check: command contains Claude Code path indicators
+    return any(pat in cmd_lower for pat in _CLAUDE_CODE_PATTERNS)
+
+
 def find_target_processes(keywords: list) -> list[dict]:
     """Find processes matching keywords. Returns list of {pid, name, cwd}."""
     if not keywords:
@@ -61,6 +80,8 @@ def find_target_processes(keywords: list) -> list[dict]:
                 cmdline = parts[1]
                 pid_str = parts[2].strip()
                 if any(kw in cmdline.lower() for kw in kw_lower):
+                    if _is_claude_code_process(cmdline):
+                        continue
                     cwd = _get_cwd_windows(pid_str)
                     results.append({"pid": int(pid_str), "name": cmdline[:80], "cwd": cwd})
         except FileNotFoundError:
@@ -79,6 +100,8 @@ def find_target_processes(keywords: list) -> list[dict]:
                         continue
                     pid_str, cmdline = line.split("|", 1)
                     if any(kw in cmdline.lower() for kw in kw_lower):
+                        if _is_claude_code_process(cmdline):
+                            continue
                         cwd = _get_cwd_windows(pid_str.strip())
                         results.append({"pid": int(pid_str), "name": cmdline[:80], "cwd": cwd})
             except FileNotFoundError:
@@ -100,6 +123,8 @@ def find_target_processes(keywords: list) -> list[dict]:
                     continue
                 pid_str, ppid_str, cmd = parts
                 if any(kw in cmd.lower() for kw in kw_lower):
+                    if _is_claude_code_process(cmd):
+                        continue
                     cwd = _get_cwd_unix(pid_str)
                     results.append({
                         "pid": int(pid_str),

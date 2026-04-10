@@ -21,7 +21,7 @@ echo "PANE_CHECK: actual=${PANE_COUNT}, expected=${EXPECTED}"
 
 **2단계: 판단**:
 - `PANE_COUNT >= EXPECTED` → 초기화 완료. "pane ID 수집"으로 직행.
-- `PANE_COUNT < EXPECTED` → **WORKER_MISSING**. 초기화 파일의 "1. 팀원 pane 확인 및 생성" 실행.
+- `PANE_COUNT < EXPECTED` → **WORKER_MISSING**. 초기화 파일의 "1. 팀원 pane 확인" 실행 (wp-setup.py가 pane 생성 중일 수 있으므로 대기).
 
 ⚠️ **절대 규칙**: WORKER_MISSING이면 절대 직접 개발(코딩)하지 마라. 초기화를 완료하라.
 
@@ -53,12 +53,13 @@ echo "PANE_CHECK: actual=${PANE_COUNT}, expected=${EXPECTED}"
 ⚠️ tmux send-keys는 긴 문자열을 잘라버린다. 프롬프트를 반드시 파일로 전달한다.
 ⚠️ pane 식별은 반드시 pane_id(`%N` 형식, 예: `%7`)를 사용한다.
 ⚠️ **`{TEMP_DIR}/task-<TSK-ID>.txt` 파일은 셋업 스크립트가 사전 생성한 DDTR 프롬프트이다. 절대 덮어쓰거나 새로 작성하지 마라.** 워커는 이 파일을 읽고 `/dev` 스킬을 실행한다. 리더가 자체 프롬프트를 만들면 스킬 호출이 누락된다.
+⚠️ **`{TEMP_DIR}/task-<TSK-ID>-design.txt`는 설계 전용 프롬프트이다.** 의존 대기 중인 task의 설계를 선행할 때 사용한다. 이 파일도 절대 덮어쓰거나 새로 작성하지 마라.
 
 **할당 절차** (각 task에 대해):
 
 1단계 — pane 타이틀 업데이트:
 ```bash
-tmux select-pane -t {paneId} -T "worker{N} {task-id}"
+tmux select-pane -t {paneId} -T "팀원{N} {task-id}"
 ```
 
 2단계 — Escape로 깨운 뒤 짧은 지시 전송:
@@ -77,7 +78,8 @@ python3 {PLUGIN_ROOT}/scripts/signal-helper.py wait-running {task-id} {SHARED_SI
 이 명령은 `.running` 시그널이 생길 때까지 최대 120초 대기한다.
 타임아웃 시 pane 출력을 확인하고, 미응답이면 재전송한다.
 
-**초기 할당**: Level 0 task부터 worker에게 각 1건씩 할당. prompt_file은 실행 계획에 기재된 경로(예: `{TEMP_DIR}/task-<각 TSK-ID>.txt`).
+**초기 할당**: Level 0 task부터 worker에게 각 1건씩 할당. prompt_file은 `{TEMP_DIR}/task-<각 TSK-ID>.txt`.
+**유휴 worker 설계 선행**: Level 0 task를 모두 할당하고도 남는 worker가 있으면, 의존 대기 중인 미설계 task(status `[ ]`)의 설계를 선행 할당한다. prompt_file은 `{TEMP_DIR}/task-<TSK-ID>-design.txt`. 설계 전용 파일이 없는 task는 이미 설계 완료이므로 건너뛴다.
 
 ## 3. 모니터링 및 pane 재활용
 
@@ -85,9 +87,13 @@ python3 {PLUGIN_ROOT}/scripts/signal-helper.py wait-running {task-id} {SHARED_SI
 ```bash
 python3 {PLUGIN_ROOT}/scripts/signal-helper.py wait {task-id} {SHARED_SIGNAL_DIR} 14400
 ```
+설계 선행 task는 설계 시그널도 감시:
+```bash
+python3 {PLUGIN_ROOT}/scripts/signal-helper.py wait {task-id}-design {SHARED_SIGNAL_DIR} 14400
+```
 완료 통보를 받으면 시그널 파일 내용을 확인:
 ```bash
-cat {SHARED_SIGNAL_DIR}/{task-id}.done 2>/dev/null || cat {SHARED_SIGNAL_DIR}/{task-id}.failed 2>/dev/null
+cat {SHARED_SIGNAL_DIR}/{task-id}.done 2>/dev/null || cat {SHARED_SIGNAL_DIR}/{task-id}.failed 2>/dev/null || cat {SHARED_SIGNAL_DIR}/{task-id}-design.done 2>/dev/null || cat {SHARED_SIGNAL_DIR}/{task-id}-design.failed 2>/dev/null
 ```
 
 **DONE → pane 재활용**:
@@ -103,7 +109,10 @@ cat {SHARED_SIGNAL_DIR}/{task-id}.done 2>/dev/null || cat {SHARED_SIGNAL_DIR}/{t
    ```bash
    tmux send-keys -t {paneId} Enter
    ```
-3. 의존성 해소된 다음 task를 위 "할당 — 3단계"로 1건 할당
+3. 다음 task 할당 (우선순위):
+   a. 의존성 해소된 DDTR task가 있으면 → `{TEMP_DIR}/task-<TSK-ID>.txt`로 할당 (설계 완료 task는 `/dev`가 `[dd]` 감지하여 build부터 자동 재개)
+   b. 없으면, 의존 대기 중이지만 미설계인 task가 있으면 → `{TEMP_DIR}/task-<TSK-ID>-design.txt`로 설계 선행 할당 (설계 전용 파일이 존재하는 task만 대상)
+   c. 둘 다 없으면 → 대기 (시그널 감시 계속)
 
 **FAILED → 재시도 또는 확정**:
 1. 시그널 내용 확인: `head -50 {SHARED_SIGNAL_DIR}/{task-id}.failed`

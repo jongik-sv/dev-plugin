@@ -147,6 +147,7 @@ def main():
     _validate_name(wp_leader_model, "wp_leader_model")
 
     ddtr_template_path = os.path.join(plugin_root, "skills/dev-team/references/ddtr-prompt-template.md")
+    ddtr_design_template_path = os.path.join(plugin_root, "skills/dev-team/references/ddtr-design-template.md")
     wp_leader_template_path = os.path.join(plugin_root, "skills/dev-team/references/wp-leader-prompt.md")
     wp_leader_init_path = os.path.join(plugin_root, "skills/dev-team/references/wp-leader-init.md")
     wp_leader_cleanup_path = os.path.join(plugin_root, "skills/dev-team/references/wp-leader-cleanup.md")
@@ -156,6 +157,7 @@ def main():
 
     # Template caching
     ddtr_raw = extract_template(ddtr_template_path)
+    ddtr_design_raw = extract_template(ddtr_design_template_path)
     wp_leader_raw = extract_template(wp_leader_template_path)
     wp_leader_init_raw = extract_template(wp_leader_init_path)
     wp_leader_cleanup_raw = extract_template(wp_leader_cleanup_path)
@@ -221,12 +223,21 @@ def main():
                 for m in re.finditer(r'TSK-\d+(?:-\d+)+', wt_wbs_text):
                     tsk = m.group()
                     done_path = os.path.join(shared_signal_dir, f"{tsk}.done")
-                    if not os.path.exists(done_path):
-                        # Check if [xx] in the line containing this TSK
-                        for line in wt_wbs_text.splitlines():
-                            if tsk in line and "[xx]" in line:
+                    design_done_path = os.path.join(shared_signal_dir, f"{tsk}-design.done")
+                    for line in wt_wbs_text.splitlines():
+                        if tsk not in line:
+                            continue
+                        # [xx] → restore both .done and -design.done
+                        if "[xx]" in line:
+                            if not os.path.exists(done_path):
                                 pathlib.Path(done_path).write_text("resumed\n", encoding="utf-8")
-                                break
+                            if not os.path.exists(design_done_path):
+                                pathlib.Path(design_done_path).write_text("resumed\n", encoding="utf-8")
+                            break
+                        # [dd] or [im] → design already done, restore -design.done
+                        if ("[dd]" in line or "[im]" in line) and not os.path.exists(design_done_path):
+                            pathlib.Path(design_done_path).write_text("resumed\n", encoding="utf-8")
+                            break
 
             # Remove stale .running files
             for f in pathlib.Path(shared_signal_dir).glob("*.running"):
@@ -298,12 +309,34 @@ def main():
                     f.write(content)
                 os.replace(tmp_out, ddtr_out)
 
+            # Design-only prompt generation for design-ahead
+            design_done_path = os.path.join(shared_signal_dir, f"{tsk_id}-design.done")
+            if "[ ]" in status:
+                # Task not yet designed — generate design prompt
+                design_out = os.path.join(temp_dir, f"task-{tsk_id}-design.txt")
+                if os.path.isfile(design_out):
+                    print(f"[{wp_id}] design: {tsk_id} reuse ({design_out})")
+                else:
+                    content = ddtr_prefix + ddtr_design_raw
+                    content = substitute_vars(content, wp_id=wp_id, team_size=team_size,
+                                              wt_name=wt_name, tsk_id=tsk_id, **sub_kwargs)
+                    tmp_out = design_out + ".tmp"
+                    with open(tmp_out, "w", encoding="utf-8") as f:
+                        f.write(content)
+                    os.replace(tmp_out, design_out)
+            else:
+                # [dd] or [im] — design already done, pre-create signal
+                if not os.path.exists(design_done_path):
+                    pathlib.Path(design_done_path).write_text(
+                        "pre-created: design already done\n", encoding="utf-8")
+
             ddtr_files.append(tsk_id)
+            design_prompt_line = f"- design_prompt: {temp_dir}/task-{tsk_id}-design.txt\n" if "[ ]" in status else ""
             manifest_tasks += f"""
 ### {tsk_id}
 - status: {status}
 - depends: {depends}
-- prompt_file: {temp_dir}/task-{tsk_id}.txt
+{design_prompt_line}- prompt_file: {temp_dir}/task-{tsk_id}.txt
 """
 
         print(f"[{wp_id}] ddtr: {' '.join(ddtr_files) if ddtr_files else 'none'}")
@@ -431,7 +464,7 @@ exec claude --dangerously-skip-permissions --model {wp_leader_model} "$(<../{wt_
             for wi in range(1, team_size + 1):
                 idx = str(wi)
                 if idx in pane_map:
-                    run_cmd(["tmux", "select-pane", "-t", pane_map[idx], "-T", f"worker{wi} idle"])
+                    run_cmd(["tmux", "select-pane", "-t", pane_map[idx], "-T", f"팀원{wi}"])
 
             print(f"[{wp_id}] spawn: tmux window {wt_name} (leader + {team_size} workers)")
 
