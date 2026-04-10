@@ -105,37 +105,27 @@ mv {SHARED_SIGNAL_DIR}/{WT_NAME}.initialized.tmp {SHARED_SIGNAL_DIR}/{WT_NAME}.i
 ⚠️ **`{TEMP_DIR}/task-{TSK-ID}.txt` 파일은 셋업 스크립트가 사전 생성한 DDTR 프롬프트이다. 절대 덮어쓰거나 새로 작성하지 마라.** 워커는 이 파일을 읽고 `/dev` 스킬을 실행한다. 리더가 자체 프롬프트를 만들면 스킬 호출이 누락된다.
 
 **할당 절차** (각 task에 대해):
+
+1단계 — pane 타이틀 업데이트:
 ```bash
-# 1단계: pane 타이틀 업데이트
 tmux select-pane -t {paneId} -T "worker{N} {task-id}"
-
-# 2단계: Escape로 깨운 뒤 짧은 지시 전송
-tmux send-keys -t {paneId} Escape
-sleep 1
-tmux send-keys -t {paneId} '{prompt_file} 파일을 Read 도구로 읽고 그 안의 작업을 수행하라.' Enter
-
-# 3단계: 할당 수신 검증 — .running 시그널 파일 기반 (최대 60초)
-# DDTR 워커는 시작 직후 {task-id}.running 파일을 생성한다. 이를 1차 기준으로 사용.
-WAIT=0; ACCEPTED=false
-while [ $WAIT -lt 60 ]; do
-  sleep 5; WAIT=$((WAIT + 5))
-  if [ -f "{SHARED_SIGNAL_DIR}/{task-id}.running" ]; then
-    echo "worker 활성 확인 (시그널)"; ACCEPTED=true; break
-  fi
-done
-if [ "$ACCEPTED" = false ]; then
-  # 폴백: pane 출력 확인 (장시간 bash 실행 중이면 키워드 없을 수 있음)
-  PANE_OUTPUT=$(tmux capture-pane -t {paneId} -p 2>/dev/null | grep -v "^$" | tail -5)
-  if echo "$PANE_OUTPUT" | grep -qE '(Musing|Thinking|Drizzling|Running|⏺)'; then
-    echo "worker 활성 확인 (pane)"
-  else
-    echo "worker 미응답 — 재전송"
-    tmux send-keys -t {paneId} Escape; sleep 1
-    tmux send-keys -t {paneId} i; sleep 1
-    tmux send-keys -t {paneId} '{prompt_file} 파일을 Read 도구로 읽고 그 안의 작업을 수행하라.' Enter
-  fi
-fi
 ```
+
+2단계 — Escape로 깨운 뒤 짧은 지시 전송:
+```bash
+tmux send-keys -t {paneId} Escape
+```
+잠시 후 (별도 Bash 호출):
+```bash
+tmux send-keys -t {paneId} '{prompt_file} 파일을 Read 도구로 읽고 그 안의 작업을 수행하라.' Enter
+```
+
+3단계 — 할당 수신 검증 (Bash `run_in_background`로 실행):
+```bash
+python3 {PLUGIN_ROOT}/scripts/signal-helper.py wait {task-id} {SHARED_SIGNAL_DIR} 120 running
+```
+이 명령은 `.running` 시그널이 생길 때까지 최대 120초 대기한다.
+타임아웃 시 pane 출력을 확인하고, 미응답이면 재전송한다.
 
 **초기 할당**: Level 0 task부터 worker에게 각 1건씩 할당. prompt_file은 실행 계획에 기재된 경로(예: `{TEMP_DIR}/task-<각 TSK-ID>.txt`).
 
@@ -143,18 +133,24 @@ fi
 
 **시그널 감지** — 각 task별로 Bash `run_in_background`로 감시:
 ```bash
-while [ ! -f {SHARED_SIGNAL_DIR}/{task-id}.done ] && [ ! -f {SHARED_SIGNAL_DIR}/{task-id}.failed ]; do sleep 10; done
-if [ -f {SHARED_SIGNAL_DIR}/{task-id}.done ]; then echo "DONE:{task-id}"
-elif [ -f {SHARED_SIGNAL_DIR}/{task-id}.failed ]; then echo "FAILED:{task-id}"
-fi
+python3 {PLUGIN_ROOT}/scripts/signal-helper.py wait {task-id} {SHARED_SIGNAL_DIR} 14400
+```
+완료 통보를 받으면 시그널 파일 내용을 확인:
+```bash
+cat {SHARED_SIGNAL_DIR}/{task-id}.done 2>/dev/null || cat {SHARED_SIGNAL_DIR}/{task-id}.failed 2>/dev/null
 ```
 
 **DONE → pane 재활용**:
-1. 시그널 내용 확인: `head -50 {SHARED_SIGNAL_DIR}/{task-id}.done`
-2. 컨텍스트 초기화:
+1. 시그널 내용 확인
+2. 컨텍스트 초기화 (각각 별도 Bash 호출, sleep 사용 금지):
    ```bash
-   tmux send-keys -t {paneId} Escape; sleep 1
-   tmux send-keys -t {paneId} '/clear' Enter; sleep 10
+   tmux send-keys -t {paneId} Escape
+   ```
+   ```bash
+   tmux send-keys -t {paneId} '/clear' Enter
+   ```
+   약 10초 후 (별도 Bash 호출):
+   ```bash
    tmux send-keys -t {paneId} Enter
    ```
 3. 의존성 해소된 다음 task를 위 "할당 — 3단계"로 1건 할당
@@ -168,19 +164,19 @@ fi
 
 ### 4. Worker 종료
 
-모든 task 완료/실패 처리 후:
+모든 task 완료/실패 처리 후, 각 worker pane에 대해 **개별 Bash 호출**로 종료한다 (sleep 사용 금지):
+```bash
+tmux send-keys -t {paneId} Escape
+```
+```bash
+tmux send-keys -t {paneId} '/exit' Enter
+```
+모든 worker에 `/exit`을 보낸 뒤, 프로세스 정리:
 ```bash
 for pane in "${PANE_IDS[@]:1}"; do
-  PANE_PID=$(tmux display-message -t "$pane" -p '#{pane_pid}')
-  if command -v pkill &>/dev/null; then
-    pkill -TERM -P "$PANE_PID" 2>/dev/null; sleep 1
-  else
-    taskkill /PID "$PANE_PID" /T /F 2>/dev/null
-  fi
-  tmux send-keys -t "$pane" Escape 2>/dev/null; sleep 1
-  tmux send-keys -t "$pane" '/exit' Enter 2>/dev/null
+  PANE_PID=$(tmux display-message -t "$pane" -p '#{pane_pid}' 2>/dev/null)
+  [ -n "$PANE_PID" ] && pkill -TERM -P "$PANE_PID" 2>/dev/null
 done
-sleep 5
 ```
 
 ### 팀원 실패 처리
@@ -195,9 +191,9 @@ sleep 5
 
 ### cross-WP 의존 Task 처리 (team-mode에 없는 WBS 전용 로직)
 
-cross-WP 의존이 있는 Task를 할당하기 전, 시그널 파일을 확인한다 (**절대 경로 사용**):
+cross-WP 의존이 있는 Task를 할당하기 전, signal-helper로 대기한다 (**절대 경로 사용**, Bash `run_in_background`):
 ```bash
-while [ ! -f {SHARED_SIGNAL_DIR}/{의존-TSK-ID}.done ]; do sleep 10; done
+python3 {PLUGIN_ROOT}/scripts/signal-helper.py wait {의존-TSK-ID} {SHARED_SIGNAL_DIR} 14400
 ```
 
 ### 최종 정리 (자동 해산)
