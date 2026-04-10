@@ -33,55 +33,24 @@ WP 내 모든 Task에 대해 아래 파일이 존재하는지 확인한다:
 ```bash
 for PANE_ID in $(tmux list-panes -t "${SESSION}:${WT_NAME}" -F '#{pane_id}'); do
   tmux send-keys -t "${PANE_ID}" Escape 2>/dev/null
-  sleep 1
+done
+```
+```bash
+for PANE_ID in $(tmux list-panes -t "${SESSION}:${WT_NAME}" -F '#{pane_id}'); do
   tmux send-keys -t "${PANE_ID}" '/exit' Enter 2>/dev/null
 done
-sleep 3
-# 자식 프로세스 트리 정리 (고아 프로세스 방지, macOS/Linux: pkill, Windows/psmux: taskkill)
-for PANE_ID in $(tmux list-panes -t "${SESSION}:${WT_NAME}" -F '#{pane_id}'); do
-  PANE_PID=$(tmux display-message -t "$PANE_ID" -p '#{pane_pid}')
-  if command -v pkill &>/dev/null; then
-    pkill -TERM -P "$PANE_PID" 2>/dev/null; sleep 1; pkill -9 -P "$PANE_PID" 2>/dev/null
-  else
-    taskkill /PID "$PANE_PID" /T /F 2>/dev/null
-  fi
-done
-sleep 2
+```
+```bash
 tmux kill-window -t "${SESSION}:${WT_NAME}" 2>/dev/null
 ```
+> ⚠️ 팀리더가 직접 `pkill`이나 `taskkill`을 실행하지 마라 — 다른 세션의 claude 프로세스를 오살할 수 있다. WP 리더의 cleanup 절차(`wp-leader-cleanup.md`)가 pane별 자식 프로세스를 정리한다. 테스트 프로세스는 `run-test.py`가 프로세스 그룹 단위로 자동 정리한다.
 
-### 2. 코드 리뷰 (merge 전 품질 게이트)
+### 2. 코드 리뷰 확인
 
-Agent 도구로 서브에이전트를 실행한다 (model: `"sonnet"`, mode: "auto"):
-```
-dev/${WT_NAME} 브랜치의 main 대비 변경사항을 리뷰하라.
-Worktree 경로: .claude/worktrees/${WT_NAME}
-
-## 1. 변경 확인
-git log main..dev/${WT_NAME} --oneline
-git diff main...dev/${WT_NAME}
-
-## 2. 리뷰 관점
-- 보안 취약점, 데이터 유실 위험
-- 명백한 버그, 미처리 에러
-- 테스트 누락
-각 이슈에 severity (Critical/High/Medium/Low) 부여
-
-## 3. Critical/High 이슈가 있으면 즉시 수정
-- worktree 내 파일은 절대 경로로 접근: .claude/worktrees/${WT_NAME}/...
-- 수정 후 domain별 테스트 실행: git -C .claude/worktrees/${WT_NAME} ... (출력 2>&1 | tail -200)
-- 커밋: git -C .claude/worktrees/${WT_NAME} add -A && git -C .claude/worktrees/${WT_NAME} commit -m "review: {수정 요약}"
-
-## 4. 결과 작성
-{DOCS_DIR}/tasks/{WP-ID}/review.md에 작성:
-- verdict: PASS | PASS_WITH_FIXES | FAIL
-- 이슈 목록 (severity별)
-- 수정 내역 (있으면)
-```
-
-서브에이전트 완료 후 `{DOCS_DIR}/tasks/{WP-ID}/review.md`의 verdict를 읽어 판정:
-- **PASS** / **PASS_WITH_FIXES** → merge 진행
-- **FAIL** → 사용자에게 보고하고 merge 중단
+코드 리뷰는 WP 리더가 완료 전에 `codex:review`로 수행한다 (`wp-leader-cleanup.md` 참조).
+시그널 파일의 리뷰 항목을 확인한다:
+- **approve** / **needs-attention(수정됨)** → merge 진행
+- **스킵** (일부 Task 실패) → 시그널 내용의 실패 Task를 확인하고 사용자에게 보고 후 merge 여부 판단
 
 ### 3. 머지 실행
 
@@ -91,11 +60,9 @@ git diff main...dev/${WT_NAME}
 git merge --no-ff dev/${WT_NAME} -m "Merge dev/${WT_NAME}: {WP 제목} ({TSK-ID 목록})"
 ```
 3. 충돌 발생 시: 사용자에게 보고하고 수동 해결 요청. 60초 후 재확인 (최대 3회). 3회 초과 시 `git merge --abort`로 해당 WP 머지 건너뛰기
-4. worktree + 브랜치 정리:
-```bash
-git worktree remove --force .claude/worktrees/${WT_NAME}
-git branch -d dev/${WT_NAME}
-```
+4. worktree + 브랜치 보존 (재시작 대비):
+   - 머지 성공 후에도 워크트리와 브랜치를 **즉시 삭제하지 않는다**. 재시작 시 `wp-setup.py`가 기존 워크트리를 감지하여 완료된 Task를 건너뛸 수 있다.
+   - 워크트리 정리는 **전체 완료 머지(B) 단계에서만** 일괄 수행한다.
 5. `{DOCS_DIR}/wbs.md`에서 해당 WP의 `- progress:` 값 업데이트
 
 ---
@@ -110,9 +77,15 @@ git branch -d dev/${WT_NAME}
 3. 머지 후 충돌 여부 확인
    - 충돌 발생 시: 사용자에게 보고하고 수동 해결 요청. 60초 후 재확인하여 미해결 시 다시 안내 (최대 3회). 3회 초과 시 `git merge --abort`로 해당 WP 머지를 건너뛰고 다음 WP 진행
    - 충돌 없으면: 다음 브랜치 머지 진행
-4. 모든 머지 완료 후 정리:
+4. 모든 머지 **성공** 후 정리 (머지 실패 WP가 하나라도 있으면 정리하지 않는다):
    - 시그널 디렉토리 정리: `rm -rf ${TEMP_DIR}/claude-signals/${PROJECT_NAME}${WINDOW_SUFFIX}`
-   - 남은 worktree 정리: `git worktree remove --force .claude/worktrees/${WT_NAME} && git branch -d dev/${WT_NAME}`
+   - 워크트리 + 브랜치 정리 (머지 완료된 WP만):
+     ```bash
+     git worktree remove --force .claude/worktrees/${WT_NAME}
+     git branch -d dev/${WT_NAME}
+     ```
+   - 프롬프트 파일 정리: `rm -f .claude/worktrees/${WT_NAME}-*.txt ${TEMP_DIR}/task-*.txt ${TEMP_DIR}/team-manifest-${WT_NAME}.md`
+   - ⚠️ 머지 실패/건너뛴 WP의 워크트리·시그널·프롬프트는 **절대 삭제하지 않는다** (재시작 시 재활용)
 5. `{DOCS_DIR}/wbs.md`에서 각 WP의 `- progress:` 값을 업데이트
 6. 전체 결과 요약 보고:
    - WP별 완료 Task 수

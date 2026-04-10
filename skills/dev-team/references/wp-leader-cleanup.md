@@ -39,7 +39,26 @@ done
    ```
    미커밋 변경이 있으면 `git add` + `git commit`
 
-3. **팀리더에게 완료 보고** (시그널 파일, **절대 경로 사용**):
+3. **코드 리뷰** (모든 Task 성공 시에만):
+   일부 Task가 실패했거나 스킵된 경우 이 단계를 건너뛴다.
+
+   `/codex:review --base main --wait` 실행.
+
+   verdict가 `needs-attention`이고 Critical/High severity findings가 있으면:
+   Agent 도구로 서브에이전트를 실행한다 (model: `"sonnet"`, mode: "auto"):
+   ```
+   아래 코드 리뷰 결과의 Critical/High 이슈를 수정하라.
+
+   [codex:review 결과 붙여넣기]
+
+   ## 규칙
+   - Critical/High severity만 수정한다. Medium/Low는 무시.
+   - 수정 후 단위 테스트 실행하여 통과 확인.
+   - 커밋: git add -A && git commit -m "review: {수정 요약}"
+   ```
+   Medium/Low만 있으면 수정 없이 진행한다.
+
+4. **팀리더에게 완료 보고** (시그널 파일, **절대 경로 사용**):
    > 시그널 파일 이름은 `{WT_NAME}.done`
 
    **모든 Task 성공 시**:
@@ -48,6 +67,7 @@ done
    [{WT_NAME} 완료]
    - 완료 Task: {완료된 TSK-ID 목록}
    - 테스트: {통과 수}/{전체 수}
+   - 리뷰: {approve | needs-attention(수정됨) | 스킵}
    - 커밋: {최신 커밋 해시}
    - 특이사항: {있으면 기록, 없으면 "없음"}
    EOF
@@ -69,7 +89,7 @@ done
    > ⚠️ `{SHARED_SIGNAL_DIR}`은 팀리더가 프롬프트에 포함시킨 절대 경로이다. 상대 경로(`../.signals/`) 사용 금지.
    > ⚠️ 실패 Task가 있더라도 반드시 `.done` 시그널을 생성하라. 팀리더가 무한 대기하는 것을 방지한다.
 
-4. **리더 자신 종료**: 위 Worker 종료 완료 확인 후 종료
+5. **리더 자신 종료**: 위 Worker 종료 완료 확인 후 종료
 
 **⚠️ 금지사항**:
 - 시그널 파일 생성 후 추가 입력을 기다리지 마라

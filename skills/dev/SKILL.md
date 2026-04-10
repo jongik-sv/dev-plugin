@@ -114,13 +114,8 @@ python3 ${CLAUDE_PLUGIN_ROOT}/scripts/wbs-parse.py {DOCS_DIR}/wbs.md {TSK-ID} --
 
 ### Phase 간 프로세스 정리
 
-각 Phase 서브에이전트 완료 직후, 고아 테스트 프로세스를 정리한다:
-```bash
-python3 ${CLAUDE_PLUGIN_ROOT}/scripts/cleanup-orphaned.py
-```
-서브에이전트가 실행한 테스트 프로세스(Dev Config의 Cleanup Processes에 정의된)가 종료되지 않고 남아있으면 CPU를 계속 소비하므로,
-Phase 전환 시마다 실행한다 (특히 Test → Refactor 전환 시 중요).
-Phase 4 (Refactor) 완료 후에도 실행한다 — Refactor 내부에서도 테스트를 실행하므로 고아 프로세스가 남을 수 있다.
+테스트 명령은 `run-test.py`로 래핑되어 완료/타임아웃/시그널 시 프로세스 그룹 전체가 자동 정리된다 (`references/test-commands.md` 참조).
+별도의 고아 프로세스 정리는 불필요하다.
 
 ## --only 옵션 처리
 - `--only design`: Phase 1만 실행

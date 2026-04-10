@@ -27,7 +27,8 @@ Skills delegate deterministic work to Python scripts (cross-platform: Mac/Linux/
 | `scripts/signal-helper.py` | Atomic signal file create/check/wait | dev-team, team-mode, agent-pool, DDTR workers |
 | `scripts/wp-setup.py` | Worktree + prompt + tmux setup | dev-team |
 | `scripts/wbs-update-status.py` | WBS Task status update (atomic replace) | dev-design, dev-build, dev-refactor |
-| `scripts/cleanup-orphaned.py` | Orphaned test process cleanup (Dev Config driven) | dev (Phase transition) |
+| `scripts/run-test.py` | Test command wrapper with timeout + process-group cleanup | dev-test, dev-build, dev-refactor |
+| `scripts/cleanup-orphaned.py` | Orphaned test process cleanup (legacy fallback) | manual use |
 | `scripts/_platform.py` | Cross-platform utilities (temp dir, JSON escape) | available for scripts |
 
 All scripts use `${CLAUDE_PLUGIN_ROOT}/scripts/` as base path. Python 3 standard library only — no pip dependencies.

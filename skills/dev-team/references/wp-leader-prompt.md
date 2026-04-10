@@ -96,7 +96,14 @@ python3 {PLUGIN_ROOT}/scripts/signal-helper.py wait {task-id}-design {SHARED_SIG
 cat {SHARED_SIGNAL_DIR}/{task-id}.done 2>/dev/null || cat {SHARED_SIGNAL_DIR}/{task-id}.failed 2>/dev/null || cat {SHARED_SIGNAL_DIR}/{task-id}-design.done 2>/dev/null || cat {SHARED_SIGNAL_DIR}/{task-id}-design.failed 2>/dev/null
 ```
 
-**DONE → pane 재활용**:
+**DONE → 설계 선행 완료 vs DDTR 완료 구분**:
+
+**(A) 설계 선행 완료** (`{task-id}-design.done` 시그널):
+1. /clear **하지 않는다** — 설계 컨텍스트를 유지한 채 DDTR 할당에 활용한다.
+2. 해당 task의 의존성이 이미 해소되었으면 → 즉시 `{TEMP_DIR}/task-<TSK-ID>.txt`로 DDTR 할당 (`/dev`가 `[dd]` 감지하여 build부터 자동 재개)
+3. 의존성이 아직 미해소면 → /clear 후 다른 미설계 task의 설계 선행 할당, 또는 대기
+
+**(B) DDTR 완료** (`{task-id}.done` 시그널):
 1. 시그널 내용 확인 — 커밋 해시가 포함되어 있는지 검증. 비어 있으면 5초 후 재확인 1회
 2. 컨텍스트 초기화 (각각 별도 Bash 호출, sleep 사용 금지):
    ```bash
@@ -126,10 +133,12 @@ cat {SHARED_SIGNAL_DIR}/{task-id}.done 2>/dev/null || cat {SHARED_SIGNAL_DIR}/{t
 
 ### cross-WP 의존 Task 처리
 
-cross-WP 의존이 있는 Task를 할당하기 전, signal-helper로 대기한다 (**절대 경로 사용**, Bash `run_in_background`):
+cross-WP 의존이 있는 Task의 **DDTR(전체 개발 사이클) 할당**은 의존 해소 후에 수행한다. signal-helper로 대기 (**절대 경로 사용**, Bash `run_in_background`):
 ```bash
 python3 {PLUGIN_ROOT}/scripts/signal-helper.py wait {의존-TSK-ID} {SHARED_SIGNAL_DIR} 14400
 ```
+
+⚠️ **설계 선행은 cross-WP 의존과 무관하게 즉시 할당 가능하다.** 설계는 의존 task의 구현 결과를 필요로 하지 않는다. 유휴 worker가 있고 미설계 task가 있으면, cross-WP 의존 여부와 관계없이 `{TEMP_DIR}/task-<TSK-ID>-design.txt`로 설계를 선행 할당하라. worker가 놀고 있는 시간(수 분)이 /clear 비용(수 초)보다 훨씬 크다.
 
 ## 최종 정리 (모든 Task 완료 후)
 
