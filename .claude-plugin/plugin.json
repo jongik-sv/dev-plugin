@@ -15,9 +15,5 @@
     "dev-automation",
     "team-mode",
     "agent-pool"
-  ],
-  "skills": [
-    "dev", "dev-design", "dev-build", "dev-test", "dev-refactor",
-    "dev-team", "dev-help", "team-mode", "agent-pool", "wbs"
   ]
 }
