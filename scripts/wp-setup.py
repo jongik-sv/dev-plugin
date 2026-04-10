@@ -14,13 +14,24 @@ import shutil
 import re
 import tempfile
 import pathlib
+import glob
 
 USAGE = "Usage: wp-setup.py <config.json>"
 
+_SAFE_NAME_RE = re.compile(r'^[a-zA-Z0-9._-]+$')
 
-def run(cmd: str, check: bool = True, capture: bool = False) -> subprocess.CompletedProcess:
-    """Run a shell command."""
-    return subprocess.run(cmd, shell=True, check=check, capture_output=capture, text=True)
+
+def _validate_name(value: str, label: str) -> str:
+    """Validate that a name contains only safe characters."""
+    if not _SAFE_NAME_RE.match(value):
+        print(f"ERROR: {label} contains unsafe characters: {value!r}", file=sys.stderr)
+        sys.exit(1)
+    return value
+
+
+def run_cmd(args: list[str], check: bool = True, capture: bool = False) -> subprocess.CompletedProcess:
+    """Run a command as argument list (no shell)."""
+    return subprocess.run(args, check=check, capture_output=capture, text=True)
 
 
 def detect_mux() -> str | None:
@@ -76,7 +87,7 @@ def substitute_vars(text: str, **kwargs) -> str:
         "{MODEL_ARG}": model_arg,
     }
     model_display = model_override if model_override else "\uc5c6\uc74c"
-    replacements['{MODEL_OVERRIDE \ub610\ub294 "\uc5c6\uc74c"}'] = model_display
+    replacements['{MODEL_OVERRIDE}'] = model_display
 
     for placeholder, value in replacements.items():
         text = text.replace(placeholder, value)
@@ -126,6 +137,12 @@ def main():
     wp_leader_model = config.get("wp_leader_model", "sonnet")
     plugin_root = config["plugin_root"]
 
+    # Validate model names
+    if model_override:
+        _validate_name(model_override, "model_override")
+    _validate_name(worker_model, "worker_model")
+    _validate_name(wp_leader_model, "wp_leader_model")
+
     ddtr_template_path = os.path.join(plugin_root, "skills/dev-team/references/ddtr-prompt-template.md")
     wp_leader_template_path = os.path.join(plugin_root, "skills/dev-team/references/wp-leader-prompt.md")
 
@@ -166,12 +183,20 @@ def main():
         wt_path = f".claude/worktrees/{wt_name}"
         resume_mode = False
 
-        branch_check = run(f"git branch --list dev/{wt_name}", capture=True, check=False)
+        branch_check = run_cmd(["git", "branch", "--list", f"dev/{wt_name}"], capture=True, check=False)
         if os.path.isdir(wt_path) and branch_check.stdout.strip():
-            print(f"[{wp_id}] worktree: resume ({wt_path})")
-            resume_mode = True
+            # Health check: verify worktree is in a usable state
+            health = run_cmd(["git", "-C", wt_path, "status", "--porcelain"], capture=True, check=False)
+            if health.returncode != 0:
+                print(f"[{wp_id}] worktree: unhealthy, recreating ({wt_path})")
+                run_cmd(["git", "worktree", "remove", "--force", wt_path], check=False)
+                run_cmd(["git", "branch", "-D", f"dev/{wt_name}"], check=False)
+                run_cmd(["git", "worktree", "add", wt_path, "-b", f"dev/{wt_name}"])
+            else:
+                print(f"[{wp_id}] worktree: resume ({wt_path})")
+                resume_mode = True
         else:
-            run(f'git worktree add "{wt_path}" -b "dev/{wt_name}"')
+            run_cmd(["git", "worktree", "add", wt_path, "-b", f"dev/{wt_name}"])
             print(f"[{wp_id}] worktree: created ({wt_path})")
 
         # --- 2. Signal dir + restore ---
@@ -179,7 +204,6 @@ def main():
 
         if resume_mode:
             # Restore signals from completed tasks in worktrees
-            import glob
             for wt_dir in glob.glob(".claude/worktrees/*/"):
                 wt_wbs = os.path.join(wt_dir, docs_dir, "wbs.md")
                 if not os.path.isfile(wt_wbs):
@@ -207,8 +231,8 @@ def main():
         # --- 2b. Pre-create .done for completed cross-WP dependencies ---
         # Even if worktrees were removed, the main WBS has [xx] status.
         for tsk_id in tasks:
-            r = run(f'python3 "{wbs_parse}" "{wbs_path}" "{tsk_id}" --field depends',
-                    capture=True, check=False)
+            r = run_cmd(["python3", wbs_parse, wbs_path, tsk_id, "--field", "depends"],
+                        capture=True, check=False)
             depends_str = r.stdout.strip()
             if not depends_str or depends_str == "-":
                 continue
@@ -223,8 +247,8 @@ def main():
                 done_path = os.path.join(shared_signal_dir, f"{dep}.done")
                 if os.path.exists(done_path):
                     continue
-                r2 = run(f'python3 "{wbs_parse}" "{wbs_path}" "{dep}" --field status',
-                         capture=True, check=False)
+                r2 = run_cmd(["python3", wbs_parse, wbs_path, dep, "--field", "status"],
+                             capture=True, check=False)
                 if "[xx]" in r2.stdout:
                     pathlib.Path(done_path).write_text(
                         "pre-created: completed in main WBS\n", encoding="utf-8")
@@ -236,15 +260,18 @@ def main():
 
         for tsk_id in tasks:
             # Get task status via wbs-parse.py
-            r = run(f'python3 "{wbs_parse}" "{wbs_path}" "{tsk_id}" --field status', capture=True, check=False)
+            r = run_cmd(["python3", wbs_parse, wbs_path, tsk_id, "--field", "status"],
+                        capture=True, check=False)
             status = r.stdout.strip()
             if "[xx]" in status:
                 continue
 
-            r = run(f'python3 "{wbs_parse}" "{wbs_path}" "{tsk_id}" --field depends', capture=True, check=False)
+            r = run_cmd(["python3", wbs_parse, wbs_path, tsk_id, "--field", "depends"],
+                        capture=True, check=False)
             depends = r.stdout.strip() or "(none)"
 
-            r = run(f'python3 "{wbs_parse}" "{wbs_path}" "{tsk_id}" --block', capture=True, check=False)
+            r = run_cmd(["python3", wbs_parse, wbs_path, tsk_id, "--block"],
+                        capture=True, check=False)
             task_block = r.stdout
 
             all_task_blocks += task_block + "\n\n"
@@ -325,30 +352,39 @@ exec claude --dangerously-skip-permissions --model {wp_leader_model} "$(<../{wt_
         os.chmod(runner_path, 0o755)
 
         if mux == "tmux" and session:
-            run(f'tmux new-window -t "{session}:" -n "{wt_name}" "{runner_path}"')
+            run_cmd(["tmux", "new-window", "-t", f"{session}:", "-n", wt_name, runner_path])
             # Get the window index for the newly created window (dot in name breaks tmux target)
-            r = run(f"tmux list-windows -t \"{session}\" -F '#{{window_index}}:#{{window_name}}' | grep ':{wt_name}$'",
-                    capture=True, check=False)
-            win_idx = r.stdout.strip().split(":")[0] if r.stdout.strip() else ""
+            r = run_cmd(["tmux", "list-windows", "-t", session,
+                         "-F", "#{window_index}:#{window_name}"],
+                        capture=True, check=False)
+            win_idx = ""
+            for wline in r.stdout.strip().splitlines():
+                if wline.endswith(f":{wt_name}"):
+                    win_idx = wline.split(":")[0]
+                    break
             win_target = f"{session}:{win_idx}" if win_idx else f"{session}:{wt_name}"
-            run(f'tmux set-option -w -t "{win_target}" automatic-rename off')
-            run(f'tmux set-option -w -t "{win_target}" allow-rename off')
-            run(f'tmux set-option -w -t "{win_target}" pane-border-status top')
-            run(f'tmux set-option -w -t "{win_target}" pane-border-format " #{{pane_title}} "')
+            run_cmd(["tmux", "set-option", "-w", "-t", win_target, "automatic-rename", "off"])
+            run_cmd(["tmux", "set-option", "-w", "-t", win_target, "allow-rename", "off"])
+            run_cmd(["tmux", "set-option", "-w", "-t", win_target, "pane-border-status", "top"])
+            run_cmd(["tmux", "set-option", "-w", "-t", win_target,
+                     "pane-border-format", " #{pane_title} "])
 
             wt_abs_path = os.path.join(os.getcwd(), f".claude/worktrees/{wt_name}")
             for wi in range(1, team_size + 1):
-                run(f"tmux split-window -t \"{win_target}\" -h "
-                    f"\"cd '{wt_abs_path}' && claude --dangerously-skip-permissions --model {worker_model}\"")
-            run(f'tmux select-layout -t "{win_target}" tiled')
+                run_cmd(["tmux", "split-window", "-t", win_target, "-h",
+                         f"cd '{wt_abs_path}' && claude --dangerously-skip-permissions --model {worker_model}"])
+            run_cmd(["tmux", "select-layout", "-t", win_target, "tiled"])
 
-            # Pane ID file
+            # Pane ID collection
             pane_ids_file = os.path.join(temp_dir, f"pane-ids-{wt_name}.txt")
-            run(f"tmux list-panes -t \"{win_target}\" -F '#{{pane_index}}:#{{pane_id}}' > \"{pane_ids_file}\"")
+            r = run_cmd(["tmux", "list-panes", "-t", win_target,
+                         "-F", "#{pane_index}:#{pane_id}"],
+                        capture=True, check=False)
+            with open(pane_ids_file, "w", encoding="utf-8") as f:
+                f.write(r.stdout)
 
             # Read pane IDs and set titles
-            with open(pane_ids_file, "r", encoding="utf-8") as f:
-                pane_lines = f.read().strip().splitlines()
+            pane_lines = r.stdout.strip().splitlines()
 
             pane_map = {}
             for line in pane_lines:
@@ -357,17 +393,17 @@ exec claude --dangerously-skip-permissions --model {wp_leader_model} "$(<../{wt_
                     pane_map[parts[0]] = parts[1]
 
             if "0" in pane_map:
-                run(f'tmux select-pane -t "{pane_map["0"]}" -T "{wp_id} Leader"')
+                run_cmd(["tmux", "select-pane", "-t", pane_map["0"], "-T", f"{wp_id} Leader"])
             for wi in range(1, team_size + 1):
                 idx = str(wi)
                 if idx in pane_map:
-                    run(f'tmux select-pane -t "{pane_map[idx]}" -T "worker{wi} idle"')
+                    run_cmd(["tmux", "select-pane", "-t", pane_map[idx], "-T", f"worker{wi} idle"])
 
             print(f"[{wp_id}] spawn: tmux window {wt_name} (leader + {team_size} workers)")
 
         elif mux == "psmux" and session:
             # psmux support — similar commands, may need adjustment
-            run(f'psmux new-window -t "{session}:" -n "{wt_name}" "{runner_path}"', check=False)
+            run_cmd(["psmux", "new-window", "-t", f"{session}:", "-n", wt_name, runner_path], check=False)
             print(f"[{wp_id}] spawn: psmux window {wt_name}")
 
         else:

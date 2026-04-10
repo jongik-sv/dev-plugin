@@ -13,20 +13,22 @@ import subprocess
 import platform
 
 
-def get_active_worktrees() -> list[str]:
-    """Return list of active git worktree paths."""
+def get_active_worktrees() -> list[str] | None:
+    """Return list of active git worktree paths, or None on git failure."""
     try:
         r = subprocess.run(
             ["git", "worktree", "list", "--porcelain"],
             capture_output=True, text=True, check=False,
         )
+        if r.returncode != 0:
+            return None
         paths = []
         for line in r.stdout.splitlines():
             if line.startswith("worktree "):
                 paths.append(line[len("worktree "):].strip())
         return paths
     except FileNotFoundError:
-        return []
+        return None
 
 
 def find_target_processes() -> list[dict]:
@@ -178,6 +180,9 @@ def main():
     dry_run = "--dry-run" in sys.argv
 
     active_worktrees = get_active_worktrees()
+    if active_worktrees is None:
+        print("WARNING: git worktree list 실패 — 고아 프로세스 정리를 건너뜁니다")
+        return
     processes = find_target_processes()
 
     orphans = [p for p in processes if is_orphan(p, active_worktrees)]

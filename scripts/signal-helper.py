@@ -15,12 +15,13 @@ USAGE = """\
 Usage: signal-helper.py <command> <id> <signal-dir> [message]
 
 Commands:
-  start   <id> <dir>            .running file create
-  done    <id> <dir> [message]  .done file atomic create (.running removed)
-  fail    <id> <dir> [message]  .failed file atomic create (.running removed)
-  check   <id> <dir>            status output (running|done|failed|none)
-  wait    <id> <dir> [timeout]  wait for .done or .failed (default timeout: unlimited)
-  heartbeat <id> <dir>          touch .running file
+  start        <id> <dir>            .running file create
+  done         <id> <dir> [message]  .done file atomic create (.running removed)
+  fail         <id> <dir> [message]  .failed file atomic create (.running removed)
+  check        <id> <dir>            status output (running|done|failed|none)
+  wait         <id> <dir> [timeout]  wait for .done or .failed (default timeout: unlimited)
+  wait-running <id> <dir> [timeout]  wait for .running/.done/.failed (default timeout: 120s)
+  heartbeat    <id> <dir>            touch .running file
 
 Examples:
   signal-helper.py start TSK-01-01 /tmp/claude-signals/proj
@@ -28,6 +29,7 @@ Examples:
   signal-helper.py fail TSK-01-01 /tmp/claude-signals/proj "Phase: test, Error: assertion failed"
   signal-helper.py check TSK-01-01 /tmp/claude-signals/proj
   signal-helper.py wait TSK-01-01 /tmp/claude-signals/proj 600
+  signal-helper.py wait-running TSK-01-01 /tmp/claude-signals/proj 120
   signal-helper.py heartbeat TSK-01-01 /tmp/claude-signals/proj
 """
 
@@ -68,7 +70,12 @@ def main():
         content = truncate(msg or "\uc644\ub8cc")
         tmp_path = sig_dir / f"{sig_id}.done.tmp"
         tmp_path.write_text(content + "\n", encoding="utf-8")
-        tmp_path.replace(done_path)
+        try:
+            tmp_path.replace(done_path)
+        except OSError:
+            import shutil
+            shutil.copy2(str(tmp_path), str(done_path))
+            tmp_path.unlink(missing_ok=True)
         running_path.unlink(missing_ok=True)
         print("OK:done")
 
@@ -76,7 +83,12 @@ def main():
         content = truncate(msg or "\uc2e4\ud328")
         tmp_path = sig_dir / f"{sig_id}.failed.tmp"
         tmp_path.write_text(content + "\n", encoding="utf-8")
-        tmp_path.replace(failed_path)
+        try:
+            tmp_path.replace(failed_path)
+        except OSError:
+            import shutil
+            shutil.copy2(str(tmp_path), str(failed_path))
+            tmp_path.unlink(missing_ok=True)
         running_path.unlink(missing_ok=True)
         print("OK:failed")
 
@@ -93,10 +105,17 @@ def main():
             print("none")
 
     elif cmd == "wait":
-        timeout = int(msg) if msg else 0  # 0 = unlimited
+        try:
+            timeout = int(msg) if msg else 0  # 0 = unlimited
+        except ValueError:
+            print(f"ERROR: invalid timeout value: {msg}", file=sys.stderr)
+            sys.exit(1)
         elapsed = 0
         interval = 5
         while not done_path.exists() and not failed_path.exists():
+            if not sig_dir.exists():
+                print(f"ERROR:signal_dir_missing:{sig_id} ({sig_dir})", file=sys.stderr)
+                sys.exit(1)
             time.sleep(interval)
             elapsed += interval
             if elapsed % 300 == 0:
@@ -110,6 +129,30 @@ def main():
         else:
             print(f"FAILED:{sig_id}")
             print(read_truncated(failed_path))
+
+    elif cmd == "wait-running":
+        try:
+            timeout = int(msg) if msg else 120
+        except ValueError:
+            print(f"ERROR: invalid timeout value: {msg}", file=sys.stderr)
+            sys.exit(1)
+        elapsed = 0
+        interval = 2
+        while not running_path.exists() and not done_path.exists() and not failed_path.exists():
+            if not sig_dir.exists():
+                print(f"ERROR:signal_dir_missing:{sig_id} ({sig_dir})", file=sys.stderr)
+                sys.exit(1)
+            time.sleep(interval)
+            elapsed += interval
+            if timeout > 0 and elapsed >= timeout:
+                print(f"timeout:{sig_id} ({elapsed}s)")
+                sys.exit(1)
+        if done_path.exists():
+            print(f"DONE:{sig_id}")
+        elif failed_path.exists():
+            print(f"FAILED:{sig_id}")
+        else:
+            print(f"RUNNING:{sig_id}")
 
     elif cmd == "heartbeat":
         running_path.touch()

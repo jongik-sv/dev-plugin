@@ -27,6 +27,7 @@ WBS 기반 TDD 개발 자동화 플러그인입니다. 설계 → TDD 구현 →
 | `/dev-build` | TDD 구현 (테스트 먼저 → 구현) | `/dev-build [p1] TSK-00-01` |
 | `/dev-test` | 테스트 실행, 실패 시 수정 반복 (최대 3회) | `/dev-test [p1] TSK-00-01` |
 | `/dev-refactor` | 리팩토링 후 테스트 확인 | `/dev-refactor [p1] TSK-00-01` |
+| `/dev-help` | 이 안내 메시지 표시 | `/dev-help` |
 
 ### 서브프로젝트(하위 폴더) 지원
 

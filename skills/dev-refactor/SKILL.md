@@ -35,7 +35,7 @@ Bash 도구로 실행:
 ```bash
 python3 ${CLAUDE_PLUGIN_ROOT}/scripts/wbs-parse.py {DOCS_DIR}/wbs.md {TSK-ID}
 ```
-JSON 출력에서 domain을 확인한다. `{DOCS_DIR}/tasks/{TSK-ID}/design.md`에서 관련 파일 목록을 파악한다.
+JSON 출력에서 domain을 확인한다. `{DOCS_DIR}/tasks/{TSK-ID}/design.md`에서 관련 파일 목록을 파악한다 (없으면 wbs.md 정보만으로 진행).
 
 ### 2. 리팩토링 (서브에이전트 위임)
 Agent 도구로 서브에이전트를 실행한다 (model: 호출자 지정값 또는 `"sonnet"`, mode: "auto"):
@@ -57,18 +57,23 @@ Domain: {domain}
 ## 규칙
 - 동작을 변경하지 않는다 (리팩토링만)
 - 수정 후 반드시 테스트 실행하여 통과 확인
-  - backend: `bundle exec rspec`
+  - backend: `bundle exec rspec --exclude-pattern "spec/features/**/*,spec/system/**/*"`
   - frontend: `npm run test`
-  - sidecar: `uv run pytest`
+  - sidecar: `uv run pytest -m "not e2e"`
+  - fullstack: backend → frontend → sidecar 순차 실행 (fail-fast)
 - 테스트 실패 시 수정을 되돌린다
 
 ## 결과 작성
 {DOCS_DIR}/tasks/{TSK-ID}/refactor.md 파일에 작성한다.
-양식은 .claude/skills/dev-refactor/template.md를 따른다.
+양식은 ${CLAUDE_PLUGIN_ROOT}/skills/dev-refactor/template.md를 따른다.
 ```
 
 ### 3. WBS 상태 업데이트
-- `{DOCS_DIR}/wbs.md`에서 해당 Task의 `- status: [im]`를 `- status: [xx]`로 변경
+Bash 도구로 실행:
+```bash
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/wbs-update-status.py {DOCS_DIR}/wbs.md {TSK-ID} xx
+```
+에러 시 사용자에게 보고 후 종료.
 
 ### 4. 완료 보고
 - 리팩토링 내역 요약과 Task 완료를 사용자에게 출력

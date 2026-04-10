@@ -20,20 +20,20 @@ JSON 출력에서 추출:
 - `options.only`: 특정 단계만 실행 (design|build|test|refactor)
 - `options.model`: 모델 오버라이드 (예: `opus`)
 
-## 모델 선택 (docs/model-selection.md 기준)
+## 모델 선택
 
 `options.model`이 비어 있으면 **Phase별 권장 모델**을 자동 적용한다:
 
 | Phase | 기본 모델 | Agent `model` 값 |
 |-------|-----------|-------------------|
-| Design | Sonnet | `"sonnet"` |
+| Design | Opus | `"opus"` |
 | Build | Sonnet | `"sonnet"` |
 | Test | Haiku | `"haiku"` |
 | Refactor | Sonnet | `"sonnet"` |
 
 `options.model`이 있으면 (예: `opus`) 전 단계 해당 모델.
 
-> 한 줄 기억: 설계·개발·리팩토링은 Sonnet, 테스트는 Haiku, Opus는 예약어.
+> 한 줄 기억: 설계는 Opus, 개발·리팩토링은 Sonnet, 테스트는 Haiku.
 
 ## 실행 절차
 
@@ -62,7 +62,7 @@ python3 ${CLAUDE_PLUGIN_ROOT}/scripts/wbs-parse.py {DOCS_DIR}/wbs.md {TSK-ID} --
 ### 1. Phase: Design (설계)
 서브에이전트 실행:
 - **description**: "{TSK-ID} 설계"
-- **model**: `options.model` 또는 `"sonnet"` (기본)
+- **model**: `options.model` 또는 `"opus"` (기본)
 - **prompt**: dev-design 스킬의 절차를 따른다. Task 블록 전체 + `DOCS_DIR={DOCS_DIR}` 정보를 포함하여 전달.
   1. `{DOCS_DIR}/PRD.md`, `{DOCS_DIR}/TRD.md`를 참조하여 구현 구조 설계
   2. `{DOCS_DIR}/tasks/{TSK-ID}/design.md` 생성 (생성/수정할 파일 목록, 주요 구조, 데이터 흐름)
@@ -74,7 +74,7 @@ python3 ${CLAUDE_PLUGIN_ROOT}/scripts/wbs-parse.py {DOCS_DIR}/wbs.md {TSK-ID} --
 - **description**: "{TSK-ID} TDD 구현"
 - **model**: `options.model` 또는 `"sonnet"` (기본)
 - **prompt**: dev-build 스킬의 절차를 따른다. Task 블록 + design.md 내용 + `DOCS_DIR={DOCS_DIR}` 포함.
-  1. acceptance criteria 기반 테스트 먼저 작성
+  1. design.md의 QA 체크리스트 기반 테스트 먼저 작성
   2. 테스트 통과하는 코드 구현
   3. domain별 테스트 프레임워크로 확인 (backend: RSpec, frontend: Vitest, sidecar: pytest)
   4. `{DOCS_DIR}/wbs.md`에서 status를 `[im]`으로 업데이트
@@ -85,10 +85,11 @@ python3 ${CLAUDE_PLUGIN_ROOT}/scripts/wbs-parse.py {DOCS_DIR}/wbs.md {TSK-ID} --
 - **description**: "{TSK-ID} 테스트"
 - **model**: `options.model` 또는 `"haiku"` (기본)
 - **prompt**: dev-test 스킬의 절차를 따른다. `DOCS_DIR={DOCS_DIR}` 포함.
-  1. 단위 테스트 실행 (backend: `bundle exec rspec` spec/features·system 제외, frontend: `npm run test`, sidecar: `uv run pytest -m "not e2e"`, fullstack: 전부)
-  2. E2E 테스트 실행 (backend: `bundle exec rspec spec/features spec/system`, frontend: `npm run test:e2e` → 실패 시 `npx playwright test`, sidecar: `uv run pytest -m e2e`, fullstack: 전부). 파일/명령 없으면 N/A로 기록하고 계속 진행.
+  1. 단위 테스트 실행 (backend: `bundle exec rspec` spec/features·system 제외, frontend: `npm run test`, sidecar: `uv run pytest -m "not e2e"`, fullstack: backend → frontend → sidecar 순차 실행 (fail-fast), database / infra / docs: N/A)
+  2. E2E 테스트 실행 (backend: `bundle exec rspec spec/features spec/system`, frontend: `npm run test:e2e` → stderr에 "Missing script" 포함 시에만 `npx playwright test` 시도, sidecar: `uv run pytest -m e2e`, fullstack: backend → frontend → sidecar 순차 실행 (fail-fast), database / infra / docs: N/A). 파일/명령 없으면 N/A로 기록하고 계속 진행.
   3. 실패 시 수정 → 단위+E2E 재실행 (최대 3회, 3회차는 Sonnet 자동 승격). 테스트 출력은 `tail -200`으로 제한. 재시도 시 이전 실패 요약만 전달 (전체 로그 전달 금지).
   4. `{DOCS_DIR}/tasks/{TSK-ID}/test-report.md` 생성 (단위·E2E 결과 구분하여 기록)
+  > 참고: Test Phase는 WBS 상태를 변경하지 않는다. 최종 상태 변경(`[xx]`)은 Refactor Phase에서 수행.
 - **mode**: "auto"
 
 ### 4. Phase: Refactor (리팩토링)
@@ -110,6 +111,7 @@ python3 ${CLAUDE_PLUGIN_ROOT}/scripts/cleanup-orphaned.py
 ```
 서브에이전트가 실행한 vitest/tsc 등이 종료되지 않고 남아있으면 CPU를 계속 소비하므로,
 Phase 전환 시마다 실행한다 (특히 Test → Refactor 전환 시 중요).
+Phase 4 (Refactor) 완료 후에도 실행한다 — Refactor 내부에서도 테스트를 실행하므로 고아 프로세스가 남을 수 있다.
 
 ## --only 옵션 처리
 - `--only design`: Phase 1만 실행

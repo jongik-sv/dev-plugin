@@ -26,6 +26,8 @@ Skills delegate deterministic work to Python scripts (cross-platform: Mac/Linux/
 | `scripts/dep-analysis.py` | Dependency level calculation (topological sort) → JSON | dev-team, agent-pool, team-mode |
 | `scripts/signal-helper.py` | Atomic signal file create/check/wait | dev-team, team-mode, agent-pool, DDTR workers |
 | `scripts/wp-setup.py` | Worktree + prompt + tmux setup | dev-team |
+| `scripts/wbs-update-status.py` | WBS Task status update (atomic replace) | dev-design, dev-build, dev-refactor |
+| `scripts/cleanup-orphaned.py` | Orphaned test process cleanup (vitest/tsc) | dev (Phase transition) |
 | `scripts/_platform.py` | Cross-platform utilities (temp dir, JSON escape) | all scripts |
 
 All scripts use `${CLAUDE_PLUGIN_ROOT}/scripts/` as base path. Python 3 standard library only — no pip dependencies.
@@ -33,7 +35,7 @@ All scripts use `${CLAUDE_PLUGIN_ROOT}/scripts/` as base path. Python 3 standard
 ### Skill Layers
 
 **Layer 1 — Generic parallel engines** (no WBS dependency):
-- `agent-pool`: N subagents in one session, slot-pool pattern with signal files (`/tmp/agent-pool-signals/`). No tmux needed.
+- `agent-pool`: N subagents in one session, slot-pool pattern with signal files (`/tmp/agent-pool-signals-{timestamp}/`). No tmux needed.
 - `team-mode`: N independent claude processes in tmux panes, signal-file based task dispatch and pane recycling. Requires tmux.
 
 **Layer 2 — WBS development lifecycle** (operates on `docs/wbs.md` Tasks):
@@ -68,10 +70,14 @@ The `description` field doubles as NL trigger keywords (e.g., "팀모드", "team
 ## Domain-Specific Test Commands
 
 Skills reference these based on the Task's `domain` field:
-- `backend`: `bundle exec rspec`
-- `frontend`: `npm run test`
-- `sidecar`: `uv run pytest`
-- `fullstack`: all of the above
+- `backend` unit: `bundle exec rspec --exclude-pattern "spec/features/**/*,spec/system/**/*"`
+- `backend` E2E: `bundle exec rspec spec/features spec/system`
+- `frontend` unit: `npm run test`
+- `frontend` E2E: `npm run test:e2e` (Missing script → `npx playwright test`)
+- `sidecar` unit: `uv run pytest -m "not e2e"`
+- `sidecar` E2E: `uv run pytest -m e2e`
+- `fullstack`: backend → frontend → sidecar sequential (fail-fast)
+- `database` / `infra` / `docs`: N/A
 
 ## Target Project Requirements
 

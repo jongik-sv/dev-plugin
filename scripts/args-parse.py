@@ -96,11 +96,19 @@ def main():
         elif tok == "--team-size":
             idx += 1
             if idx < len(tokens):
-                opt_team_size = int(tokens[idx])
+                try:
+                    opt_team_size = int(tokens[idx])
+                except ValueError:
+                    print(json.dumps({"error": f"--team-size 값이 숫자가 아닙니다: {tokens[idx]}"}))
+                    sys.exit(1)
         elif tok == "--pool-size":
             idx += 1
             if idx < len(tokens):
-                opt_pool_size = int(tokens[idx])
+                try:
+                    opt_pool_size = int(tokens[idx])
+                except ValueError:
+                    print(json.dumps({"error": f"--pool-size 값이 숫자가 아닙니다: {tokens[idx]}"}))
+                    sys.exit(1)
         elif tok == "--scale":
             idx += 1
             if idx < len(tokens):

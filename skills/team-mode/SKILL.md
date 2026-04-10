@@ -200,6 +200,7 @@ Level 2: Level 1 task에 의존
 ```bash
 mkdir -p {SIGNAL_DIR}
 mkdir -p {SIGNAL_DIR}/discoveries
+mkdir -p {SIGNAL_DIR}/queue
 ```
 
 ### tmux 창 및 pane 생성
@@ -397,6 +398,7 @@ fi
 
 #### DONE 시그널인 경우
 1. **시그널 내용 확인**: `head -50 {SIGNAL_DIR}/{task-id}.done`
+1b. **idle 시그널 정리**: `rm -f {SIGNAL_DIR}/worker-{N}.idle` (남아 있다면 제거)
 2. **컨텍스트 초기화**:
    ```bash
    tmux send-keys -t {paneId} Escape

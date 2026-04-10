@@ -7,12 +7,14 @@ Output format is identical JSON.
 import sys
 import os
 import json
+import re
 
 USAGE = """\
 Usage: dep-analysis.py [input-file]
 
 Input: JSON array (stdin or file), each element:
   {"tsk_id":"TSK-01-01", "depends":"-", "status":"[ ]"}
+  Also accepts "id" as alias for "tsk_id" (e.g. agent-pool format)
 
   - depends: "-", "(none)", "" -> no dependency
   - depends: "TSK-01-01" or "TSK-01-01, TSK-01-02" -> comma separated
@@ -67,7 +69,7 @@ def main():
     dep_map = {}  # tsk_id -> list of dependency IDs
 
     for item in items:
-        tsk_id = item.get("tsk_id", "")
+        tsk_id = item.get("tsk_id", "") or item.get("id", "")
         status = item.get("status", "")
         dep_str = item.get("depends", "")
 
@@ -145,9 +147,6 @@ def main():
     }
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
-
-# Need re for dep parsing
-import re
 
 if __name__ == "__main__":
     main()
