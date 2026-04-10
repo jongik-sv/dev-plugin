@@ -311,15 +311,18 @@ tmux kill-window -t "${SESSION}:${WT_NAME}" 2>/dev/null
 2. **코드 리뷰** (merge 전 품질 게이트 — Codex 활용):
 
    **2-1. Codex 리뷰 실행**:
-   worktree로 이동하여 `codex:review`를 실행한다:
+   Bash 도구로 worktree로 이동한 후 slash command를 실행한다:
    ```bash
    cd .claude/worktrees/${WT_NAME}
    ```
-   Skill 도구로 실행:
-   - skill: `codex:review`
-   - args: `--base main --scope branch --wait`
+   slash command로 실행:
+   `/codex:review --base main --scope branch --wait`
 
-   Codex 리뷰 결과를 `{DOCS_DIR}/tasks/{WP-ID}-review.md`에 기록한다.
+   리뷰 출력 전체를 Write 도구로 저장한다:
+   ```bash
+   mkdir -p {DOCS_DIR}/tasks/{WP-ID}
+   ```
+   저장 경로: `{DOCS_DIR}/tasks/{WP-ID}/review.md`
 
    **2-2. Critical/High 이슈 수정** (이슈가 있을 때만):
    Codex가 Critical 또는 High severity 이슈를 보고한 경우, Agent 도구로 서브에이전트를 실행한다 (model: `"sonnet"`, mode: "auto"):

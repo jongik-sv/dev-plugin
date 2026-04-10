@@ -1,5 +1,4 @@
 ## 할일
-1. cross-platform-migration
 
 ## 좀 있다 할일
 - future-upgrade-plan 업데이트 : 다른 컴퓨터에 각각 개발하는 방안(분산 개발, 다른 구독 요금)
@@ -11,4 +10,5 @@
 - WP 단위 코드 리뷰 (merge 전 품질 게이트) 추가
 - codex:review 사용 문서, 코드 모두 맞는 명령어 사용
 - 스킬 의존성 사전 체크 (tmux, jq, git — 이미 각 진입점에서 체크 구현됨)
+- cross-platform-migration
 
