@@ -4,6 +4,8 @@
 Replaces wp-setup.sh for cross-platform support.
 Eliminates jq dependency — uses Python's json module.
 """
+from __future__ import annotations
+
 import sys
 import os
 import json
@@ -290,20 +292,25 @@ exec claude --dangerously-skip-permissions --model {wp_leader_model} "$(<../{wt_
 
         if mux == "tmux" and session:
             run(f'tmux new-window -t "{session}:" -n "{wt_name}" "{runner_path}"')
-            run(f'tmux set-option -w -t "{session}:{wt_name}" automatic-rename off')
-            run(f'tmux set-option -w -t "{session}:{wt_name}" allow-rename off')
-            run(f'tmux set-option -w -t "{session}:{wt_name}" pane-border-status top')
-            run(f'tmux set-option -w -t "{session}:{wt_name}" pane-border-format " #{{pane_title}} "')
+            # Get the window index for the newly created window (dot in name breaks tmux target)
+            r = run(f"tmux list-windows -t \"{session}\" -F '#{{window_index}}:#{{window_name}}' | grep ':{wt_name}$'",
+                    capture=True, check=False)
+            win_idx = r.stdout.strip().split(":")[0] if r.stdout.strip() else ""
+            win_target = f"{session}:{win_idx}" if win_idx else f"{session}:{wt_name}"
+            run(f'tmux set-option -w -t "{win_target}" automatic-rename off')
+            run(f'tmux set-option -w -t "{win_target}" allow-rename off')
+            run(f'tmux set-option -w -t "{win_target}" pane-border-status top')
+            run(f'tmux set-option -w -t "{win_target}" pane-border-format " #{{pane_title}} "')
 
             wt_abs_path = os.path.join(os.getcwd(), f".claude/worktrees/{wt_name}")
             for wi in range(1, team_size + 1):
-                run(f"tmux split-window -t \"{session}:{wt_name}\" -h "
+                run(f"tmux split-window -t \"{win_target}\" -h "
                     f"\"cd '{wt_abs_path}' && claude --dangerously-skip-permissions --model {worker_model}\"")
-            run(f'tmux select-layout -t "{session}:{wt_name}" tiled')
+            run(f'tmux select-layout -t "{win_target}" tiled')
 
             # Pane ID file
             pane_ids_file = os.path.join(temp_dir, f"pane-ids-{wt_name}.txt")
-            run(f"tmux list-panes -t \"{session}:{wt_name}\" -F '#{{pane_index}}:#{{pane_id}}' > \"{pane_ids_file}\"")
+            run(f"tmux list-panes -t \"{win_target}\" -F '#{{pane_index}}:#{{pane_id}}' > \"{pane_ids_file}\"")
 
             # Read pane IDs and set titles
             with open(pane_ids_file, "r", encoding="utf-8") as f:
