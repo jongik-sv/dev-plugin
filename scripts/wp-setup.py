@@ -53,18 +53,28 @@ def extract_template(file_path: str) -> str:
 
 def substitute_vars(text: str, **kwargs) -> str:
     """Replace {VAR} placeholders in text."""
+    model_override = kwargs.get("model_override", "")
+
+    # Build --model arg for /dev skill invocation
+    model_arg = f"--model {model_override}" if model_override else ""
+
+    # Derive subproject from docs_dir (e.g. "docs/p1.5" → "p1.5", "docs" → "")
+    docs_dir = kwargs.get("docs_dir", "docs")
+    subproject = docs_dir.split("/", 1)[1] if "/" in docs_dir else ""
+
     replacements = {
         "{WP-ID}": kwargs.get("wp_id", ""),
         "{TEAM_SIZE}": str(kwargs.get("team_size", "")),
         "{WT_NAME}": kwargs.get("wt_name", ""),
         "{SHARED_SIGNAL_DIR}": kwargs.get("shared_signal_dir", ""),
         "{TEMP_DIR}": kwargs.get("temp_dir", ""),
-        "{DOCS_DIR}": kwargs.get("docs_dir", ""),
+        "{DOCS_DIR}": docs_dir,
         "{TSK-ID}": kwargs.get("tsk_id", ""),
         "{SESSION}": kwargs.get("session", ""),
         "{WORKER_MODEL}": kwargs.get("worker_model", ""),
+        "{SUBPROJECT}": subproject,
+        "{MODEL_ARG}": model_arg,
     }
-    model_override = kwargs.get("model_override", "")
     model_display = model_override if model_override else "\uc5c6\uc74c"
     replacements['{MODEL_OVERRIDE \ub610\ub294 "\uc5c6\uc74c"}'] = model_display
 
@@ -222,7 +232,6 @@ def main():
                 content = ddtr_prefix + ddtr_raw
                 content = substitute_vars(content, wp_id=wp_id, team_size=team_size,
                                           wt_name=wt_name, tsk_id=tsk_id, **sub_kwargs)
-                content = insert_blocks(content, "{single Task block", task_block)
 
                 tmp_out = ddtr_out + ".tmp"
                 with open(tmp_out, "w", encoding="utf-8") as f:
