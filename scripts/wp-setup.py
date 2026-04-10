@@ -115,7 +115,7 @@ def main():
         config = json.load(f)
 
     project_name = config.get("project_name", "")
-    window_suffix = config.get("window_suffix", "")
+    window_suffix = config.get("window_suffix", "").replace(".", "_")  # dot breaks tmux target syntax (session:window.pane)
     temp_dir = config.get("temp_dir", tempfile.gettempdir())
     shared_signal_dir = config["shared_signal_dir"]
     docs_dir = config.get("docs_dir", "docs")
@@ -203,6 +203,31 @@ def main():
             if os.path.exists(init_file):
                 os.unlink(init_file)
             print(f"[{wp_id}] signals: restore complete ({shared_signal_dir})")
+
+        # --- 2b. Pre-create .done for completed cross-WP dependencies ---
+        # Even if worktrees were removed, the main WBS has [xx] status.
+        for tsk_id in tasks:
+            r = run(f'python3 "{wbs_parse}" "{wbs_path}" "{tsk_id}" --field depends',
+                    capture=True, check=False)
+            depends_str = r.stdout.strip()
+            if not depends_str or depends_str == "-":
+                continue
+            wp_num = wp_id.split("-")[1] if len(wp_id.split("-")) >= 2 else ""
+            for dep in re.split(r'[,\s]+', depends_str):
+                dep = dep.strip()
+                if not dep.startswith("TSK-"):
+                    continue
+                dep_wp_num = dep.split("-")[1] if len(dep.split("-")) >= 2 else ""
+                if dep_wp_num == wp_num:
+                    continue  # intra-WP — handled by WP leader
+                done_path = os.path.join(shared_signal_dir, f"{dep}.done")
+                if os.path.exists(done_path):
+                    continue
+                r2 = run(f'python3 "{wbs_parse}" "{wbs_path}" "{dep}" --field status',
+                         capture=True, check=False)
+                if "[xx]" in r2.stdout:
+                    pathlib.Path(done_path).write_text(
+                        "pre-created: completed in main WBS\n", encoding="utf-8")
 
         # --- 3. DDTR prompt generation + data collection ---
         ddtr_files = []
