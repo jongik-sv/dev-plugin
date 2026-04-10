@@ -207,13 +207,17 @@ python3 {PLUGIN_ROOT}/scripts/signal-helper.py wait {의존-TSK-ID} {SHARED_SIGN
    rm -f {SHARED_SIGNAL_DIR}/{WT_NAME}.initialized
    ```
 
-1. **미커밋 변경 확인 및 커밋**:
+1. **코드 품질 개선** (모든 Task 성공 시에만):
+   `/simplify` 스킬을 호출하여 WP 내 변경 코드를 정리한다.
+   일부 Task가 실패했거나 스킵된 경우 이 단계를 건너뛴다.
+
+2. **미커밋 변경 확인 및 커밋**:
    ```bash
    git status --short
    ```
    미커밋 변경이 있으면 `git add` + `git commit`
 
-2. **팀리더에게 완료 보고** (시그널 파일, **절대 경로 사용**):
+3. **팀리더에게 완료 보고** (시그널 파일, **절대 경로 사용**):
    > 시그널 파일 이름은 `{WT_NAME}.done` (= `{WP-ID}{WINDOW_SUFFIX}.done`)
 
    **모든 Task 성공 시**:
@@ -243,7 +247,7 @@ python3 {PLUGIN_ROOT}/scripts/signal-helper.py wait {의존-TSK-ID} {SHARED_SIGN
    > ⚠️ `{SHARED_SIGNAL_DIR}`은 팀리더가 프롬프트에 포함시킨 절대 경로이다. 상대 경로(`../.signals/`) 사용 금지.
    > ⚠️ 실패 Task가 있더라도 반드시 `.done` 시그널을 생성하라. 팀리더가 무한 대기하는 것을 방지한다.
 
-3. **팀원 종료 및 리더 자신 종료**: 위 "Worker 종료" 절차를 따른다
+4. **팀원 종료 및 리더 자신 종료**: 위 "Worker 종료" 절차를 따른다
 
 **⚠️ 금지사항**:
 - 시그널 파일 생성 후 추가 입력을 기다리지 마라

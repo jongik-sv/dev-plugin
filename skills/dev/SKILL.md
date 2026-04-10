@@ -85,9 +85,10 @@ python3 ${CLAUDE_PLUGIN_ROOT}/scripts/wbs-parse.py {DOCS_DIR}/wbs.md {TSK-ID} --
 - **description**: "{TSK-ID} 테스트"
 - **model**: `options.model` 또는 `"haiku"` (기본)
 - **prompt**: dev-test 스킬의 절차를 따른다. `DOCS_DIR={DOCS_DIR}` 포함.
-  1. 전체 테스트 실행
-  2. 실패 시 수정 → 재실행 (최대 3회, 3회차는 Sonnet 자동 승격). 테스트 출력은 `tail -200`으로 제한. 재시도 시 이전 실패 요약만 전달 (전체 로그 전달 금지).
-  3. `{DOCS_DIR}/tasks/{TSK-ID}/test-report.md` 생성
+  1. 단위 테스트 실행 (backend: `bundle exec rspec` spec/features·system 제외, frontend: `npm run test`, sidecar: `uv run pytest -m "not e2e"`, fullstack: 전부)
+  2. E2E 테스트 실행 (backend: `bundle exec rspec spec/features spec/system`, frontend: `npm run test:e2e` → 실패 시 `npx playwright test`, sidecar: `uv run pytest -m e2e`, fullstack: 전부). 파일/명령 없으면 N/A로 기록하고 계속 진행.
+  3. 실패 시 수정 → 단위+E2E 재실행 (최대 3회, 3회차는 Sonnet 자동 승격). 테스트 출력은 `tail -200`으로 제한. 재시도 시 이전 실패 요약만 전달 (전체 로그 전달 금지).
+  4. `{DOCS_DIR}/tasks/{TSK-ID}/test-report.md` 생성 (단위·E2E 결과 구분하여 기록)
 - **mode**: "auto"
 
 ### 4. Phase: Refactor (리팩토링)
