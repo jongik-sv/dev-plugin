@@ -102,6 +102,7 @@ mv {SHARED_SIGNAL_DIR}/{WT_NAME}.initialized.tmp {SHARED_SIGNAL_DIR}/{WT_NAME}.i
 
 ⚠️ tmux send-keys는 긴 문자열을 잘라버린다. 프롬프트를 반드시 파일로 전달한다.
 ⚠️ pane 식별은 반드시 pane_id(`%N` 형식, 예: `%7`)를 사용한다.
+⚠️ **`{TEMP_DIR}/task-{TSK-ID}.txt` 파일은 셋업 스크립트가 사전 생성한 DDTR 프롬프트이다. 절대 덮어쓰거나 새로 작성하지 마라.** 워커는 이 파일을 읽고 `/dev` 스킬을 실행한다. 리더가 자체 프롬프트를 만들면 스킬 호출이 누락된다.
 
 **할당 절차** (각 task에 대해):
 ```bash
