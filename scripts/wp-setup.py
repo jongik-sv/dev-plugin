@@ -85,6 +85,9 @@ def substitute_vars(text: str, **kwargs) -> str:
         "{WORKER_MODEL}": kwargs.get("worker_model", ""),
         "{SUBPROJECT}": subproject,
         "{MODEL_ARG}": model_arg,
+        "{PLUGIN_ROOT}": kwargs.get("plugin_root", ""),
+        "{INIT_FILE}": kwargs.get("init_file", ""),
+        "{CLEANUP_FILE}": kwargs.get("cleanup_file", ""),
     }
     model_display = model_override if model_override else "\uc5c6\uc74c"
     replacements['{MODEL_OVERRIDE}'] = model_display
@@ -145,6 +148,8 @@ def main():
 
     ddtr_template_path = os.path.join(plugin_root, "skills/dev-team/references/ddtr-prompt-template.md")
     wp_leader_template_path = os.path.join(plugin_root, "skills/dev-team/references/wp-leader-prompt.md")
+    wp_leader_init_path = os.path.join(plugin_root, "skills/dev-team/references/wp-leader-init.md")
+    wp_leader_cleanup_path = os.path.join(plugin_root, "skills/dev-team/references/wp-leader-cleanup.md")
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
     wbs_parse = os.path.join(script_dir, "wbs-parse.py")
@@ -152,6 +157,8 @@ def main():
     # Template caching
     ddtr_raw = extract_template(ddtr_template_path)
     wp_leader_raw = extract_template(wp_leader_template_path)
+    wp_leader_init_raw = extract_template(wp_leader_init_path)
+    wp_leader_cleanup_raw = extract_template(wp_leader_cleanup_path)
 
     ddtr_prefix = ""
     if model_override:
@@ -164,6 +171,7 @@ def main():
         session=session,
         worker_model=worker_model,
         model_override=model_override,
+        plugin_root=plugin_root,
     )
 
     mux = detect_mux()
@@ -322,14 +330,20 @@ def main():
             f.write(manifest_content)
         print(f"[{wp_id}] manifest: {manifest_path}")
 
-        # --- 5. WP leader prompt ---
+        # --- 5. WP leader prompt (core + init + cleanup) ---
+        init_file_abs = os.path.abspath(f".claude/worktrees/{wt_name}-init.txt")
+        cleanup_file_abs = os.path.abspath(f".claude/worktrees/{wt_name}-cleanup.txt")
+        var_kwargs = dict(wp_id=wp_id, team_size=team_size,
+                          wt_name=wt_name, tsk_id="",
+                          init_file=init_file_abs, cleanup_file=cleanup_file_abs,
+                          **sub_kwargs)
+
         wp_leader_out = f".claude/worktrees/{wt_name}-prompt.txt"
         if os.path.isfile(wp_leader_out):
             print(f"[{wp_id}] leader: reuse ({wp_leader_out})")
         else:
             content = wp_leader_raw
-            content = substitute_vars(content, wp_id=wp_id, team_size=team_size,
-                                      wt_name=wt_name, tsk_id="", **sub_kwargs)
+            content = substitute_vars(content, **var_kwargs)
             content = insert_blocks(
                 content,
                 "[WP \ub0b4 \ubaa8\ub4e0 Task \ube14\ub85d", all_task_blocks,
@@ -340,6 +354,26 @@ def main():
                 f.write(content)
             os.replace(tmp_out, wp_leader_out)
             print(f"[{wp_id}] leader: {wp_leader_out}")
+
+        # Init file (read once at startup)
+        wp_init_out = f".claude/worktrees/{wt_name}-init.txt"
+        if not os.path.isfile(wp_init_out):
+            init_content = substitute_vars(wp_leader_init_raw, **var_kwargs)
+            tmp_out = wp_init_out + ".tmp"
+            with open(tmp_out, "w", encoding="utf-8") as f:
+                f.write(init_content)
+            os.replace(tmp_out, wp_init_out)
+            print(f"[{wp_id}] leader-init: {wp_init_out}")
+
+        # Cleanup file (read at end)
+        wp_cleanup_out = f".claude/worktrees/{wt_name}-cleanup.txt"
+        if not os.path.isfile(wp_cleanup_out):
+            cleanup_content = substitute_vars(wp_leader_cleanup_raw, **var_kwargs)
+            tmp_out = wp_cleanup_out + ".tmp"
+            with open(tmp_out, "w", encoding="utf-8") as f:
+                f.write(cleanup_content)
+            os.replace(tmp_out, wp_cleanup_out)
+            print(f"[{wp_id}] leader-cleanup: {wp_cleanup_out}")
 
         # --- 6. Runner + tmux/psmux spawn ---
         runner_path = f".claude/worktrees/{wt_name}-run.sh"

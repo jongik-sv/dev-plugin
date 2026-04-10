@@ -24,13 +24,7 @@ description: "에이전트 풀(agent pool, 에이전트 pool) — N개의 서브
 
 ### 시그널 프로토콜
 
-task 상태는 시그널 파일로 추적한다. `mv`를 사용하여 원자적으로 전환한다.
-
-| 상태 | 파일 | 생성 시점 |
-|------|------|-----------|
-| 실행 중 | `{task-id}.running` | task 시작 직후 |
-| 완료 | `{task-id}.done` | task 성공 완료 시 |
-| 실패 | `{task-id}.failed` | task 실패 시 |
+시그널 파일(`.running`/`.done`/`.failed`)로 task 상태를 추적한다. 전체 프로토콜: `${CLAUDE_PLUGIN_ROOT}/references/signal-protocol.md` 참조.
 
 ## 1. Task 입력
 

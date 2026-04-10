@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
-"""cleanup-orphaned.py — Kill orphaned vitest/tsc processes not belonging to active worktrees.
+"""cleanup-orphaned.py — Kill orphaned test processes not belonging to active worktrees.
 
 Cross-platform: macOS, Linux, Windows.
 Usage:
-  python3 cleanup-orphaned.py [--dry-run]
+  python3 cleanup-orphaned.py [--dry-run] [--processes vitest,tsc]
+
+If --processes is not given, reads Cleanup Processes from wbs.md Dev Config.
 """
 from __future__ import annotations
 
 import os
+import re
 import sys
 import subprocess
 import platform
@@ -31,8 +34,11 @@ def get_active_worktrees() -> list[str] | None:
         return None
 
 
-def find_target_processes() -> list[dict]:
-    """Find vitest/tsc processes. Returns list of {pid, name, cwd}."""
+def find_target_processes(keywords: list) -> list[dict]:
+    """Find processes matching keywords. Returns list of {pid, name, cwd}."""
+    if not keywords:
+        return []
+    kw_lower = tuple(kw.lower() for kw in keywords)
     system = platform.system()
     results = []
 
@@ -54,7 +60,7 @@ def find_target_processes() -> list[dict]:
                     continue
                 cmdline = parts[1]
                 pid_str = parts[2].strip()
-                if any(kw in cmdline.lower() for kw in ("vitest", "tsc")):
+                if any(kw in cmdline.lower() for kw in kw_lower):
                     cwd = _get_cwd_windows(pid_str)
                     results.append({"pid": int(pid_str), "name": cmdline[:80], "cwd": cwd})
         except FileNotFoundError:
@@ -72,7 +78,7 @@ def find_target_processes() -> list[dict]:
                     if "|" not in line:
                         continue
                     pid_str, cmdline = line.split("|", 1)
-                    if any(kw in cmdline.lower() for kw in ("vitest", "tsc")):
+                    if any(kw in cmdline.lower() for kw in kw_lower):
                         cwd = _get_cwd_windows(pid_str.strip())
                         results.append({"pid": int(pid_str), "name": cmdline[:80], "cwd": cwd})
             except FileNotFoundError:
@@ -93,7 +99,7 @@ def find_target_processes() -> list[dict]:
                 if len(parts) < 3:
                     continue
                 pid_str, ppid_str, cmd = parts
-                if any(kw in cmd.lower() for kw in ("vitest", "tsc")):
+                if any(kw in cmd.lower() for kw in kw_lower):
                     cwd = _get_cwd_unix(pid_str)
                     results.append({
                         "pid": int(pid_str),
@@ -176,14 +182,67 @@ def kill_process(pid: int) -> bool:
         return False
 
 
+def _load_cleanup_processes() -> list:
+    """Try to load cleanup_processes from wbs.md Dev Config."""
+    # Search for wbs.md in common locations
+    candidates = ["docs/wbs.md"]
+    # Also check docs/*/wbs.md for subprojects
+    if os.path.isdir("docs"):
+        for entry in os.listdir("docs"):
+            p = os.path.join("docs", entry, "wbs.md")
+            if os.path.isfile(p):
+                candidates.append(p)
+
+    for path in candidates:
+        if not os.path.isfile(path):
+            continue
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                text = f.read()
+            # Inline minimal parser for Cleanup Processes line
+            in_config = False
+            in_cleanup = False
+            for line in text.splitlines():
+                if re.match(r'^##\s+Dev\s+Config\s*$', line, re.IGNORECASE):
+                    in_config = True
+                    continue
+                if in_config and re.match(r'^##\s+', line) and not line.strip().startswith("###"):
+                    if not re.match(r'^##\s+Dev\s+Config', line, re.IGNORECASE):
+                        break
+                if in_config and re.match(r'^###\s+Cleanup\s+Processes', line, re.IGNORECASE):
+                    in_cleanup = True
+                    continue
+                if in_cleanup and line.strip().startswith("###"):
+                    break
+                if in_cleanup and line.strip() and not line.strip().startswith("---"):
+                    return [p.strip() for p in line.strip().split(",") if p.strip()]
+        except OSError:
+            continue
+    return []
+
+
 def main():
     dry_run = "--dry-run" in sys.argv
+
+    # Parse --processes arg
+    keywords = None
+    for i, arg in enumerate(sys.argv):
+        if arg == "--processes" and i + 1 < len(sys.argv):
+            keywords = [p.strip() for p in sys.argv[i + 1].split(",") if p.strip()]
+
+    # If not provided, try to read from wbs.md Dev Config
+    if keywords is None:
+        keywords = _load_cleanup_processes()
+
+    if not keywords:
+        print("정리 대상 프로세스 없음 (Dev Config에 'Cleanup Processes' 미설정 또는 --processes 미지정)")
+        return
 
     active_worktrees = get_active_worktrees()
     if active_worktrees is None:
         print("WARNING: git worktree list 실패 — 고아 프로세스 정리를 건너뜁니다")
         return
-    processes = find_target_processes()
+    processes = find_target_processes(keywords)
 
     orphans = [p for p in processes if is_orphan(p, active_worktrees)]
 

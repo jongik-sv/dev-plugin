@@ -6,7 +6,6 @@
 너는 {WP-ID} WP 리더이다.
 
 ⚠️ 중요: 팀원은 반드시 tmux pane으로만 생성하라. Agent 도구로 팀원을 생성하지 마라.
-⚠️ 중요: 가장 먼저 아래 "초기화" 섹션을 실행하여 tmux pane을 생성하라.
 ⚠️ 중요: tmux 명령에 반드시 세션 prefix(`{SESSION}:{WT_NAME}`)를 사용하라. pane 식별은 pane_id(`%N`)를 사용하라.
 
 ## 상태 자가 진단 (매 응답 시작 시 반드시 실행)
@@ -22,15 +21,20 @@ echo "PANE_CHECK: actual=${PANE_COUNT}, expected=${EXPECTED}"
 
 **2단계: 판단**:
 - `PANE_COUNT >= EXPECTED` → 초기화 완료. "pane ID 수집"으로 직행.
-- `PANE_COUNT < EXPECTED` → **WORKER_MISSING**. "1. 초기화" 섹션에서 부족분 생성.
+- `PANE_COUNT < EXPECTED` → **WORKER_MISSING**. 초기화 파일의 "1. 팀원 pane 확인 및 생성" 실행.
 
 ⚠️ **절대 규칙**: WORKER_MISSING이면 절대 직접 개발(코딩)하지 마라. 초기화를 완료하라.
+
+## 초기화 (시작 시 1회 실행)
+
+`{INIT_FILE}` 파일을 Read 도구로 읽고 초기화 절차를 따르라.
+완료 후 "2. Task 할당"으로 진행한다.
 
 ## 경로 변수
 - DOCS_DIR = {DOCS_DIR}
   (서브프로젝트가 없으면 `docs`, 있으면 `docs/{SUBPROJECT}`. 모든 wbs/PRD/TRD/tasks 경로는 이 변수 기준)
-- WT_NAME = {WP-ID}{WINDOW_SUFFIX}
-  (tmux window 이름, signal key, worktree 식별자)
+- WT_NAME = {WT_NAME}
+  (tmux window 이름, signal key, worktree 식별자. `{WP-ID}` + WINDOW_SUFFIX 조합)
 - MODEL_OVERRIDE = {MODEL_OVERRIDE}
   (`--model opus` 지정 시 `"opus"`, 미지정 시 `"없음"`. 없으면 DDTR 프롬프트에서 Phase별 기본 모델 적용: 설계=opus, 개발/리팩토링=sonnet, 테스트=haiku)
 
@@ -44,65 +48,11 @@ echo "PANE_CHECK: actual=${PANE_COUNT}, expected=${EXPECTED}"
 ## 실행 계획
 [팀리더가 산출한 레벨별 실행 계획]
 
-## 재개 모드 처리
-
-Task를 할당하기 전에 worktree 내 {DOCS_DIR}/wbs.md를 읽어 각 Task의 status를 확인한다:
-- `[xx]` 상태: 할당하지 않는다. `.done` 시그널이 없으면 생성한다:
-  `echo "resumed" > {SHARED_SIGNAL_DIR}/<해당-TSK-ID>.done`
-- `[dd]`, `[im]` 상태: 팀원에게 할당한다. DDTR 프롬프트의 "상태 확인 및 Phase 재개" 로직이 중간 Phase부터 재개한다.
-- `[ ]` 상태: 정상 할당.
-
-모든 Task가 이미 `[xx]`이면 즉시 완료 보고(시그널) 후 종료한다.
-
-## WP 리더 역할 — 팀원 관리 절차
-
-### 1. 초기화 — 팀원 pane 확인 및 생성
-
-⚠️ 가장 먼저 이 섹션을 실행하라. 팀원은 tmux pane으로만 생성한다.
-
-**변수 확인**:
-- SESSION = {SESSION}
-- WORKER_MODEL = {WORKER_MODEL}
-- SIGNAL_DIR = {SHARED_SIGNAL_DIR} (**team-mode 기본값 사용 금지**)
-- MAX_RETRIES = 1
-
-**pane 존재 확인** (wp-setup.py가 사전 생성한 경우 건너뜀):
-```bash
-ACTUAL=$(tmux list-panes -t "{SESSION}:{WT_NAME}" -F '#{pane_id}' | wc -l | tr -d ' ')
-EXPECTED=$(({TEAM_SIZE} + 1))
-echo "현재 pane: ${ACTUAL}, 필요: ${EXPECTED}"
-```
-
-- `ACTUAL >= EXPECTED` → pane 이미 충분. **pane 생성을 건너뛰고** "pane ID 수집"으로 진행.
-- `ACTUAL < EXPECTED` → 부족분만 생성:
-
-**pane 생성** (부족분만):
-```bash
-NEED=$(($EXPECTED - $ACTUAL))
-for i in $(seq 1 $NEED); do
-  tmux split-window -t "{SESSION}:{WT_NAME}" -h \
-    "cd $(pwd) && claude --dangerously-skip-permissions --model {WORKER_MODEL}"
-done
-tmux select-layout -t "{SESSION}:{WT_NAME}" tiled
-```
-
-**pane ID 수집** (이후 모든 명령에 pane_id 사용):
-```bash
-PANE_IDS=($(tmux list-panes -t "{SESSION}:{WT_NAME}" -F '#{pane_id}'))
-# PANE_IDS[0]=리더(자신), PANE_IDS[1~]=worker
-```
-
-**초기화 완료 시그널 생성**:
-```bash
-echo "initialized at $(date)" > {SHARED_SIGNAL_DIR}/{WT_NAME}.initialized.tmp
-mv {SHARED_SIGNAL_DIR}/{WT_NAME}.initialized.tmp {SHARED_SIGNAL_DIR}/{WT_NAME}.initialized
-```
-
-### 2. Task 할당 — 3단계 파일 기반
+## 2. Task 할당 — 3단계 파일 기반
 
 ⚠️ tmux send-keys는 긴 문자열을 잘라버린다. 프롬프트를 반드시 파일로 전달한다.
 ⚠️ pane 식별은 반드시 pane_id(`%N` 형식, 예: `%7`)를 사용한다.
-⚠️ **`{TEMP_DIR}/task-{TSK-ID}.txt` 파일은 셋업 스크립트가 사전 생성한 DDTR 프롬프트이다. 절대 덮어쓰거나 새로 작성하지 마라.** 워커는 이 파일을 읽고 `/dev` 스킬을 실행한다. 리더가 자체 프롬프트를 만들면 스킬 호출이 누락된다.
+⚠️ **`{TEMP_DIR}/task-<TSK-ID>.txt` 파일은 셋업 스크립트가 사전 생성한 DDTR 프롬프트이다. 절대 덮어쓰거나 새로 작성하지 마라.** 워커는 이 파일을 읽고 `/dev` 스킬을 실행한다. 리더가 자체 프롬프트를 만들면 스킬 호출이 누락된다.
 
 **할당 절차** (각 task에 대해):
 
@@ -129,7 +79,7 @@ python3 {PLUGIN_ROOT}/scripts/signal-helper.py wait-running {task-id} {SHARED_SI
 
 **초기 할당**: Level 0 task부터 worker에게 각 1건씩 할당. prompt_file은 실행 계획에 기재된 경로(예: `{TEMP_DIR}/task-<각 TSK-ID>.txt`).
 
-### 3. 모니터링 및 pane 재활용
+## 3. 모니터링 및 pane 재활용
 
 **시그널 감지** — 각 task별로 Bash `run_in_background`로 감시:
 ```bash
@@ -160,98 +110,21 @@ cat {SHARED_SIGNAL_DIR}/{task-id}.done 2>/dev/null || cat {SHARED_SIGNAL_DIR}/{t
 2. 재시도 횟수 < MAX_RETRIES: `.failed` 삭제 → 컨텍스트 초기화 → 같은 task 재할당
 3. 재시도 초과: task를 실패로 확정, 의존 task 스킵 → 다음 task 할당
 
-⚠️ **필수 규칙**: 1건씩 할당 (복수 할당 금지). 시그널 감지 전 /clear 금지. 흐름: 1건 할당 → 시그널 대기 → /clear → 다음 1건.
-
-### 4. Worker 종료
-
-모든 task 완료/실패 처리 후, 각 worker pane에 대해 **개별 Bash 호출**로 종료한다 (sleep 사용 금지):
-```bash
-tmux send-keys -t {paneId} Escape
-```
-```bash
-tmux send-keys -t {paneId} '/exit' Enter
-```
-모든 worker에 `/exit`을 보낸 뒤, 프로세스 정리:
-```bash
-for pane in "${PANE_IDS[@]:1}"; do
-  PANE_PID=$(tmux display-message -t "$pane" -p '#{pane_pid}' 2>/dev/null)
-  [ -n "$PANE_PID" ] && pkill -TERM -P "$PANE_PID" 2>/dev/null
-done
-```
-
-### 팀원 실패 처리
-
-팀원이 `.failed` 시그널을 보내면:
-1. `.failed` 내용을 읽어 실패 Phase와 에러 확인
-2. 재시도 횟수 < MAX_RETRIES이면: `.failed` 삭제 → /clear → 같은 Task 재할당
-3. 재시도 초과이면: Task를 실패로 확정, 의존 Task는 스킵 처리
-
 팀원이 시그널 없이 종료한 경우 (pane 닫힘 또는 하트비트 stale):
 - FAILED와 동일하게 처리
 
-### cross-WP 의존 Task 처리 (team-mode에 없는 WBS 전용 로직)
+⚠️ **필수 규칙**: 1건씩 할당 (복수 할당 금지). 시그널 감지 전 /clear 금지. 흐름: 1건 할당 → 시그널 대기 → /clear → 다음 1건.
+
+### cross-WP 의존 Task 처리
 
 cross-WP 의존이 있는 Task를 할당하기 전, signal-helper로 대기한다 (**절대 경로 사용**, Bash `run_in_background`):
 ```bash
 python3 {PLUGIN_ROOT}/scripts/signal-helper.py wait {의존-TSK-ID} {SHARED_SIGNAL_DIR} 14400
 ```
 
-### 최종 정리 (자동 해산)
+## 최종 정리 (모든 Task 완료 후)
 
-⚠️ **필수**: 모든 Task 완료 후 반드시 아래 순서대로 실행하라. 대기하거나 사용자 입력을 기다리지 마라.
-
-모든 Task의 시그널 파일을 확인한 후:
-
-0. **초기화 시그널 정리**:
-   ```bash
-   rm -f {SHARED_SIGNAL_DIR}/{WT_NAME}.initialized
-   ```
-
-1. **코드 품질 개선** (모든 Task 성공 시에만):
-   `/simplify` 스킬을 호출하여 WP 내 변경 코드를 정리한다.
-   일부 Task가 실패했거나 스킵된 경우 이 단계를 건너뛴다.
-
-2. **미커밋 변경 확인 및 커밋**:
-   ```bash
-   git status --short
-   ```
-   미커밋 변경이 있으면 `git add` + `git commit`
-
-3. **팀리더에게 완료 보고** (시그널 파일, **절대 경로 사용**):
-   > 시그널 파일 이름은 `{WT_NAME}.done` (= `{WP-ID}{WINDOW_SUFFIX}.done`)
-
-   **모든 Task 성공 시**:
-   ```bash
-   cat > {SHARED_SIGNAL_DIR}/{WT_NAME}.done.tmp << 'EOF'
-   [{WT_NAME} 완료]
-   - 완료 Task: {완료된 TSK-ID 목록}
-   - 테스트: {통과 수}/{전체 수}
-   - 커밋: {최신 커밋 해시}
-   - 특이사항: {있으면 기록, 없으면 "없음"}
-   EOF
-   mv {SHARED_SIGNAL_DIR}/{WT_NAME}.done.tmp {SHARED_SIGNAL_DIR}/{WT_NAME}.done
-   ```
-
-   **일부 Task 실패 시에도 반드시 보고** (나머지 Task가 모두 완료/실패/스킵된 상태):
-   ```bash
-   cat > {SHARED_SIGNAL_DIR}/{WT_NAME}.done.tmp << 'EOF'
-   [{WT_NAME} 부분 완료]
-   - 완료 Task: {완료된 TSK-ID 목록}
-   - 실패 Task: {실패한 TSK-ID 목록}
-   - 스킵 Task: {의존 실패로 스킵된 TSK-ID 목록}
-   - 커밋: {최신 커밋 해시}
-   - 특이사항: {실패 원인 요약}
-   EOF
-   mv {SHARED_SIGNAL_DIR}/{WT_NAME}.done.tmp {SHARED_SIGNAL_DIR}/{WT_NAME}.done
-   ```
-   > ⚠️ `{SHARED_SIGNAL_DIR}`은 팀리더가 프롬프트에 포함시킨 절대 경로이다. 상대 경로(`../.signals/`) 사용 금지.
-   > ⚠️ 실패 Task가 있더라도 반드시 `.done` 시그널을 생성하라. 팀리더가 무한 대기하는 것을 방지한다.
-
-4. **팀원 종료 및 리더 자신 종료**: 위 "Worker 종료" 절차를 따른다
-
-**⚠️ 금지사항**:
-- 시그널 파일 생성 후 추가 입력을 기다리지 마라
-- 모든 Task 완료 → 시그널 생성 → 팀원 종료 → 자신 종료를 **중단 없이 연속 실행**하라
+`{CLEANUP_FILE}` 파일을 Read 도구로 읽고 정리 절차를 따르라.
 
 ## 규칙
 - 같은 작업 디렉토리에서 여러 팀원이 작업하므로 파일 충돌에 주의

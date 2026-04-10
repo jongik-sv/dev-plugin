@@ -27,8 +27,8 @@ Skills delegate deterministic work to Python scripts (cross-platform: Mac/Linux/
 | `scripts/signal-helper.py` | Atomic signal file create/check/wait | dev-team, team-mode, agent-pool, DDTR workers |
 | `scripts/wp-setup.py` | Worktree + prompt + tmux setup | dev-team |
 | `scripts/wbs-update-status.py` | WBS Task status update (atomic replace) | dev-design, dev-build, dev-refactor |
-| `scripts/cleanup-orphaned.py` | Orphaned test process cleanup (vitest/tsc) | dev (Phase transition) |
-| `scripts/_platform.py` | Cross-platform utilities (temp dir, JSON escape) | all scripts |
+| `scripts/cleanup-orphaned.py` | Orphaned test process cleanup (Dev Config driven) | dev (Phase transition) |
+| `scripts/_platform.py` | Cross-platform utilities (temp dir, JSON escape) | available for scripts |
 
 All scripts use `${CLAUDE_PLUGIN_ROOT}/scripts/` as base path. Python 3 standard library only — no pip dependencies.
 
@@ -69,15 +69,14 @@ The `description` field doubles as NL trigger keywords (e.g., "팀모드", "team
 
 ## Domain-Specific Test Commands
 
-Skills reference these based on the Task's `domain` field:
-- `backend` unit: `bundle exec rspec --exclude-pattern "spec/features/**/*,spec/system/**/*"`
-- `backend` E2E: `bundle exec rspec spec/features spec/system`
-- `frontend` unit: `npm run test`
-- `frontend` E2E: `npm run test:e2e` (Missing script → `npx playwright test`)
-- `sidecar` unit: `uv run pytest -m "not e2e"`
-- `sidecar` E2E: `uv run pytest -m e2e`
-- `fullstack`: backend → frontend → sidecar sequential (fail-fast)
-- `database` / `infra` / `docs`: N/A
+Test commands, design guidance, and cleanup process names are **project-configured** in `{DOCS_DIR}/wbs.md` under the `## Dev Config` section. Skills load this config at runtime via `wbs-parse.py --dev-config`. See `references/test-commands.md` for the config loading protocol.
+
+### Shared Reference Files
+
+| File | Purpose |
+|------|---------|
+| `references/test-commands.md` | Domain-specific unit/E2E test commands | 
+| `references/signal-protocol.md` | Signal file protocol (`.running`/`.done`/`.failed`) |
 
 ## Target Project Requirements
 

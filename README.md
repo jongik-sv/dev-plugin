@@ -277,14 +277,35 @@ WBS와 무관하게 임의의 작업을 병렬로 실행합니다.
 | `[im]` | 구현 완료 (implementation) |
 | `[xx]` | 전체 완료 |
 
-### domain별 테스트 프레임워크
+### Dev Config (프로젝트별 설정)
 
-| domain | 프레임워크 | 실행 명령 |
-|--------|-----------|-----------|
-| backend | RSpec | `bundle exec rspec` |
-| frontend | Vitest | `npm run test` |
-| sidecar | pytest | `uv run pytest` |
-| fullstack | 위 전부 | 순차 실행 |
+`docs/wbs.md` 상단에 `## Dev Config` 섹션을 추가하여 domain별 테스트 명령, 설계 가이드, 정리 대상 프로세스를 정의합니다.
+`/wbs`로 WBS를 생성하면 TRD 기반으로 자동 생성됩니다.
+
+```markdown
+## Dev Config
+
+### Domains
+| domain | description | unit-test | e2e-test |
+|--------|-------------|-----------|----------|
+| backend | Server API | `your-unit-test-cmd` | `your-e2e-test-cmd` |
+| frontend | Client UI | `your-unit-test-cmd` | `your-e2e-test-cmd` |
+| database | Data layer | - | - |
+| fullstack | Full stack | - | - |
+
+### Design Guidance
+| domain | architecture |
+|--------|-------------|
+| backend | Your backend architecture description |
+| frontend | Your frontend architecture description |
+
+### Cleanup Processes
+node, vitest
+```
+
+- `unit-test`/`e2e-test`에 `-`를 쓰면 해당 테스트는 N/A로 처리됩니다
+- `fullstack` domain은 테스트 명령이 있는 모든 domain을 순차 실행합니다 (fail-fast)
+- `## Dev Config` 섹션이 없으면 스킬 실행 시 에러와 함께 템플릿이 안내됩니다
 
 ---
 
