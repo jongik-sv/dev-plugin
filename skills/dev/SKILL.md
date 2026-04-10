@@ -101,6 +101,15 @@ python3 ${CLAUDE_PLUGIN_ROOT}/scripts/wbs-parse.py {DOCS_DIR}/wbs.md {TSK-ID} --
   4. `{DOCS_DIR}/wbs.md`에서 status를 `[xx]`로 업데이트
 - **mode**: "auto"
 
+### Phase 간 프로세스 정리
+
+각 Phase 서브에이전트 완료 직후, 고아 테스트 프로세스를 정리한다:
+```bash
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/cleanup-orphaned.py
+```
+서브에이전트가 실행한 vitest/tsc 등이 종료되지 않고 남아있으면 CPU를 계속 소비하므로,
+Phase 전환 시마다 실행한다 (특히 Test → Refactor 전환 시 중요).
+
 ## --only 옵션 처리
 - `--only design`: Phase 1만 실행
 - `--only build`: Phase 2만 실행
