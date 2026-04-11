@@ -155,6 +155,13 @@ wbs.md에 '## Dev Config' 섹션이 없습니다. 아래 내용을 wbs.md 헤더
 | backend | Your backend architecture description |
 | frontend | Your frontend architecture description |
 
+### Quality Commands
+| name | command |
+|------|---------|
+| lint | `your-lint-cmd` |
+| typecheck | `your-typecheck-cmd` |
+| coverage | `your-coverage-cmd` |
+
 ### Cleanup Processes
 node, vitest
 """
@@ -286,6 +293,17 @@ def parse_dev_config(wbs_text: str) -> dict:
         if val:
             design_guidance[d] = val
 
+    # Parse Quality Commands table
+    quality_rows = _parse_md_table(section, "Quality Commands", ["name", "command"])
+    quality_commands = {}
+    for row in quality_rows:
+        if len(row) < 2:
+            continue
+        name = row[0].strip().strip("`")
+        val = _cell_value(row[1])
+        if val:
+            quality_commands[name] = val
+
     # Parse Cleanup Processes
     cleanup_processes = []
     in_cleanup = False
@@ -303,6 +321,7 @@ def parse_dev_config(wbs_text: str) -> dict:
     return {
         "domains": domains,
         "design_guidance": design_guidance,
+        "quality_commands": quality_commands,
         "cleanup_processes": cleanup_processes,
         "fullstack_domains": fullstack_domains,
     }

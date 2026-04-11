@@ -75,8 +75,18 @@ Domain: {domain}
 ### 테스트 출력 제한
 `${CLAUDE_PLUGIN_ROOT}/references/test-commands.md`의 "출력 제한" 섹션 참조.
 
+### 단계 2.5: 정적 검증 (Dev Config에 정의된 경우만)
+Dev Config의 `quality_commands`에 lint, typecheck가 정의되어 있으면 실행한다:
+```bash
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/wbs-parse.py {DOCS_DIR}/wbs.md - --dev-config
+```
+JSON 출력의 `quality_commands.lint`, `quality_commands.typecheck`를 확인한다.
+- 정의된 명령만 실행한다 (없는 항목은 건너뛴다)
+- 경고(warning)는 기록만 한다
+- 에러가 있으면 단계 3에서 테스트 실패와 함께 수정한다
+
 ### 단계 3: 실패 수정
-단위 또는 E2E 테스트 중 실패가 있으면 **경계 교차 검증** 후 코드 수정:
+단위/E2E 테스트 또는 정적 검증에서 에러가 있으면 **경계 교차 검증** 후 코드 수정:
 - 테스트 기대값(consumer)과 실제 구현(producer)을 **동시에** 읽는다
 - 함수 시그니처, 반환 타입, 필드명 등 계약이 일치하는지 확인
 - 단순 로직 버그인지, 경계 불일치(boundary mismatch)인지 구분하여 수정

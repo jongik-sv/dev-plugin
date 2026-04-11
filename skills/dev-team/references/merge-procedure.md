@@ -60,9 +60,15 @@ tmux kill-window -t "${SESSION}:${WT_NAME}" 2>/dev/null
 git merge --no-ff dev/${WT_NAME} -m "Merge dev/${WT_NAME}: {WP 제목} ({TSK-ID 목록})"
 ```
 3. 충돌 발생 시: 사용자에게 보고하고 수동 해결 요청. 60초 후 재확인 (최대 3회). 3회 초과 시 `git merge --abort`로 해당 WP 머지 건너뛰기
-4. worktree + 브랜치 보존 (재시작 대비):
-   - 머지 성공 후에도 워크트리와 브랜치를 **즉시 삭제하지 않는다**. 재시작 시 `wp-setup.py`가 기존 워크트리를 감지하여 완료된 Task를 건너뛸 수 있다.
-   - 워크트리 정리는 **전체 완료 머지(B) 단계에서만** 일괄 수행한다.
+4. 워크트리 + 브랜치 정리 (머지 성공 시):
+   머지가 완료된 WP는 재시작 시 다시 실행할 필요가 없으므로, 즉시 정리한다:
+   ```bash
+   git worktree remove --force .claude/worktrees/${WT_NAME}
+   git branch -d dev/${WT_NAME}
+   rm -f .claude/worktrees/${WT_NAME}-prompt.txt .claude/worktrees/${WT_NAME}-init.txt .claude/worktrees/${WT_NAME}-cleanup.txt .claude/worktrees/${WT_NAME}-run.sh
+   rm -f ${TEMP_DIR}/team-manifest-${WT_NAME}.md
+   ```
+   머지 실패/건너뛴 WP의 워크트리는 보존한다 (재시도 대비).
 5. `{DOCS_DIR}/wbs.md`에서 해당 WP의 `- progress:` 값 업데이트
 
 ---
@@ -77,17 +83,24 @@ git merge --no-ff dev/${WT_NAME} -m "Merge dev/${WT_NAME}: {WP 제목} ({TSK-ID 
 3. 머지 후 충돌 여부 확인
    - 충돌 발생 시: 사용자에게 보고하고 수동 해결 요청. 60초 후 재확인하여 미해결 시 다시 안내 (최대 3회). 3회 초과 시 `git merge --abort`로 해당 WP 머지를 건너뛰고 다음 WP 진행
    - 충돌 없으면: 다음 브랜치 머지 진행
-4. 모든 머지 **성공** 후 정리 (머지 실패 WP가 하나라도 있으면 정리하지 않는다):
-   - 시그널 디렉토리 정리: `rm -rf ${TEMP_DIR}/claude-signals/${PROJECT_NAME}${WINDOW_SUFFIX}`
-   - 워크트리 + 브랜치 정리 (머지 완료된 WP만):
-     ```bash
-     git worktree remove --force .claude/worktrees/${WT_NAME}
-     git branch -d dev/${WT_NAME}
-     ```
-   - 프롬프트 파일 정리: `rm -f .claude/worktrees/${WT_NAME}-*.txt ${TEMP_DIR}/task-*.txt ${TEMP_DIR}/team-manifest-${WT_NAME}.md`
-   - ⚠️ 머지 실패/건너뛴 WP의 워크트리·시그널·프롬프트는 **절대 삭제하지 않는다** (재시작 시 재활용)
-5. `{DOCS_DIR}/wbs.md`에서 각 WP의 `- progress:` 값을 업데이트
-6. 전체 결과 요약 보고:
+4. 개별 WP 정리 (조기 머지(A)에서 이미 정리된 WP는 건너뛴다):
+   각 머지 성공 WP에 대해:
+   ```bash
+   git worktree remove --force .claude/worktrees/${WT_NAME}
+   git branch -d dev/${WT_NAME}
+   rm -f .claude/worktrees/${WT_NAME}-prompt.txt .claude/worktrees/${WT_NAME}-init.txt .claude/worktrees/${WT_NAME}-cleanup.txt .claude/worktrees/${WT_NAME}-run.sh
+   rm -f ${TEMP_DIR}/team-manifest-${WT_NAME}.md
+   ```
+   머지 실패/건너뛴 WP의 워크트리는 보존한다 (재시도 대비).
+5. 공유 리소스 정리:
+   모든 WP가 머지 성공한 경우:
+   ```bash
+   rm -rf ${SHARED_SIGNAL_DIR}
+   rm -f ${TEMP_DIR}/task-*.txt
+   ```
+   머지 실패 WP가 있으면 시그널 디렉토리와 task 프롬프트는 보존한다 (재시도 시 필요).
+6. `{DOCS_DIR}/wbs.md`에서 각 WP의 `- progress:` 값을 업데이트
+7. 전체 결과 요약 보고:
    - WP별 완료 Task 수
    - 성공/실패 현황
    - 머지 결과

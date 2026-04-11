@@ -29,9 +29,9 @@ done
    rm -f {SHARED_SIGNAL_DIR}/{WT_NAME}.initialized
    ```
 
-1. **코드 품질 개선** (모든 Task 성공 시에만, `/simplify` 스킬 설치 시):
-   `/simplify` 스킬이 사용 가능하면 호출하여 WP 내 변경 코드를 정리한다.
-   `/simplify`가 없거나, 일부 Task가 실패했거나 스킵된 경우 이 단계를 건너뛴다.
+1. **코드 품질 개선** (모든 Task 성공 시에만):
+   `/simplify` (Claude Code 빌트인)를 호출하여 WP 내 변경 코드를 정리한다.
+   일부 Task가 실패했거나 스킵된 경우 이 단계를 건너뛴다.
 
 2. **미커밋 변경 확인 및 커밋**:
    ```bash
