@@ -76,56 +76,15 @@ Project
 
 ### Task category
 
-| category | 설명 | 워크플로우 |
-|----------|------|------------|
-| `development` | 신규 기능 개발 | `[ ]` → `[dd]` → `[im]` → `[xx]` |
-| `defect` | 결함 수정 | `[ ]` → `[dd]` → `[im]` → `[xx]` |
-| `infrastructure` | 인프라/기술 작업 | `[ ]` → `[dd]` → `[im]` → `[xx]` |
+`development` / `defect` / `infrastructure` 세 가지 모두 동일 DDTR 워크플로우(`[ ]`→`[dd]`→`[im]`→`[ts]`→`[xx]`)를 따른다. 상태 전이와 실패 처리 규칙은 `${CLAUDE_PLUGIN_ROOT}/references/state-machine.json`에 정의되어 있다.
 
 ### Task domain
 
-PRD/TRD를 분석하여 프로젝트에 맞는 domain을 정의한다. domain 이름은 자유롭게 정의할 수 있다 (예: `sidecar`, `mobile`, `ml-pipeline`, `etl` 등).
-
-기본 domain 예시:
-
-| domain | 설명 |
-|--------|------|
-| `frontend` | 클라이언트 UI/UX |
-| `backend` | 서버 비즈니스 로직 |
-| `database` | 데이터 계층 |
-| `infra` | 인프라/DevOps |
-| `fullstack` | 전체 스택 |
-| `docs` | 문서화 |
-| `test` | 테스트 전용 |
+PRD/TRD를 분석하여 프로젝트에 맞는 domain을 자유롭게 정의한다 (예: `frontend`, `backend`, `infra`, `ml-pipeline`, `etl`, `fullstack`). domain 이름은 제약 없음.
 
 ### Dev Config 생성
 
-WBS 생성 시, 헤더 블록과 첫 번째 WP 사이에 `## Dev Config` 섹션을 함께 생성한다.
-TRD의 기술 스택 정보를 참조하여 domain별 테스트 명령(`unit-test`, `e2e-test`)과 설계 가이드(`architecture`), 정리 대상 프로세스(`Cleanup Processes`)를 설정한다. 추론할 수 없는 경우 사용자에게 확인한다.
-
-```markdown
-## Dev Config
-
-### Domains
-| domain | description | unit-test | e2e-test |
-|--------|-------------|-----------|----------|
-| backend | Server API | `your-unit-test-cmd` | `your-e2e-test-cmd` |
-| frontend | Client UI | `your-unit-test-cmd` | `your-e2e-test-cmd` |
-| database | Data layer | - | - |
-| fullstack | Full stack | - | - |
-
-### Design Guidance
-| domain | architecture |
-|--------|-------------|
-| backend | Your backend architecture description |
-| frontend | Your frontend architecture description |
-
-### Cleanup Processes
-node, vitest
-```
-
-- `-` = 해당 테스트 N/A
-- `fullstack`은 unit/e2e 명령이 있는 모든 domain을 순차 실행 (fail-fast)
+WBS 생성 시, 헤더 블록과 첫 번째 WP 사이에 `## Dev Config` 섹션을 삽입한다. 섹션 골격과 각 항목의 의미(`domain`/`unit-test`/`e2e-test`/`Design Guidance`/`Cleanup Processes`, `-` 표기, `fullstack` 정책)는 `${CLAUDE_PLUGIN_ROOT}/skills/wbs/references/dev-config-template.md` 단일 소스를 참조한다. 템플릿을 Read하여 복사한 뒤, TRD의 기술 스택 정보로 명령과 아키텍처 설명을 채우고 추론할 수 없는 값은 사용자에게 확인한다.
 
 ---
 

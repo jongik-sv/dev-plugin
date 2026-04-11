@@ -13,8 +13,13 @@ import subprocess
 import shutil
 import re
 import tempfile
+import time
 import pathlib
 import glob
+
+# Resume protocol: .running files older than this are considered stale
+# (heartbeat interval is 2 min per signal-protocol.md; 5 min = 2.5x grace)
+STALE_RUNNING_SECONDS = 300
 
 USAGE = "Usage: wp-setup.py <config.json>"
 
@@ -239,13 +244,43 @@ def main():
                             pathlib.Path(design_done_path).write_text("resumed\n", encoding="utf-8")
                             break
 
-            # Remove stale .running files
-            for f in pathlib.Path(shared_signal_dir).glob("*.running"):
+            # Resume protocol (references/signal-protocol.md):
+            #   .done     → 유지 (완료 증거, 리더가 스킵)
+            #   .failed   → 삭제 (재실행 허용)
+            #   .shutdown → 삭제 (사용자 중단 마커, state.json 기반 정상 재개)
+            #   .running  → stale 감지 후 제거 (mtime > STALE_RUNNING_SECONDS)
+            now = time.time()
+            removed_failed = 0
+            removed_shutdown = 0
+            removed_running = 0
+            kept_running = 0
+            for f in pathlib.Path(shared_signal_dir).glob("*.failed"):
                 f.unlink()
+                removed_failed += 1
+            for f in pathlib.Path(shared_signal_dir).glob("*.shutdown"):
+                f.unlink()
+                removed_shutdown += 1
+            for f in pathlib.Path(shared_signal_dir).glob("*.running"):
+                try:
+                    age = now - f.stat().st_mtime
+                except FileNotFoundError:
+                    continue
+                if age >= STALE_RUNNING_SECONDS:
+                    f.unlink()
+                    removed_running += 1
+                else:
+                    kept_running += 1
             init_file = os.path.join(shared_signal_dir, f"{wt_name}.initialized")
             if os.path.exists(init_file):
                 os.unlink(init_file)
-            print(f"[{wp_id}] signals: restore complete ({shared_signal_dir})")
+            print(
+                f"[{wp_id}] signals: restore complete "
+                f"(failed-removed={removed_failed}, "
+                f"shutdown-removed={removed_shutdown}, "
+                f"running-stale-removed={removed_running}, "
+                f"running-live-kept={kept_running}) "
+                f"({shared_signal_dir})"
+            )
 
         # --- 2b. Pre-create .done for completed cross-WP dependencies ---
         # Even if worktrees were removed, the main WBS has [xx] status.

@@ -42,7 +42,21 @@ done
 3. **코드 리뷰** (모든 Task 성공 시에만):
    일부 Task가 실패했거나 스킵된 경우 이 단계를 건너뛴다.
 
-   `/codex:review --base main --wait` 실행.
+   **3-1. codex 플러그인 설치 여부 확인** (Bash):
+   ```bash
+   find ~/.claude/plugins -maxdepth 6 -type d -name "codex" 2>/dev/null | head -1
+   ```
+
+   **3-2. codex 미설치인 경우** (위 명령 출력이 비어 있음):
+   아래 에러 메시지를 **반드시 출력**하고 이 단계를 건너뛴 뒤 단계 4로 진행한다. `REVIEW_STATUS`를 `"스킵 (codex:review 미설치)"`로 기록한다:
+   ```bash
+   echo "⚠️  [wp-leader-cleanup] codex:review 스킬을 찾을 수 없습니다." >&2
+   echo "⚠️  codex 플러그인이 설치되어 있지 않아 코드 리뷰를 건너뜁니다." >&2
+   echo "⚠️  설치하려면 codex 플러그인을 /plugin install 로 추가하세요." >&2
+   ```
+   > wp-leader는 여기서 **중단하지 않는다.** 미설치 경고를 출력한 뒤 단계 4(팀리더 보고)로 정상 진행한다. 팀리더에게 보내는 `.done` 시그널의 "리뷰" 필드에 `스킵 (codex:review 미설치)`를 기록하여 사용자가 원인을 추적할 수 있게 한다.
+
+   **3-3. codex 설치된 경우**: `/codex:review --base main --wait` 실행.
 
    verdict가 `needs-attention`이고 Critical/High severity findings가 있으면:
    Agent 도구로 서브에이전트를 실행한다 (model: `"sonnet"`, mode: "auto"):
@@ -58,6 +72,8 @@ done
    ```
    Medium/Low만 있으면 수정 없이 진행한다.
 
+   `REVIEW_STATUS`를 리뷰 결과에 맞춰 기록한다: `approve` | `needs-attention(수정됨)`.
+
 4. **팀리더에게 완료 보고** (시그널 파일, **절대 경로 사용**):
    > 시그널 파일 이름은 `{WT_NAME}.done`
 
@@ -67,7 +83,7 @@ done
    [{WT_NAME} 완료]
    - 완료 Task: {완료된 TSK-ID 목록}
    - 테스트: {통과 수}/{전체 수}
-   - 리뷰: {approve | needs-attention(수정됨) | 스킵}
+   - 리뷰: {REVIEW_STATUS — approve | needs-attention(수정됨) | 스킵 (codex:review 미설치) | 스킵 (Task 실패)}
    - 커밋: {최신 커밋 해시}
    - 특이사항: {있으면 기록, 없으면 "없음"}
    EOF

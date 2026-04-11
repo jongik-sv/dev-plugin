@@ -18,7 +18,8 @@ Commands:
   start        <id> <dir>            .running file create
   done         <id> <dir> [message]  .done file atomic create (.running removed)
   fail         <id> <dir> [message]  .failed file atomic create (.running removed)
-  check        <id> <dir>            status output (running|done|failed|none)
+  shutdown     <id> <dir> [reason]   .shutdown marker create (user-initiated graceful stop)
+  check        <id> <dir>            status output (running|done|failed|shutdown|none)
   wait         <id> <dir> [timeout]  wait for .done or .failed (default timeout: unlimited)
   wait-running <id> <dir> [timeout]  wait for .running/.done/.failed (default timeout: 120s)
   heartbeat    <id> <dir>            touch .running file
@@ -27,6 +28,7 @@ Examples:
   signal-helper.py start TSK-01-01 /tmp/claude-signals/proj
   signal-helper.py done TSK-01-01 /tmp/claude-signals/proj "test: 5/5, commit: abc123"
   signal-helper.py fail TSK-01-01 /tmp/claude-signals/proj "Phase: test, Error: assertion failed"
+  signal-helper.py shutdown WP-04 /tmp/claude-signals/proj "user-shutdown"
   signal-helper.py check TSK-01-01 /tmp/claude-signals/proj
   signal-helper.py wait TSK-01-01 /tmp/claude-signals/proj 600
   signal-helper.py wait-running TSK-01-01 /tmp/claude-signals/proj 120
@@ -61,6 +63,7 @@ def main():
     done_path = sig_dir / f"{sig_id}.done"
     failed_path = sig_dir / f"{sig_id}.failed"
     running_path = sig_dir / f"{sig_id}.running"
+    shutdown_path = sig_dir / f"{sig_id}.shutdown"
 
     if cmd == "start":
         running_path.write_text("started\n", encoding="utf-8")
@@ -92,6 +95,20 @@ def main():
         running_path.unlink(missing_ok=True)
         print("OK:failed")
 
+    elif cmd == "shutdown":
+        reason = msg or "user-shutdown"
+        import datetime
+        content = truncate(f"reason: {reason}\nat: {datetime.datetime.now(datetime.timezone.utc).isoformat()}\n")
+        tmp_path = sig_dir / f"{sig_id}.shutdown.tmp"
+        tmp_path.write_text(content, encoding="utf-8")
+        try:
+            tmp_path.replace(shutdown_path)
+        except OSError:
+            import shutil
+            shutil.copy2(str(tmp_path), str(shutdown_path))
+            tmp_path.unlink(missing_ok=True)
+        print("OK:shutdown")
+
     elif cmd == "check":
         if done_path.exists():
             print("done")
@@ -99,6 +116,9 @@ def main():
         elif failed_path.exists():
             print("failed")
             print(read_truncated(failed_path))
+        elif shutdown_path.exists():
+            print("shutdown")
+            print(read_truncated(shutdown_path))
         elif running_path.exists():
             print("running")
         else:

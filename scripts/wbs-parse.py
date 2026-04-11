@@ -22,15 +22,23 @@ Modes:
   --phase-start          Start phase based on Task's current status
   --dev-config           Extract ## Dev Config section as JSON
 
+Feature mode:
+  wbs-parse.py --feat <feat-dir> --phase-start
+  wbs-parse.py --feat <feat-dir> --status
+  wbs-parse.py --feat <feat-dir> --dev-config [docs-dir]
+      Fallback chain: <feat-dir>/dev-config.md → <docs-dir>/wbs.md → default-dev-config.md
+
 Examples:
   wbs-parse.py docs/wbs.md TSK-01-02
   wbs-parse.py docs/wbs.md TSK-01-02 --block
   wbs-parse.py docs/wbs.md TSK-01-02 --field domain
   wbs-parse.py docs/wbs.md WP-01 --tasks
-  wbs-parse.py docs/wbs.md WP-01 --tasks-pending
   wbs-parse.py docs/wbs.md - --resumable-wps
   wbs-parse.py docs/wbs.md TSK-01-02 --phase-start
   wbs-parse.py docs/wbs.md - --dev-config
+  wbs-parse.py --feat docs/features/login-2fa --phase-start
+  wbs-parse.py --feat docs/features/login-2fa --status
+  wbs-parse.py --feat docs/features/login-2fa --dev-config docs
 """
 
 
@@ -327,7 +335,197 @@ def parse_dev_config(wbs_text: str) -> dict:
     }
 
 
+def _read_file(path: str) -> str:
+    with open(path, "r", encoding="utf-8") as f:
+        return f.read()
+
+
+def _resolve_dev_config_feat(feat_dir: str, docs_dir: str) -> dict:
+    """Fallback chain for feat mode: feat-local → wbs → default.
+
+    Returns parsed dev-config JSON with a `source` field indicating origin.
+    """
+    # 1) Feature-local override: {feat_dir}/dev-config.md
+    local_path = os.path.join(feat_dir, "dev-config.md")
+    if os.path.isfile(local_path):
+        try:
+            result = parse_dev_config(_read_file(local_path))
+            if "error" not in result:
+                result["source"] = "feat-local"
+                result["source_path"] = local_path
+                return result
+        except OSError:
+            pass
+
+    # 2) Project wbs.md Dev Config section
+    if docs_dir:
+        wbs_path = os.path.join(docs_dir, "wbs.md")
+        if os.path.isfile(wbs_path):
+            try:
+                result = parse_dev_config(_read_file(wbs_path))
+                if "error" not in result:
+                    result["source"] = "wbs"
+                    result["source_path"] = wbs_path
+                    return result
+            except OSError:
+                pass
+
+    # 3) Global default
+    plugin_root = os.environ.get("CLAUDE_PLUGIN_ROOT") or \
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    default_path = os.path.join(plugin_root, "references", "default-dev-config.md")
+    if not os.path.isfile(default_path):
+        return {
+            "error": "DEFAULT_DEV_CONFIG_MISSING",
+            "message": f"Default dev-config not found at {default_path}. Plugin installation may be corrupted.",
+        }
+    try:
+        result = parse_dev_config(_read_file(default_path))
+        if "error" in result:
+            return result
+        result["source"] = "default"
+        result["source_path"] = default_path
+        return result
+    except OSError as e:
+        return {
+            "error": "DEFAULT_DEV_CONFIG_READ_ERROR",
+            "message": f"Failed to read {default_path}: {e}",
+        }
+
+
+def _resolve_phase_from_status(status: str, sm: dict) -> str:
+    """Resolve start_phase from a status string using the state machine, with fallback.
+
+    Legacy markers [dd!]/[im!] are normalized before DFA lookup:
+      [dd!] → [ ]  (design failure = no progress)
+      [im!] → [im] (safest default: assume build ok, test failed)
+    """
+    key = status.strip() if status and status.strip() else "[ ]"
+    legacy_map = {"[dd!]": "[ ]", "[im!]": "[im]"}
+    key = legacy_map.get(key, key)
+
+    state_def = sm.get("states", {}).get(key) if sm else None
+    if state_def:
+        return state_def.get("phase_start") or "design"
+    # Fallback if state machine missing
+    if "[xx]" in key:
+        return "done"
+    if "[ts]" in key:
+        return "refactor"
+    if "[im]" in key:
+        return "test"
+    if "[dd]" in key:
+        return "build"
+    return "design"
+
+
+def _load_task_state_json(docs_dir: str, tsk_id: str):
+    """Load state.json for a WBS task, if present.
+
+    Returns the parsed dict or None if the file is missing/unreadable.
+    """
+    path = os.path.join(docs_dir, "tasks", tsk_id, "state.json")
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _load_feat_state(feat_dir: str):
+    """Load feat state, preferring state.json, falling back to legacy status.json.
+
+    Normalizes the legacy ``state`` field name to ``status``.
+    Returns (data, err).
+    """
+    state_path = os.path.join(feat_dir, "state.json")
+    legacy_path = os.path.join(feat_dir, "status.json")
+    target = state_path if os.path.isfile(state_path) else legacy_path
+    if not os.path.isfile(target):
+        return None, f"neither state.json nor status.json found in {feat_dir}"
+    try:
+        with open(target, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError) as e:
+        return None, f"failed to read {target}: {e}"
+    if "state" in data and "status" not in data:
+        data["status"] = data.pop("state")
+    return data, None
+
+
+def _load_state_machine():
+    plugin_root = os.environ.get("CLAUDE_PLUGIN_ROOT")
+    if not plugin_root:
+        plugin_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    sm_path = os.path.join(plugin_root, "references", "state-machine.json")
+    if not os.path.isfile(sm_path):
+        return None, f"state-machine.json not found at {sm_path}"
+    try:
+        with open(sm_path, "r", encoding="utf-8") as f:
+            return json.load(f), None
+    except (OSError, json.JSONDecodeError) as e:
+        return None, f"load error: {e}"
+
+
+def _handle_feat_mode(argv):
+    """Feature mode dispatcher: wbs-parse.py --feat <feat-dir> <mode> [extra]."""
+    if len(argv) < 4:
+        print("ERROR: --feat requires <feat-dir> <mode>", file=sys.stderr)
+        sys.exit(1)
+
+    feat_dir = argv[2]
+    mode = argv[3]
+
+    if not os.path.isdir(feat_dir):
+        print(f"ERROR: feature dir not found: {feat_dir}", file=sys.stderr)
+        sys.exit(1)
+
+    # --dev-config uses its own fallback chain (no status.json required)
+    if mode == "--dev-config":
+        docs_dir = argv[4] if len(argv) > 4 else ""
+        result = _resolve_dev_config_feat(feat_dir, docs_dir)
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return
+
+    data, err = _load_feat_state(feat_dir)
+    if err:
+        print(f"ERROR: {err}", file=sys.stderr)
+        sys.exit(1)
+
+    name = data.get("name") or os.path.basename(feat_dir.rstrip("/"))
+    status = data.get("status", "[ ]")
+
+    if mode == "--phase-start":
+        sm, sm_err = _load_state_machine()
+        phase = _resolve_phase_from_status(status, sm or {})
+        result = {
+            "source": "feat",
+            "feat_name": name,
+            "feat_dir": feat_dir,
+            "status": status,
+            "start_phase": phase,
+        }
+        if sm_err:
+            result["state_machine_warning"] = sm_err
+        print(json.dumps(result, ensure_ascii=False))
+        return
+
+    if mode == "--status":
+        print(json.dumps(data, ensure_ascii=False, indent=2))
+        return
+
+    print(f"ERROR: unknown feat mode: {mode}", file=sys.stderr)
+    sys.exit(1)
+
+
 def main():
+    # Feature mode short-circuit
+    if len(sys.argv) >= 2 and sys.argv[1] == "--feat":
+        _handle_feat_mode(sys.argv)
+        return
+
     if len(sys.argv) < 3:
         print(USAGE)
         sys.exit(1)
@@ -448,27 +646,40 @@ def main():
             print(f"ERROR: {target_id} not found", file=sys.stderr)
             sys.exit(1)
 
-        status = get_field(block, "status")
         domain = get_field(block, "domain")
         docs_dir = os.path.dirname(wbs_path)
 
-        if "[xx]" in status:
-            phase = "done"
-        elif "[im]" in status:
-            phase = "test"
-        elif "[dd]" in status:
-            design_path = os.path.join(docs_dir, "tasks", target_id, "design.md")
-            phase = "build" if os.path.isfile(design_path) else "design"
+        # state.json is the source of truth when present; fall back to wbs.md status line.
+        state_data = _load_task_state_json(docs_dir, target_id)
+        if state_data is not None:
+            status = state_data.get("status", "[ ]") or "[ ]"
+            status_source = "state.json"
         else:
-            phase = "design"
+            status = get_field(block, "status") or "[ ]"
+            status_source = "wbs.md"
+
+        sm, sm_error = _load_state_machine()
+        phase = _resolve_phase_from_status(status, sm or {})
 
         result = {
             "tsk_id": target_id,
             "status": status,
+            "status_source": status_source,
             "domain": domain,
             "start_phase": phase,
             "docs_dir": docs_dir,
         }
+        if state_data and state_data.get("last"):
+            result["last"] = state_data["last"]
+        # Drift detection: warn if state.json and wbs.md disagree on status
+        if state_data is not None:
+            wbs_status = get_field(block, "status") or "[ ]"
+            legacy_map = {"[dd!]": "[ ]", "[im!]": "[im]"}
+            wbs_norm = legacy_map.get(wbs_status, wbs_status)
+            if wbs_norm != status:
+                result["drift_warning"] = f"wbs.md status {wbs_status} != state.json status {status}"
+        if sm_error:
+            result["state_machine_warning"] = sm_error
         print(json.dumps(result, ensure_ascii=False))
 
     else:

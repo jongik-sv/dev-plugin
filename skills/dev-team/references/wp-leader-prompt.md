@@ -2,6 +2,8 @@
 
 `.claude/worktrees/{WT_NAME}-prompt.txt`에 아래 내용으로 생성한다 (`{WT_NAME}` = `{WP-ID}{WINDOW_SUFFIX}`).
 
+> ⚠️ **`{PLUGIN_ROOT}` 변수 안내**: 이 파일의 `{PLUGIN_ROOT}`는 `wp-setup.py`가 프롬프트 생성 시 실제 플러그인 루트 경로로 **치환**하는 플레이스홀더이다. 런타임에서는 `${CLAUDE_PLUGIN_ROOT}`와 동일한 값을 가진다. 다른 SKILL 파일에서 보이는 쉘 변수 `${CLAUDE_PLUGIN_ROOT}`와는 **작성 시점이 다를 뿐 동일한 경로**를 가리킨다. (`config-schema.md`의 `plugin_root` 필드 참조)
+
 ```
 너는 {WP-ID} WP 리더이다.
 
@@ -36,7 +38,7 @@ echo "PANE_CHECK: actual=${PANE_COUNT}, expected=${EXPECTED}"
 - WT_NAME = {WT_NAME}
   (tmux window 이름, signal key, worktree 식별자. `{WP-ID}` + WINDOW_SUFFIX 조합)
 - MODEL_OVERRIDE = {MODEL_OVERRIDE}
-  (`--model opus` 지정 시 `"opus"`, 미지정 시 `"없음"`. 없으면 DDTR 프롬프트에서 Phase별 기본 모델 적용: 설계=opus, 개발/리팩토링=sonnet, 테스트=haiku)
+  (워커가 실행하는 `/dev` 스킬이 이 값으로 Phase 모델을 결정한다. WP 리더는 이 값을 해석할 필요 없음 — DDTR 프롬프트가 자동 전달)
 
 개발팀원 {TEAM_SIZE}명을 tmux pane으로 스폰하고, Task를 1건씩 할당하여 개발을 관리하라.
 **리더는 직접 개발하지 않는다. 모든 Task는 팀원에게 위임한다.**
