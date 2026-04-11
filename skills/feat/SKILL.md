@@ -45,6 +45,7 @@ python3 ${CLAUDE_PLUGIN_ROOT}/scripts/args-parse.py feat $ARGUMENTS
 JSON 출력에서 추출:
 - `docs_dir`: 저장소 루트 (`docs` 또는 `docs/p1`)
 - `feat_name`: Feature 이름 (비어 있을 수 있음 — 그 경우 feat-init.py가 자동 생성)
+- `feat_name_arg`: **feat-init.py에 넘길 이름 인자** (비어 있으면 자동으로 `-`). 1단계에서 이 필드를 사용하라.
 - `feat_description`: Feature 설명 (신규 생성 시 spec.md에 기록)
 - `options.only`: 특정 단계만 실행 (design|build|test|refactor)
 - `options.model`: 모델 오버라이드
@@ -55,15 +56,13 @@ JSON 출력에서 추출:
 
 ## 1. Feature 초기화 (이름 자동 생성 포함)
 
-Bash 도구로 실행한다. `feat_name`이 비어 있으면 `-`(하이픈)을 전달하여 feat-init.py가 설명에서 자동 생성하도록 한다:
+Bash 도구로 실행한다. **반드시 `feat_name`이 아닌 `feat_name_arg`를 사용**한다 — 빈 이름일 때 `-`로 자동 치환되어 있어 쉘 워드 스플리팅 버그를 방지한다:
 
 ```bash
-# feat_name이 있는 경우
-python3 ${CLAUDE_PLUGIN_ROOT}/scripts/feat-init.py {DOCS_DIR} {feat_name} {feat_description}
-
-# feat_name이 비어 있는 경우 (자동 생성)
-python3 ${CLAUDE_PLUGIN_ROOT}/scripts/feat-init.py {DOCS_DIR} - {feat_description}
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/feat-init.py {DOCS_DIR} {feat_name_arg} {feat_description}
 ```
+
+> 과거 버그: 템플릿에 `{feat_name}`을 쓰면 이름이 비어 있을 때 빈 토큰이 사라져 `feat-init.py docs 레이트 리미터 추가` 처럼 호출되고 `레이트`가 이름으로 잘못 인식되어 kebab-case 검증 실패 → 폴더 미생성. `feat_name_arg`는 항상 `-` 또는 유효한 이름이므로 안전하다.
 
 JSON 출력에서 추출 (`args-parse.py`와 동일한 키 이름 사용 — audit 4-7 해결):
 - `source`: 항상 `"feat"` (스키마 정렬용)

@@ -47,7 +47,7 @@ tmux kill-window -t "${SESSION}:${WT_NAME}" 2>/dev/null
 
 ### 2. 코드 리뷰 확인
 
-코드 리뷰는 WP 리더가 완료 전에 `codex:review`로 수행한다 (`wp-leader-cleanup.md` 참조).
+코드 리뷰는 WP 리더가 완료 전에 `/codex:review` 슬래시 명령(SlashCommand 도구 호출)으로 수행한다 (`wp-leader-cleanup.md` 참조). Skill 도구가 아니다.
 시그널 파일의 리뷰 항목을 확인한다:
 - **approve** / **needs-attention(수정됨)** → merge 진행
 - **스킵** (일부 Task 실패) → 시그널 내용의 실패 Task를 확인하고 사용자에게 보고 후 merge 여부 판단

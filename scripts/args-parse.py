@@ -205,6 +205,12 @@ def main():
     # Unified task_id (feat_name may be empty when auto-naming is requested)
     task_id = feat_name if source == "feat" else tsk_id
 
+    # Shell-safe name arg: "-" when empty, so feat SKILL.md can call
+    # `feat-init.py {docs_dir} {feat_name_arg} {feat_description}` unconditionally
+    # without worrying about empty-token word-splitting (audit bug: empty {feat_name}
+    # caused the first description token to be misread as the name).
+    feat_name_arg = feat_name if feat_name else "-"
+
     # Output
     result = {
         "subproject": subproject,
@@ -213,6 +219,7 @@ def main():
         "task_id": task_id,
         "tsk_id": tsk_id,
         "feat_name": feat_name,
+        "feat_name_arg": feat_name_arg,
         "feat_description": " ".join(feat_description_tokens),
         "wp_ids": wp_ids,
         "options": {

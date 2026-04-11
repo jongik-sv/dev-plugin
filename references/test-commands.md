@@ -30,7 +30,14 @@ python3 ${CLAUDE_PLUGIN_ROOT}/scripts/wbs-parse.py --feat {FEAT_DIR} --dev-confi
 ## E2E 테스트
 
 - `domains[{domain}].e2e_test`가 null이 아니면: 해당 명령을 실행. 실행 실패(명령 없음, 스크립트 없음 등)는 N/A가 아니라 실패로 기록
-- `domains[{domain}].e2e_test`가 null이면: "N/A — {domain} domain"으로 기록
+- `domains[{domain}].e2e_test`가 null이면 **도메인에 따라 처리가 달라진다** (v1.4.1부터, lect 사고 대응):
+  - **frontend / fullstack 도메인**: 설정 공백으로 간주하여 **`test.fail`**. UI 도메인은 E2E 명령 누락을 silent skip으로 처리하지 않는다. 이 차단은 `skills/dev-test/SKILL.md` **단계 1-5 (UI E2E 정합성 게이트)**에서 서브에이전트 스폰 전에 수행된다
+  - **그 외 도메인** (backend, default 등): "N/A — {domain} domain"으로 기록하고 계속 진행
+- **명시적 skip (권장 X)**: UI 도메인에서도 고의로 E2E를 건너뛰려면 `e2e-test` 칸에 명시적 placeholder 명령을 쓴다:
+  - 크로스플랫폼 권장: `python3 -c "pass"`
+  - 지양: `/bin/true` (Windows에서 실패, macOS/Linux 전용)
+  - 이유: 파일에 흔적이 남아 PR 리뷰에서 "왜 E2E를 skip했나?"를 포착 가능
+- **design.md UI 키워드 재분류**: dev-design이 domain을 "default"나 "backend"로 라벨링했어도 design.md 본문에 UI 키워드(button/click/render/form/Playwright/화면/버튼…)가 있으면 dev-test 단계 1-5가 `effective_domain = frontend`로 재라벨링하여 본 규칙을 적용한다. 자세한 키워드 목록과 알고리즘은 `skills/dev-test/SKILL.md` 단계 1-5 참조
 - domain이 `fullstack`이면: `fullstack_domains` 목록의 각 domain에 대해 e2e_test를 순차 실행 (fail-fast: 첫 domain 실패 시 중단)
 
 ## 실행 래핑
