@@ -23,7 +23,32 @@ import platform
 import threading
 from collections import deque
 
+import re
+
 TAIL_LINES = 200
+
+# Error classification patterns for timeout diagnostics
+_ERROR_PATTERNS = {
+    "COMPILE_ERROR": [
+        r"TS\d{4}:",              # TypeScript compiler errors
+        r"SyntaxError",           # JS/TS syntax errors
+        r"Cannot find module",    # Missing imports
+        r"Module not found",      # Webpack/bundler missing module
+        r"error\[E\d{4}\]",      # Rust compiler errors
+        r"BUILD FAILED",          # Gradle/Maven
+    ],
+    "SERVER_CRASH": [
+        r"EADDRINUSE",            # Port already in use
+        r"ECONNREFUSED",          # Connection refused
+        r"exited with code [1-9]",  # Non-zero exit
+        r"Server failed to start",
+    ],
+    "SCHEMA_MISMATCH": [
+        r"Unknown arg",           # Prisma unknown argument
+        r"Invalid.*[Pp]risma",    # Prisma validation error
+        r"Unknown field",         # ORM field mismatch
+    ],
+}
 
 
 def main():
@@ -117,6 +142,17 @@ def main():
 
     if timed_out:
         print(f"\n[run-test] TIMEOUT: {timeout_secs}s 초과 — 프로세스 그룹 종료됨")
+        # Classify error from captured output
+        combined = "\n".join(tail)
+        hints = []
+        for category, patterns in _ERROR_PATTERNS.items():
+            for pat in patterns:
+                if re.search(pat, combined):
+                    hints.append(category)
+                    break
+        if hints:
+            for h in hints:
+                print(f"[run-test] HINT: {h}")
         sys.exit(124)
 
     # Normal completion: kill any lingering children

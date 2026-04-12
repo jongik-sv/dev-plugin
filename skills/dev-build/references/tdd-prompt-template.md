@@ -32,9 +32,34 @@
 
 ### E2E 테스트 — 코드 작성만 (실행하지 않음)
 `${CLAUDE_PLUGIN_ROOT}/references/test-commands.md`의 "E2E 테스트" 섹션을 참조하여 domain에 e2e_test가 정의되어 있으면:
+
+#### Step 1: E2E Convention Discovery (필수 — 코드 작성 전 반드시 수행)
+
+E2E 테스트 코드를 작성하기 **전에** 프로젝트의 기존 E2E 설정과 패턴을 파악한다. 이 단계를 건너뛰면 잘못된 위치·URL·패턴으로 테스트를 작성하게 된다.
+
+1. **E2E config 파일 찾기**: Glob 도구로 `**/playwright.config.*` 또는 `**/cypress.config.*`를 검색한다. 찾으면 Read로 읽고 다음을 추출:
+   - `testDir` → E2E 테스트 파일 위치
+   - `baseURL` 또는 `webServer.url` → 테스트 대상 URL/포트
+   - `use.baseURL` → Playwright의 경우 여기에 정의될 수 있음
+   - 환경변수 참조 (`process.env.XXX`) → 실제 사용되는 env var 이름
+
+2. **기존 E2E 테스트 파일 확인**: `testDir` 경로 하위에서 Glob으로 `**/*.spec.{ts,js}` 또는 `**/*.test.{ts,js}`를 검색한다. 1-2개 파일을 Read로 읽고 다음 패턴을 파악:
+   - URL 접근 방식 (`page.goto()` 인자가 상대경로인지, 환경변수인지, 하드코딩인지)
+   - 셀렉터 컨벤션 (`data-testid`, role, CSS selector 등)
+   - fixture / helper 사용 패턴
+   - 파일 명명 규칙
+
+3. **config 파일을 못 찾은 경우**: Dev Config의 `e2e_test` 명령에서 config 경로 힌트를 추출한다 (예: `--config e2e/playwright.config.ts`). 그래도 없으면 프로젝트 루트에서 `package.json`의 `scripts` 섹션을 읽어 E2E 관련 스크립트를 확인한다.
+
+#### Step 2: E2E 테스트 코드 작성
+
+Discovery에서 파악한 정보를 **반드시** 반영하여 작성한다:
+- **파일 위치**: discovery에서 확인한 `testDir` 하위에 생성 (추측하지 않는다)
+- **URL 패턴**: discovery에서 확인한 baseURL/환경변수 패턴을 그대로 사용
+- **코드 패턴**: 기존 테스트 파일의 셀렉터·fixture·helper 패턴을 따른다
 - design.md의 QA 체크리스트 중 통합 케이스를 E2E 테스트 코드로 작성한다
-- 프로젝트의 기존 E2E 테스트 파일을 읽고 패턴(디렉토리 구조, 셀렉터 컨벤션, fixture 등)을 따른다
 - E2E 테스트를 이 단계에서 실행하지 않는다 — 실행과 검증은 dev-test가 수행한다
+
 e2e_test가 null이면 이 단계를 건너뛴다.
 
 ## 규칙

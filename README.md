@@ -90,8 +90,8 @@ claude
 /skills
 ```
 
-10개 스킬이 표시되면 설치 완료:
-`wbs`, `agent-pool`, `team-mode`, `dev-team`, `dev`, `dev-design`, `dev-build`, `dev-test`, `dev-refactor`, `dev-help`
+11개 스킬이 표시되면 설치 완료:
+`wbs`, `agent-pool`, `team-mode`, `dev-team`, `dev`, `feat`, `dev-design`, `dev-build`, `dev-test`, `dev-refactor`, `dev-help`
 
 ---
 
@@ -109,7 +109,8 @@ claude
 | 스킬 | 설명 | 사용법 |
 |------|------|--------|
 | **wbs** | PRD/TRD로부터 WBS 생성 (규모별 3/4단계 자동 선택) | `/wbs [--scale large\|medium]` |
-| **dev** | 전체 개발 사이클 오케스트레이터 (설계→TDD→테스트→리팩토링) | `/dev TSK-00-01` |
+| **dev** | WBS Task 전체 개발 사이클 오케스트레이터 (설계→TDD→테스트→리팩토링) | `/dev TSK-00-01` |
+| **feat** | WBS 독립 Feature 전체 개발 사이클 (즉석 기능/버그/리팩토링) | `/feat rate-limiter` |
 | **dev-design** | 설계 단계 — design.md 생성 | `/dev-design TSK-00-01` |
 | **dev-build** | TDD 구현 — 테스트 먼저 작성 후 구현하여 통과 | `/dev-build TSK-00-01` |
 | **dev-test** | 테스트 실행 — 실패 시 수정 반복 (최대 3회) | `/dev-test TSK-00-01` |
@@ -160,6 +161,39 @@ PRD/TRD 문서로부터 WBS를 생성합니다.
 **개발 사이클 흐름 (DDTR)**:
 ```
 [ ] → [dd] 설계 → [im] TDD 구현 → 테스트 → [xx] 리팩토링 완료
+```
+
+### 독립 Feature 개발 — `/feat`
+
+WBS 없이 즉석 기능 추가, 버그 수정, 프로토타입 등을 전체 사이클(DDTR)로 실행합니다.
+
+```bash
+# 이름 지정
+/feat rate-limiter
+
+# 이름 + 설명
+/feat rate-limiter "API 레이트 리미터 추가"
+
+# 설명만 (이름 자동 생성)
+/feat "로그인 2FA 기능 추가"
+
+# 특정 단계만 실행
+/feat rate-limiter --only design
+/feat rate-limiter --only build
+
+# 서브프로젝트 지정
+/feat p1 rate-limiter
+```
+
+산출물은 `docs/features/{name}/` 하위에 생성됩니다:
+
+```
+docs/features/rate-limiter/
+├── spec.md          # 요구사항
+├── state.json       # 상태 추적
+├── design.md        # 설계 문서
+├── test-report.md   # 테스트 결과
+└── refactor.md      # 리팩토링 내역
 ```
 
 ### 개별 단계 실행
@@ -320,7 +354,8 @@ dev-plugin/
 │   ├── agent-pool/              # Layer 1: 서브에이전트 슬롯 풀
 │   ├── team-mode/               # Layer 1: tmux 병렬 세션
 │   ├── wbs/                     # Layer 2: WBS 생성
-│   ├── dev/                     # Layer 2: DDTR 오케스트레이터
+│   ├── dev/                     # Layer 2: DDTR 오케스트레이터 (WBS Task)
+│   ├── feat/                    # Layer 2: DDTR 오케스트레이터 (독립 Feature)
 │   ├── dev-design/              # Layer 2: 설계 단계
 │   ├── dev-build/               # Layer 2: TDD 구현 단계
 │   ├── dev-test/                # Layer 2: 테스트 단계
