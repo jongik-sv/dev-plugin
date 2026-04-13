@@ -15,9 +15,12 @@ State is stored in a sidecar ``state.json`` file:
 ``state.json`` schema:
   {
     "status": "[im]",
+    "started_at": "2026-04-11T15:00:00Z",
     "last": { "event": "test.fail", "at": "2026-04-11T15:30:00Z" },
-    "phase_history": [ { "event": "...", "from": "[ ]", "to": "[dd]", "at": "..." }, ... ],
-    "updated": "2026-04-11T15:30:00Z"
+    "phase_history": [ { "event": "...", "from": "[ ]", "to": "[dd]", "at": "...", "elapsed_seconds": 120 }, ... ],
+    "updated": "2026-04-11T15:30:00Z",
+    "completed_at": "2026-04-11T16:00:00Z",   // set when [xx]
+    "elapsed_seconds": 3600                     // total, set when [xx]
   }
 
 For WBS mode, the task block's ``- status: [xxx]`` line in wbs.md is kept
@@ -74,12 +77,23 @@ def now_iso():
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _calc_elapsed(prev_iso, curr_iso):
+    """Calculate elapsed seconds between two ISO timestamps."""
+    try:
+        prev_dt = datetime.fromisoformat(prev_iso.replace("Z", "+00:00"))
+        curr_dt = datetime.fromisoformat(curr_iso.replace("Z", "+00:00"))
+        return round((curr_dt - prev_dt).total_seconds())
+    except (ValueError, TypeError, AttributeError):
+        return None
+
+
 # ------------------------------ state.json (shared) ------------------------------
 
 
 def _default_state():
     return {
         "status": "[ ]",
+        "started_at": None,
         "last": None,
         "phase_history": [],
         "updated": now_iso(),
@@ -100,6 +114,7 @@ def load_state_json(state_path):
     data.setdefault("status", "[ ]")
     data.setdefault("last", None)
     data.setdefault("phase_history", [])
+    data.setdefault("started_at", None)
     data.setdefault("updated", now_iso())
     return data, None
 
@@ -123,18 +138,32 @@ def apply_transition(sm, state_data, event, bypass_reason=""):
     Returns (previous_status, next_status, no_change).
     Undefined transitions are treated as no-ops.
     The special ``bypass`` event marks the task as bypassed without changing status.
+
+    Timing fields (added automatically):
+      - started_at: set on first event (top-level)
+      - elapsed_seconds: per phase_history entry (delta from previous event)
+      - completed_at: set when status reaches [xx] (top-level)
+      - elapsed_seconds: total from started_at to completed_at (top-level)
     """
     current = state_data.get("status", "[ ]")
+    ts = now_iso()
+
+    # Set started_at on first event
+    if not state_data.get("started_at"):
+        state_data["started_at"] = ts
+
+    # Calculate elapsed from previous event (or started_at)
+    prev_at = (state_data["phase_history"][-1]["at"]
+               if state_data["phase_history"]
+               else state_data.get("started_at"))
+    phase_elapsed = _calc_elapsed(prev_at, ts) if prev_at else None
 
     # bypass is a special meta-event: status unchanged, bypassed flag set
     if event == "bypass":
-        ts = now_iso()
-        state_data["phase_history"].append({
-            "event": "bypass",
-            "from": current,
-            "to": current,
-            "at": ts,
-        })
+        entry = {"event": "bypass", "from": current, "to": current, "at": ts}
+        if phase_elapsed is not None:
+            entry["elapsed_seconds"] = phase_elapsed
+        state_data["phase_history"].append(entry)
         state_data["last"] = {"event": "bypass", "at": ts}
         state_data["bypassed"] = True
         state_data["bypassed_reason"] = bypass_reason or "escalation retries exhausted"
@@ -153,16 +182,23 @@ def apply_transition(sm, state_data, event, bypass_reason=""):
     elif next_status == current:
         no_change = True
 
-    ts = now_iso()
-    state_data["phase_history"].append({
-        "event": event,
-        "from": current,
-        "to": next_status,
-        "at": ts,
-    })
+    entry = {"event": event, "from": current, "to": next_status, "at": ts}
+    if phase_elapsed is not None:
+        entry["elapsed_seconds"] = phase_elapsed
+    state_data["phase_history"].append(entry)
     state_data["last"] = {"event": event, "at": ts}
     state_data["status"] = next_status
     state_data["updated"] = ts
+
+    # Track completion
+    if next_status == "[xx]":
+        state_data["completed_at"] = ts
+        started = state_data.get("started_at")
+        if started:
+            total = _calc_elapsed(started, ts)
+            if total is not None:
+                state_data["elapsed_seconds"] = total
+
     return current, next_status, no_change
 
 
