@@ -42,21 +42,34 @@ python3 ${CLAUDE_PLUGIN_ROOT}/scripts/wbs-parse.py --feat {FEAT_DIR} --dev-confi
 
 ## 실행 래핑
 
-모든 테스트 명령은 `run-test.py`로 감싸서 실행한다:
+모든 테스트 명령은 `run-test.py`로 감싸서 실행한다. **Bash 도구의 `timeout` 파라미터도 반드시 설정한다** — 기본 120초(2분)가 run-test.py 타임아웃보다 짧으면 Bash가 먼저 프로세스를 죽여서 run-test.py의 타임아웃 진단(HINT 분류)이 무효화된다.
 
 **단위 테스트**:
 ```bash
 python3 ${CLAUDE_PLUGIN_ROOT}/scripts/run-test.py 300 -- {단위 테스트 명령}
 ```
+Bash `timeout`: **360000** (360초 = run-test.py 300초 + 60초 버퍼)
 
 **E2E 테스트**:
 ```bash
-python3 ${CLAUDE_PLUGIN_ROOT}/scripts/run-test.py 900 -- {E2E 테스트 명령}
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/run-test.py 300 -- {E2E 테스트 명령}
 ```
+Bash `timeout`: **360000** (360초 = run-test.py 300초 + 60초 버퍼)
 
-- 첫 번째 인자: 타임아웃 초. 단위 테스트 300초(5분), E2E 테스트 900초(15분).
+- 첫 번째 인자: 타임아웃 초. 단위 테스트 300초(5분), E2E 테스트 300초(5분).
+- Bash 도구의 max timeout은 600초(10분). run-test.py 타임아웃은 반드시 Bash max 이하여야 한다.
 - 테스트 프로세스를 새 프로세스 그룹으로 실행하고, 완료/타임아웃/시그널 시 프로세스 그룹 전체를 kill한다.
 - exit code 124 = 타임아웃 — 테스트 실패로 기록한다.
+
+### E2E 서버 lifecycle 분리 (선택적)
+
+Dev Config Domains 테이블에 `e2e-server`/`e2e-url` 컬럼이 정의되어 있으면, `dev-test` 스킬이 E2E 서브에이전트 스폰 전에 서버를 미리 기동한다 (단계 1-7). 이 경우 Playwright/Cypress의 `webServer` 대신 이미 기동된 서버를 사용하므로:
+
+- 서버 기동 시간이 E2E 타임아웃(300초)에 포함되지 않음
+- 재시도 시 서버 재기동 오버헤드 없음
+- 서버 기동 실패가 별도 에러로 감지됨 (BLOCKER)
+
+프로젝트의 E2E config에 `reuseExistingServer: true` (Playwright) 또는 이에 상응하는 설정이 필요하다. 서버 관리 스크립트: `${CLAUDE_PLUGIN_ROOT}/scripts/e2e-server.py`.
 
 ## 출력 제한
 

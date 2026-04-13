@@ -151,12 +151,12 @@ wbs.md에 '## Dev Config' 섹션이 없습니다. 아래 내용을 wbs.md 헤더
 ## Dev Config
 
 ### Domains
-| domain | description | unit-test | e2e-test |
-|--------|-------------|-----------|----------|
-| backend | Server API | `your-unit-test-cmd` | `your-e2e-test-cmd` |
-| frontend | Client UI | `your-unit-test-cmd` | `your-e2e-test-cmd` |
-| database | Data layer | - | - |
-| fullstack | Full stack | - | - |
+| domain | description | unit-test | e2e-test | e2e-server | e2e-url |
+|--------|-------------|-----------|----------|------------|---------|
+| backend | Server API | `your-unit-test-cmd` | `your-e2e-test-cmd` | - | - |
+| frontend | Client UI | `your-unit-test-cmd` | `your-e2e-test-cmd` | `your-dev-server-cmd` | `http://localhost:3000` |
+| database | Data layer | - | - | - | - |
+| fullstack | Full stack | - | - | - | - |
 
 ### Design Guidance
 | domain | architecture |
@@ -283,10 +283,14 @@ def parse_dev_config(wbs_text: str) -> dict:
         d = row[0].strip().strip("`")
         unit = _cell_value(row[2])
         e2e = _cell_value(row[3])
+        e2e_server = _cell_value(row[4]) if len(row) > 4 else None
+        e2e_url = _cell_value(row[5]) if len(row) > 5 else None
         domains[d] = {
             "description": _cell_value(row[1]) or d,
             "unit_test": unit,
             "e2e_test": e2e,
+            "e2e_server": e2e_server,
+            "e2e_url": e2e_url,
         }
         if d != "fullstack" and (unit or e2e):
             fullstack_domains.append(d)

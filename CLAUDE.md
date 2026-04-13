@@ -29,6 +29,7 @@ Skills delegate deterministic work to Python scripts (cross-platform: Mac/Linux/
 | `scripts/wbs-transition.py` | Permissive DFA transition engine. Writes sidecar `state.json` (source of truth), syncs wbs.md status line. Undefined events are no-ops that still log to `phase_history`. Handles legacy `[dd!]`/`[im!]` migration, feat `status.json`→`state.json` rename, and `bypass` meta-event (sets `bypassed: true` without changing status). | dev-design, dev-build, dev-test, dev-refactor, dev-team (bypass) |
 | `scripts/feat-init.py` | Feature directory initializer (`docs/features/{name}/spec.md + state.json`). Auto-renames legacy `status.json` → `state.json` on resume. | feat |
 | `scripts/run-test.py` | Test command wrapper with timeout + process-group cleanup | dev-test, dev-build, dev-refactor |
+| `scripts/e2e-server.py` | E2E server lifecycle management (check/start/stop). URL health check + background server + PID file. 서버 기동과 테스트 실행을 분리하여 타임아웃 체인 충돌 해소 | dev-test |
 | `scripts/cleanup-orphaned.py` | Orphaned test process cleanup (legacy fallback) | manual use |
 | `scripts/_platform.py` | Cross-platform utilities (temp dir, JSON escape) | available for scripts |
 
