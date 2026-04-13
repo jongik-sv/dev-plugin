@@ -21,12 +21,12 @@ Skills delegate deterministic work to Python scripts (cross-platform: Mac/Linux/
 
 | Script | Purpose | Used by |
 |--------|---------|---------|
-| `scripts/wbs-parse.py` | WBS task/WP extraction + Feature state.json read (`--feat`) → JSON. Prefers `state.json` over wbs.md status line when present. | dev, feat, dev-design/build/test/refactor, dev-team, wp-setup.py |
+| `scripts/wbs-parse.py` | WBS task/WP extraction + Feature state.json read (`--feat`) + complexity scoring (`--complexity`) → JSON. Prefers `state.json` over wbs.md status line when present. | dev, feat, dev-design/build/test/refactor, dev-team, wp-setup.py |
 | `scripts/args-parse.py` | Argument parsing + source detection (wbs/feat) → JSON | dev, feat, dev-design/build/test/refactor, dev-team |
 | `scripts/dep-analysis.py` | Dependency level calculation (topological sort) → JSON | dev-team, agent-pool, team-mode |
 | `scripts/signal-helper.py` | Atomic signal file create/check/wait | dev-team, team-mode, agent-pool, DDTR workers |
 | `scripts/wp-setup.py` | Worktree + prompt + tmux setup | dev-team |
-| `scripts/wbs-transition.py` | Permissive DFA transition engine. Writes sidecar `state.json` (source of truth), syncs wbs.md status line. Undefined events are no-ops that still log to `phase_history`. Handles legacy `[dd!]`/`[im!]` migration and feat `status.json`→`state.json` rename. | dev-design, dev-build, dev-test, dev-refactor |
+| `scripts/wbs-transition.py` | Permissive DFA transition engine. Writes sidecar `state.json` (source of truth), syncs wbs.md status line. Undefined events are no-ops that still log to `phase_history`. Handles legacy `[dd!]`/`[im!]` migration, feat `status.json`→`state.json` rename, and `bypass` meta-event (sets `bypassed: true` without changing status). | dev-design, dev-build, dev-test, dev-refactor, dev-team (bypass) |
 | `scripts/feat-init.py` | Feature directory initializer (`docs/features/{name}/spec.md + state.json`). Auto-renames legacy `status.json` → `state.json` on resume. | feat |
 | `scripts/run-test.py` | Test command wrapper with timeout + process-group cleanup | dev-test, dev-build, dev-refactor |
 | `scripts/cleanup-orphaned.py` | Orphaned test process cleanup (legacy fallback) | manual use |
@@ -65,11 +65,14 @@ SKILL.md 예시에 필요한 쉘 명령은 **Python 래퍼 호출로 치환**해
   - `team-mode`: `{TEMP}/claude-signals/{window_name}` — window-scoped, reused when the window is reused
   - `dev-team`: `{TEMP}/claude-signals/{PROJECT_NAME}{WINDOW_SUFFIX}` — project-scoped so cross-WP `wait {dep-TSK-ID}` works
 - **DDTR cycle**: Design `[dd]` → TDD Build `[im]` → Test `[ts]` → Refactor `[xx]` — success transitions only. Failures do not advance status; they are recorded in `state.json.phase_history` and the `last` field, while `status` stays at the most recent successful position. `/dev` or `/feat` re-runs resume from `state.json.status.phase_start` — identical for success-pending and failure-retry cases. State machine defined in `references/state-machine.json` and shared across both sources.
-- **State storage (sidecar `state.json`)**: Source of truth for status is the sidecar `state.json` — `docs/tasks/{TSK-ID}/state.json` (WBS) or `docs/features/{name}/state.json` (Feature). Schema: `{status, last: {event, at}, phase_history: [...], updated}`. wbs.md's `- status: [xxx]` line is a human-readable view synced by `wbs-transition.py`; `wbs-parse.py --phase-start` reads state.json when present and emits a `drift_warning` if the wbs.md line disagrees.
+- **State storage (sidecar `state.json`)**: Source of truth for status is the sidecar `state.json` — `docs/tasks/{TSK-ID}/state.json` (WBS) or `docs/features/{name}/state.json` (Feature). Schema: `{status, last: {event, at}, phase_history: [...], updated, bypassed?, bypassed_reason?}`. wbs.md's `- status: [xxx]` line is a human-readable view synced by `wbs-transition.py`; `wbs-parse.py --phase-start` reads state.json when present and emits a `drift_warning` if the wbs.md line disagrees.
+- **Bypass mechanism**: When a task fails tests after escalation retries (Sonnet→Opus), the WP leader marks it as bypassed (`wbs-transition.py bypass`). `state.json` gets `bypassed: true` while status stays at the actual failure point (e.g., `[im]`). `dep-analysis.py` treats bypassed tasks as dependency-satisfied, unblocking dependent tasks. Signal: `.bypassed` file, detected by `signal-helper.py wait` alongside `.done`/`.failed`.
 - **Source abstraction**: `dev-design/build/test/refactor` accept a `SOURCE` variable in the caller's prompt (`SOURCE=wbs` default, `SOURCE=feat` for feature mode). WBS mode branches on `{DOCS_DIR}/wbs.md` + `{DOCS_DIR}/tasks/{TSK-ID}/`; Feature mode on `{FEAT_DIR}/spec.md` + `{FEAT_DIR}/state.json`. DFA and templates are identical.
 - **Pane recycling** (team-mode): After a worker completes a task, send `/clear` then assign the next task via `tmux send-keys` with prompt files (never inline — tmux truncates long strings).
 - **Slot-pool** (agent-pool): Maintain exactly N concurrent agents; when one completes, immediately launch the next eligible task.
 - **Templates**: `skills/dev-design/template.md`, `skills/dev-test/template.md`, `skills/dev-refactor/template.md` define output formats for each phase.
+- **Design model selection**: Priority chain: `--model` CLI > wbs.md `- model:` field > auto scoring. WBS `model` field (`opus`/`sonnet`) is set at WBS creation time by the LLM using full PRD/TRD context. Auto scoring (fallback for WBS without `model` field): `wbs-parse.py --complexity` computes score from depends/domain/keywords (metadata lines excluded); score ≥ 3 → Opus, otherwise Sonnet. Build/Refactor always Sonnet, Test always Haiku (with Sonnet escalation).
+- **Escalation retry on failure**: In `dev-team` mode, when a task fails (test/build), the WP leader retries with model escalation: 1st retry same model, 2nd retry Opus, 3rd failure triggers bypass. Configurable via `MAX_ESCALATION` (default 2). See `state-machine.json._bypass_semantics`.
 
 ## Skill File Convention
 

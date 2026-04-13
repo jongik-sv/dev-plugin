@@ -74,6 +74,7 @@ def main():
     opt_estimate_only = False
     opt_workdir = ""
     opt_leader = False
+    opt_on_fail = "bypass"
 
     tokens = args_str.split() if args_str.strip() else []
     idx = 0
@@ -145,6 +146,14 @@ def main():
                 opt_workdir = tokens[idx]
         elif tok == "--leader":
             opt_leader = True
+        elif tok == "--on-fail":
+            idx += 1
+            if idx < len(tokens):
+                if tokens[idx] in ("strict", "bypass", "fast"):
+                    opt_on_fail = tokens[idx]
+                else:
+                    print(json.dumps({"error": f"--on-fail 값은 strict, bypass, fast만 허용: {tokens[idx]}"}), file=sys.stderr)
+                    sys.exit(1)
         elif tok.startswith("TSK-"):
             tsk_id = tok
             source = "wbs"
@@ -232,6 +241,7 @@ def main():
             "estimate_only": opt_estimate_only,
             "workdir": opt_workdir,
             "leader": opt_leader,
+            "on_fail": opt_on_fail,
         },
     }
     print(json.dumps(result, ensure_ascii=False, indent=2))

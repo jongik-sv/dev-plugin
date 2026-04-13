@@ -19,6 +19,7 @@ Input: JSON array (stdin or file), each element:
   - depends: "-", "(none)", "" -> no dependency
   - depends: "TSK-01-01" or "TSK-01-01, TSK-01-02" -> comma separated
   - status "[xx]" tasks are treated as completed
+  - "bypassed": true tasks are treated as completed (dependency satisfied)
 
 Output: JSON with execution levels
   {
@@ -73,7 +74,7 @@ def main():
         status = item.get("status", "")
         dep_str = item.get("depends", "")
 
-        if "[xx]" in status:
+        if "[xx]" in status or item.get("bypassed"):
             completed.append(tsk_id)
             is_completed.add(tsk_id)
             continue

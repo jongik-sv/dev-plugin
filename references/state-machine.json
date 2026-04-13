@@ -57,5 +57,16 @@
   "_failure_semantics": {
     "rule": "undefined transition은 no-op으로 처리한다. 상태는 그대로 유지하되 phase_history에는 반드시 기록한다.",
     "rationale": "실패 이벤트를 DFA 전이로 두면 [dd!]/[im!] 같은 '실패 shadow 상태'가 생겨 상태 수와 전이 수가 배가됨. 성공만 상태 전진시키고 실패는 로그에만 기록하는 편이 단순."
+  },
+  "_bypass_semantics": {
+    "description": "에스컬레이션 재시도(Sonnet→Opus) 후에도 실패가 확정된 task를 임시 완료 처리하여 의존 task의 진행을 허용하는 메커니즘.",
+    "event": "bypass — wbs-transition.py가 처리하는 특수 이벤트. DFA 전이가 아니며 status를 변경하지 않는다.",
+    "state_json_fields": {
+      "bypassed": "true일 때 dep-analysis가 이 task를 의존성 충족(완료)으로 판정한다. 실제 status는 실패 시점 그대로 유지.",
+      "bypassed_reason": "bypass 사유. 예: 'test.fail after 3 retries (escalated to opus)'"
+    },
+    "dependency_resolution": "dep-analysis.py는 bypassed: true인 task를 [xx]와 동일하게 completed로 분류한다.",
+    "signal": ".bypassed — signal-helper.py가 생성. wait 명령이 .done/.failed와 함께 감지한다.",
+    "future_extension": "[im] 상태 자체를 의존성 충족으로 인정하는 속도 우선 모드로 확장 가능 (dep-analysis 판정 조건만 변경)."
   }
 }

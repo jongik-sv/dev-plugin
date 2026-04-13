@@ -163,6 +163,61 @@ PRD/TRD 문서로부터 WBS를 생성합니다.
 [ ] → [dd] 설계 → [im] TDD 구현 → 테스트 → [xx] 리팩토링 완료
 ```
 
+### Phase별 모델 선정 기준
+
+각 Phase는 작업 특성에 맞는 모델을 자동 선택합니다:
+
+| Phase | 기본 모델 | 선정 근거 |
+|-------|-----------|-----------|
+| **Design** | **복잡도 기반** (Sonnet 또는 Opus) | 아래 복잡도 점수로 자동 결정 |
+| **Build** | Sonnet | TDD 구현은 설계 문서를 따르는 기계적 작업 |
+| **Test** | Haiku (→ 실패 시 Sonnet 에스컬레이션 → 실패 시 Opus 에스컬레이션) | 에러 파싱→수정→재실행 루프는 가장 기계적 |
+| **Refactor** | Sonnet | 코드 품질 개선은 중간 수준의 판단 필요 |
+
+#### Design 모델 선택
+
+`--model` 미지정 시, Design 모델은 아래 우선순위로 결정됩니다:
+
+**우선순위**: `--model` CLI 옵션 > wbs.md `- model:` 필드 > 자동 점수 판정
+
+**1. WBS `model` 필드 (권장)** — `/wbs`로 WBS 생성 시 LLM이 PRD/TRD 맥락을 종합하여 Task별 설계 모델을 직접 판정합니다:
+
+```markdown
+### TSK-04-03: pretool_bash_guard 바이너리
+- category: development
+- domain: sidecar
+- model: opus          ← WBS 생성 시 결정
+```
+
+유효값: `opus`, `sonnet`. 이 필드가 있으면 자동 점수 계산을 건너뜁니다.
+
+**2. 자동 점수 (fallback)** — `model` 필드가 없는 기존 WBS와 호환:
+
+**WBS 모드** (`/dev`) — `wbs-parse.py --complexity`가 메타데이터 기반으로 산정:
+
+| 신호 | 조건 | 점수 |
+|------|------|------|
+| depends | 0-1개: 0 / 2-3개: +1 / 4개+: +2 | 0~2 |
+| domain | default/backend: 0 / frontend: +1 / fullstack: +2 / docs,test: -1 | -1~2 |
+| 키워드 | 아키텍처, 미들웨어, 트랜잭션, WebSocket, FSM 등 (메타데이터 줄 제외) | +2 |
+| category | config, docs | -1 |
+
+**Feature 모드** (`/feat`) — 오케스트레이터가 spec.md + 프로젝트 구조를 확인:
+
+| 신호 | 조건 | 점수 |
+|------|------|------|
+| 도메인 | spec.md의 도메인 값 (backend→0, frontend→+1, fullstack→+2) | 0~2 |
+| 키워드 | spec.md 본문의 복잡도 키워드 | +2 |
+| 영향 범위 | 모노레포 다수 패키지에 걸치면 | +1 |
+
+**임계값: 3점 이상 → Opus, 미만 → Sonnet**
+
+```bash
+# 수동 오버라이드 (최우선)
+/dev TSK-01-02 --model opus    # 강제 Opus
+/feat login-2fa --model opus   # 강제 Opus
+```
+
 ### 독립 Feature 개발 — `/feat`
 
 WBS 없이 즉석 기능 추가, 버그 수정, 프로토타입 등을 전체 사이클(DDTR)로 실행합니다.
@@ -233,6 +288,11 @@ tmux 환경에서 WP 리더 + 팀원 pane 구조로 동작합니다.
 
 # 팀원 수 조절 (기본: 3명)
 /dev-team WP-04 --team-size 5
+
+# 테스트 실패 모드 지정
+/dev-team WP-04 --on-fail strict    # 강력 검증: 실패 시 즉시 중단
+/dev-team WP-04 --on-fail bypass    # 에스컬레이션 (기본값)
+/dev-team WP-04 --on-fail fast      # 속도 우선: 즉시 다음 진행
 ```
 
 **아키텍처**:
@@ -247,7 +307,20 @@ tmux 환경에서 WP 리더 + 팀원 pane 구조로 동작합니다.
      └─ ... (동일 구조)
 ```
 
-> tmux가 없으면 Agent 도구 백그라운드 모드(`isolation: "worktree"`)로 자동 전환됩니다.
+#### 테스트 실패 모드 (`--on-fail`)
+
+Task가 테스트에 실패했을 때 의존 Task의 진행 방식을 제어합니다:
+
+| 모드 | 설명 | 재시도 | 의존 Task |
+|------|------|--------|-----------|
+| **`strict`** | 강력 검증 | 없음 | WP 전체 중단, 사용자 보고 |
+| **`bypass`** (기본) | 에스컬레이션 | 1차 Sonnet, 2차 Opus | 소진 시 임시 완료(`bypassed`) 처리 후 계속 |
+| **`fast`** | 속도 우선 | 없음 | 즉시 임시 완료 처리 후 계속 |
+
+- `bypass`/`fast` 모드에서 임시 완료된 Task는 `state.json`에 `bypassed: true`로 기록되며, 실제 상태(예: `[im]`)는 그대로 유지됩니다.
+- 향후 MCP/CLI를 통해 bypass된 Task를 사람에게 이슈로 전달하는 기능이 추가될 예정입니다.
+
+> tmux가 없으면 `/dev TSK-ID`로 순차 개발하세요.
 
 ### 범용 병렬 실행 — `/agent-pool`, `/team-mode`
 
@@ -368,7 +441,7 @@ dev-plugin/
 
 ### Key Patterns
 
-- **Signal files** — 에이전트 간 통신은 파일 기반 시그널(`.done`, `.running`, `.failed`) 사용. worktree에서는 절대경로 필수.
+- **Signal files** — 에이전트 간 통신은 파일 기반 시그널(`.done`, `.running`, `.failed`, `.bypassed`) 사용. worktree에서는 절대경로 필수.
 - **Pane recycling** — 팀원이 Task 완료 후 `/clear` → 다음 Task 할당 (prompt 파일 경유, tmux send-keys 길이 제한 회피)
 - **Slot pool** — 정확히 N개의 동시 에이전트 유지; 슬롯이 비면 다음 Task 즉시 실행
 - **Git worktrees** — `dev-team`은 WP별 격리된 worktree 생성, 완료 시 main에 머지

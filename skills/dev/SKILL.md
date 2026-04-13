@@ -28,21 +28,51 @@ JSON 출력에서 추출:
 
 | Phase | 기본 모델 | Agent `model` 값 |
 |-------|-----------|-------------------|
-| Design | Opus | `"opus"` |
+| Design | **복잡도 기반** (Sonnet 또는 Opus) | 아래 참조 |
 | Build | Sonnet | `"sonnet"` |
 | Test | Haiku | `"haiku"` |
 | Refactor | Sonnet | `"sonnet"` |
 
 `options.model`이 있으면 (예: `opus`) 전 단계 해당 모델.
 
-**설계는 Haiku 금지** — `options.model=haiku`이면 Design Phase만 `sonnet`으로 자동 대체한다 (설계는 판단이 필요하므로 Haiku로 실행하지 않는다). 오케스트레이터(`/dev`, `/feat`)와 `dev-design` 내부에 동일 가드가 있으며, 오케스트레이터가 **먼저** 차단하여 사용자가 설계가 haiku로 실행된다고 오해하는 것을 방지한다.
+### Design 모델 선택
 
-대체가 발생하면 사용자에게 한 줄 알림:
+`options.model`이 없고 Design Phase를 실행할 때, 아래 우선순위로 모델을 결정한다:
+
+```bash
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/wbs-parse.py {DOCS_DIR}/wbs.md {TSK-ID} --complexity
+```
+
+JSON 출력의 `recommended_model`을 Design Phase의 모델로 사용한다.
+
+**우선순위 체인**: `--model` CLI 옵션 > wbs.md `- model:` 필드 > 자동 점수 판정
+
+| 소스 | 조건 | 동작 |
+|------|------|------|
+| CLI `--model` | 사용자가 명시 | 최우선 사용 |
+| WBS `- model:` 필드 | `opus` 또는 `sonnet` 기입됨 | 그대로 사용 (점수 계산 스킵) |
+| 자동 점수 (fallback) | 위 두 가지 없을 때 | 아래 점수 체계로 판정 |
+
+**자동 점수 체계** (임계값 3점 이상 → Opus):
+
+| 신호 | 조건 | 점수 |
+|------|------|------|
+| depends | 0-1개: 0 / 2-3개: +1 / 4개+: +2 | 0~2 |
+| domain | default/backend: 0 / frontend: +1 / fullstack: +2 / docs,test: -1 | -1~2 |
+| 키워드 | 아키텍처, 미들웨어, 트랜잭션, WebSocket, FSM 등 (메타데이터 줄 제외) | +2 |
+| category | config, docs | -1 |
+
+사용자에게 한 줄 알림:
+```
+ℹ️  Design 모델: {model} (source: {wbs|auto}, {score}점, 요인: {factors})
+```
+
+**설계는 Haiku 금지** — `options.model=haiku`이면 Design Phase만 `sonnet`으로 자동 대체한다 (설계는 판단이 필요하므로 Haiku로 실행하지 않는다). 대체가 발생하면 사용자에게 한 줄 알림:
 ```
 ℹ️  설계는 Haiku로 실행하지 않습니다. Design Phase는 Sonnet으로 대체하여 진행합니다.
 ```
 
-> 한 줄 기억: 설계는 Opus, 개발·리팩토링은 Sonnet, 테스트는 Haiku.
+> 한 줄 기억: 설계는 복잡도에 따라 Sonnet/Opus, 개발·리팩토링은 Sonnet, 테스트는 Haiku.
 
 ## 실행 절차
 
@@ -112,7 +142,7 @@ TSK_ID={TSK-ID}
 
 | # | Phase | description | 기본 모델 (`options.model` 우선) | `{SKILL}` | Task 블록 첨부 | 완료 게이트 (`--phase-start` 재확인) |
 |---|-------|-------------|---------------------------------|-----------|----------------|-------------------------------------|
-| 1 | Design (설계) | `"{TSK-ID} 설계"` | `opus` (※ `haiku` 지정 시 `sonnet` 대체 — Haiku 금지 규칙) | `dev-design` | ✅ | `status=[ ]`이면 미완료 중단, `[dd]`이면 진행 |
+| 1 | Design (설계) | `"{TSK-ID} 설계"` | `--complexity`의 `recommended_model` (※ `haiku` 지정 시 `sonnet` 대체) | `dev-design` | ✅ | `status=[ ]`이면 미완료 중단, `[dd]`이면 진행 |
 | 2 | Build (TDD 구현) | `"{TSK-ID} TDD 구현"` | `sonnet` | `dev-build` | ✅ | `last.event=build.fail`이면 중단(status `[dd]` 유지), `status=[im]`이면 진행 |
 | 3 | Test (테스트) | `"{TSK-ID} 테스트"` | `haiku` | `dev-test` | ❌ | `last.event=test.fail`이면 중단(status `[im]` 유지), `status=[ts]`이면 진행 |
 | 4 | Refactor (리팩토링) | `"{TSK-ID} 리팩토링"` | `sonnet` | `dev-refactor` | ❌ | `status=[xx]`이면 완료 보고, `last.event=refactor.fail`이면 실패 보고(테스트 regression, status `[ts]` 유지) |

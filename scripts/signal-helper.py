@@ -18,10 +18,11 @@ Commands:
   start        <id> <dir>            .running file create
   done         <id> <dir> [message]  .done file atomic create (.running removed)
   fail         <id> <dir> [message]  .failed file atomic create (.running removed)
+  bypass       <id> <dir> [reason]   .bypassed file atomic create (.running/.failed removed)
   shutdown     <id> <dir> [reason]   .shutdown marker create (user-initiated graceful stop)
-  check        <id> <dir>            status output (running|done|failed|shutdown|none)
-  wait         <id> <dir> [timeout]  wait for .done or .failed (default timeout: unlimited)
-  wait-running <id> <dir> [timeout]  wait for .running/.done/.failed (default timeout: 120s)
+  check        <id> <dir>            status output (running|done|failed|bypassed|shutdown|none)
+  wait         <id> <dir> [timeout]  wait for .done, .failed, or .bypassed (default: unlimited)
+  wait-running <id> <dir> [timeout]  wait for .running/.done/.failed/.bypassed (default: 120s)
   heartbeat    <id> <dir>            touch .running file
 
 Examples:
@@ -29,6 +30,7 @@ Examples:
   signal-helper.py done TSK-01-01 /tmp/claude-signals/proj "test: 5/5, commit: abc123"
   signal-helper.py fail TSK-01-01 /tmp/claude-signals/proj "Phase: test, Error: assertion failed"
   signal-helper.py shutdown WP-04 /tmp/claude-signals/proj "user-shutdown"
+  signal-helper.py bypass TSK-01-01 /tmp/claude-signals/proj "test.fail after 3 retries"
   signal-helper.py check TSK-01-01 /tmp/claude-signals/proj
   signal-helper.py wait TSK-01-01 /tmp/claude-signals/proj 600
   signal-helper.py wait-running TSK-01-01 /tmp/claude-signals/proj 120
@@ -62,6 +64,7 @@ def main():
 
     done_path = sig_dir / f"{sig_id}.done"
     failed_path = sig_dir / f"{sig_id}.failed"
+    bypassed_path = sig_dir / f"{sig_id}.bypassed"
     running_path = sig_dir / f"{sig_id}.running"
     shutdown_path = sig_dir / f"{sig_id}.shutdown"
 
@@ -95,6 +98,20 @@ def main():
         running_path.unlink(missing_ok=True)
         print("OK:failed")
 
+    elif cmd == "bypass":
+        content = truncate(msg or "escalation retries exhausted")
+        tmp_path = sig_dir / f"{sig_id}.bypassed.tmp"
+        tmp_path.write_text(content + "\n", encoding="utf-8")
+        try:
+            tmp_path.replace(bypassed_path)
+        except OSError:
+            import shutil
+            shutil.copy2(str(tmp_path), str(bypassed_path))
+            tmp_path.unlink(missing_ok=True)
+        running_path.unlink(missing_ok=True)
+        failed_path.unlink(missing_ok=True)
+        print("OK:bypassed")
+
     elif cmd == "shutdown":
         reason = msg or "user-shutdown"
         import datetime
@@ -113,6 +130,9 @@ def main():
         if done_path.exists():
             print("done")
             print(read_truncated(done_path))
+        elif bypassed_path.exists():
+            print("bypassed")
+            print(read_truncated(bypassed_path))
         elif failed_path.exists():
             print("failed")
             print(read_truncated(failed_path))
@@ -132,7 +152,7 @@ def main():
             sys.exit(1)
         elapsed = 0
         interval = 5
-        while not done_path.exists() and not failed_path.exists():
+        while not done_path.exists() and not failed_path.exists() and not bypassed_path.exists():
             if not sig_dir.exists():
                 print(f"ERROR:signal_dir_missing:{sig_id} ({sig_dir})", file=sys.stderr)
                 sys.exit(1)
@@ -146,6 +166,9 @@ def main():
         if done_path.exists():
             print(f"DONE:{sig_id}")
             print(read_truncated(done_path))
+        elif bypassed_path.exists():
+            print(f"BYPASSED:{sig_id}")
+            print(read_truncated(bypassed_path))
         else:
             print(f"FAILED:{sig_id}")
             print(read_truncated(failed_path))
@@ -158,7 +181,7 @@ def main():
             sys.exit(1)
         elapsed = 0
         interval = 2
-        while not running_path.exists() and not done_path.exists() and not failed_path.exists():
+        while not running_path.exists() and not done_path.exists() and not failed_path.exists() and not bypassed_path.exists():
             if not sig_dir.exists():
                 print(f"ERROR:signal_dir_missing:{sig_id} ({sig_dir})", file=sys.stderr)
                 sys.exit(1)
@@ -169,6 +192,8 @@ def main():
                 sys.exit(1)
         if done_path.exists():
             print(f"DONE:{sig_id}")
+        elif bypassed_path.exists():
+            print(f"BYPASSED:{sig_id}")
         elif failed_path.exists():
             print(f"FAILED:{sig_id}")
         else:

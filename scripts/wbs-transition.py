@@ -33,6 +33,7 @@ Two sources supported (same DFA, different storage):
 
   event: design.ok | build.ok | build.fail
        | test.ok   | test.fail   | refactor.ok | refactor.fail
+       | bypass
 
 Examples:
   wbs-transition.py docs/wbs.md TSK-01-02 design.ok
@@ -41,6 +42,7 @@ Examples:
 Output (JSON):
   Success: {"source": "wbs", "id": "TSK-01-02", "previous": "[ ]", "current": "[dd]", "event": "design.ok", "ok": true, "no_change": false}
   No-op:   {"source": "wbs", "id": "TSK-01-02", "previous": "[im]", "current": "[im]", "event": "test.fail", "ok": true, "no_change": true}
+  Bypass:  {"source": "wbs", "id": "TSK-01-02", "previous": "[im]", "current": "[im]", "event": "bypass", "ok": true, "no_change": true, "bypassed": true}
   Failure: {"source": "feat", "id": "login-2fa", "error": "...", "ok": false}
 """
 import sys
@@ -115,13 +117,30 @@ def save_state_json(state_path, data):
         return f"failed to write state.json: {e}"
 
 
-def apply_transition(sm, state_data, event):
+def apply_transition(sm, state_data, event, bypass_reason=""):
     """Apply an event to state_data in-place.
 
     Returns (previous_status, next_status, no_change).
     Undefined transitions are treated as no-ops.
+    The special ``bypass`` event marks the task as bypassed without changing status.
     """
     current = state_data.get("status", "[ ]")
+
+    # bypass is a special meta-event: status unchanged, bypassed flag set
+    if event == "bypass":
+        ts = now_iso()
+        state_data["phase_history"].append({
+            "event": "bypass",
+            "from": current,
+            "to": current,
+            "at": ts,
+        })
+        state_data["last"] = {"event": "bypass", "at": ts}
+        state_data["bypassed"] = True
+        state_data["bypassed_reason"] = bypass_reason or "escalation retries exhausted"
+        state_data["updated"] = ts
+        return current, current, True
+
     transitions = sm.get("transitions", {}).get(current, {})
     # Filter out meta keys like _comment
     next_status = transitions.get(event) if not event.startswith("_") else None
@@ -361,12 +380,12 @@ def parse_args(argv):
         if len(args) < 3:
             print("ERROR: --feat requires <feat-dir> <event>", file=sys.stderr)
             sys.exit(1)
-        return "feat", {"feat_dir": args[1], "event": args[2]}
+        return "feat", {"feat_dir": args[1], "event": args[2], "reason": args[3] if len(args) > 3 else ""}
 
     if len(args) < 3:
         print(__doc__)
         sys.exit(1)
-    return "wbs", {"wbs_path": args[0], "tsk_id": args[1], "event": args[2]}
+    return "wbs", {"wbs_path": args[0], "tsk_id": args[1], "event": args[2], "reason": args[3] if len(args) > 3 else ""}
 
 
 def main():
@@ -378,8 +397,11 @@ def main():
         sys.exit(1)
 
     event = a["event"]
-    if event not in sm.get("events", {}):
-        known = list(sm.get("events", {}).keys())
+    reason = a.get("reason", "")
+
+    # bypass is a special meta-event handled outside the DFA events dict
+    if event != "bypass" and event not in sm.get("events", {}):
+        known = list(sm.get("events", {}).keys()) + ["bypass"]
         print(json.dumps({
             "error": f"unknown event: {event}",
             "known_events": known,
@@ -397,20 +419,20 @@ def main():
             print(json.dumps({"source": "wbs", "id": tsk_id, "error": err, "ok": False}, ensure_ascii=False))
             sys.exit(1)
 
-        previous, current, no_change = apply_transition(sm, data, event)
+        previous, current, no_change = apply_transition(sm, data, event, bypass_reason=reason)
 
         err = save_state_json(state_path, data)
         if err:
             print(json.dumps({"source": "wbs", "id": tsk_id, "error": err, "ok": False}, ensure_ascii=False))
             sys.exit(1)
 
-        # Sync wbs.md status line
+        # Sync wbs.md status line (bypass keeps same status, but sync ensures consistency)
         _, err = write_wbs_status_line(wbs_path, tsk_id, current)
         if err:
             print(json.dumps({"source": "wbs", "id": tsk_id, "error": err, "ok": False}, ensure_ascii=False))
             sys.exit(1)
 
-        print(json.dumps({
+        result = {
             "source": "wbs",
             "id": tsk_id,
             "previous": previous,
@@ -419,7 +441,11 @@ def main():
             "last": data["last"],
             "no_change": no_change,
             "ok": True,
-        }, ensure_ascii=False))
+        }
+        if data.get("bypassed"):
+            result["bypassed"] = True
+            result["bypassed_reason"] = data.get("bypassed_reason", "")
+        print(json.dumps(result, ensure_ascii=False))
         return
 
     # feat mode
@@ -434,7 +460,7 @@ def main():
         print(json.dumps({"source": "feat", "error": err, "ok": False}, ensure_ascii=False))
         sys.exit(1)
 
-    previous, current, no_change = apply_transition(sm, data, event)
+    previous, current, no_change = apply_transition(sm, data, event, bypass_reason=reason)
 
     err = save_state_json(state_path, data)
     if err:
@@ -442,7 +468,7 @@ def main():
         sys.exit(1)
 
     feat_id = os.path.basename(feat_dir.rstrip("/"))
-    print(json.dumps({
+    result = {
         "source": "feat",
         "id": feat_id,
         "previous": previous,
@@ -451,7 +477,11 @@ def main():
         "last": data["last"],
         "no_change": no_change,
         "ok": True,
-    }, ensure_ascii=False))
+    }
+    if data.get("bypassed"):
+        result["bypassed"] = True
+        result["bypassed_reason"] = data.get("bypassed_reason", "")
+    print(json.dumps(result, ensure_ascii=False))
 
 
 if __name__ == "__main__":

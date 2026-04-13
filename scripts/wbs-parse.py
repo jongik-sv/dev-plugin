@@ -21,6 +21,7 @@ Modes:
   --resumable-wps        Executable WP list (WPs with incomplete Tasks)
   --phase-start          Start phase based on Task's current status
   --dev-config           Extract ## Dev Config section as JSON
+  --complexity           Compute complexity score and recommended design model
 
 Feature mode:
   wbs-parse.py --feat <feat-dir> --phase-start
@@ -434,6 +435,30 @@ def _load_task_state_json(docs_dir: str, tsk_id: str):
         return None
 
 
+def _enrich_tasks_with_state(tasks: list, docs_dir: str) -> list:
+    """Enrich task dicts with state.json data (bypassed flag, accurate status).
+
+    For each task, if state.json exists:
+      - Update status from state.json (source of truth)
+      - Add bypassed flag if present
+    Returns the same list (mutated in place).
+    """
+    for task in tasks:
+        tsk_id = task.get("tsk_id", "")
+        if not tsk_id:
+            continue
+        state_data = _load_task_state_json(docs_dir, tsk_id)
+        if state_data is None:
+            continue
+        # state.json is the source of truth for status
+        if "status" in state_data:
+            task["status"] = state_data["status"]
+        if state_data.get("bypassed"):
+            task["bypassed"] = True
+            task["bypassed_reason"] = state_data.get("bypassed_reason", "")
+    return tasks
+
+
 def _load_feat_state(feat_dir: str):
     """Load feat state, preferring state.json, falling back to legacy status.json.
 
@@ -467,6 +492,108 @@ def _load_state_machine():
             return json.load(f), None
     except (OSError, json.JSONDecodeError) as e:
         return None, f"load error: {e}"
+
+
+# --- Complexity scoring ---
+
+_COMPLEXITY_KEYWORDS = re.compile(
+    r"아키텍처|마이그레이션|인프라|통합|리팩토링|미들웨어|트랜잭션|동시성|상태머신|인증체계"
+    r"|architecture|migration|infrastructure|integration|refactor|middleware|transaction|concurrency"
+    r"|websocket|fsm|state.machine|oauth|rbac",
+    re.IGNORECASE,
+)
+_METADATA_LINE = re.compile(r"^- (?:category|domain|status|priority|assignee|schedule|tags|depends|model):")
+_SIMPLE_CATEGORIES = {"config", "docs", "documentation"}
+_SIMPLE_DOMAINS = {"docs", "test"}
+
+COMPLEXITY_THRESHOLD = 3  # >= threshold → opus
+
+_VALID_MODELS = {"opus", "sonnet"}
+
+
+def _strip_metadata(block: str) -> str:
+    """Remove metadata lines from block so keyword search hits content only."""
+    return "\n".join(
+        line for line in block.splitlines()
+        if not _METADATA_LINE.match(line.strip())
+    )
+
+
+def compute_complexity(block: str) -> dict:
+    """Score task complexity from WBS block metadata.
+
+    Priority: explicit `- model:` field in WBS > auto scoring.
+
+    Auto scoring (fallback when model field absent):
+      depends: 0-1→0, 2-3→+1, 4+→+2
+      domain: default/backend→0, frontend→+1, fullstack→+2, docs/test→-1
+      keywords in content (excl. metadata): +2
+      category: config/docs→-1
+    """
+    # --- Explicit model field takes priority ---
+    explicit_model = get_field(block, "model").strip().lower()
+    if explicit_model and explicit_model in _VALID_MODELS:
+        return {
+            "complexity_score": None,
+            "recommended_model": explicit_model,
+            "source": "wbs",
+            "factors": ["explicit"],
+            "threshold": COMPLEXITY_THRESHOLD,
+        }
+
+    # --- Fallback: auto scoring ---
+    score = 0
+    factors = []
+
+    # depends — scaled by count
+    depends_raw = get_field(block, "depends").strip()
+    if depends_raw and depends_raw != "-":
+        dep_list = [d.strip() for d in depends_raw.split(",") if d.strip() and d.strip() != "-"]
+        dep_count = len(dep_list)
+    else:
+        dep_count = 0
+
+    if dep_count >= 4:
+        score += 2
+        factors.append(f"depends:{dep_count}")
+    elif dep_count >= 2:
+        score += 1
+        factors.append(f"depends:{dep_count}")
+
+    # domain
+    domain = get_field(block, "domain").strip().lower()
+    if domain in ("frontend",):
+        score += 1
+        factors.append(f"domain:{domain}")
+    elif domain in ("fullstack",):
+        score += 2
+        factors.append(f"domain:{domain}")
+    elif domain in _SIMPLE_DOMAINS:
+        score -= 1
+        factors.append(f"domain:{domain}(-1)")
+
+    # keywords — search content only, not metadata lines
+    content = _strip_metadata(block)
+    if _COMPLEXITY_KEYWORDS.search(content):
+        score += 2
+        factors.append("keyword_match")
+
+    # simple category discount
+    category = get_field(block, "category").strip().lower()
+    if category in _SIMPLE_CATEGORIES:
+        score -= 1
+        factors.append(f"category:{category}(-1)")
+
+    score = max(score, 0)
+    model = "opus" if score >= COMPLEXITY_THRESHOLD else "sonnet"
+
+    return {
+        "complexity_score": score,
+        "recommended_model": model,
+        "source": "auto",
+        "factors": factors,
+        "threshold": COMPLEXITY_THRESHOLD,
+    }
 
 
 def _handle_feat_mode(argv):
@@ -595,6 +722,8 @@ def main():
             print(f"ERROR: {target_id} not found in {wbs_path}", file=sys.stderr)
             sys.exit(1)
         tasks = parse_tasks_from_wp(wp_block, pending_only=False)
+        docs_dir = os.path.dirname(wbs_path)
+        _enrich_tasks_with_state(tasks, docs_dir)
         print(json.dumps(tasks, ensure_ascii=False, indent=2))
 
     # -- WP child tasks (pending only) --
@@ -604,13 +733,19 @@ def main():
             print(f"ERROR: {target_id} not found in {wbs_path}", file=sys.stderr)
             sys.exit(1)
         tasks = parse_tasks_from_wp(wp_block, pending_only=True)
+        docs_dir = os.path.dirname(wbs_path)
+        _enrich_tasks_with_state(tasks, docs_dir)
+        # Exclude bypassed tasks (effectively done for scheduling)
+        tasks = [t for t in tasks if not t.get("bypassed")]
         print(json.dumps(tasks, ensure_ascii=False, indent=2))
 
     # -- Resumable WPs --
     elif mode == "--resumable-wps":
+        docs_dir = os.path.dirname(wbs_path)
         wps = []
         current_wp = None
         in_task = False
+        current_tsk_id = None
 
         for line in wbs_text.splitlines():
             m = re.match(r'^## (WP-\d+):', line)
@@ -619,20 +754,41 @@ def main():
                     wps.append(current_wp)
                 current_wp = {"wp_id": m.group(1), "pending": 0, "total": 0}
                 in_task = False
+                current_tsk_id = None
                 continue
             if current_wp is not None:
-                if re.match(r'^#{3,4}\s+TSK-', line):
+                tsk_m = re.match(r'^#{3,4}\s+(TSK-\d+(?:-\d+)+):', line)
+                if tsk_m:
                     in_task = True
+                    current_tsk_id = tsk_m.group(1)
                     current_wp["total"] += 1
                 if in_task and line.startswith("- status:"):
                     if "[xx]" not in line:
-                        current_wp["pending"] += 1
+                        # Check state.json for bypassed status
+                        is_bypassed = False
+                        if current_tsk_id:
+                            state_data = _load_task_state_json(docs_dir, current_tsk_id)
+                            if state_data and state_data.get("bypassed"):
+                                is_bypassed = True
+                        if not is_bypassed:
+                            current_wp["pending"] += 1
                     in_task = False
+                    current_tsk_id = None
 
         if current_wp and current_wp["pending"] > 0:
             wps.append(current_wp)
 
         print(json.dumps(wps, ensure_ascii=False, indent=2))
+
+    # -- Complexity --
+    elif mode == "--complexity":
+        block = extract_task_block(wbs_text, target_id)
+        if not block:
+            print(f"ERROR: {target_id} not found in {wbs_path}", file=sys.stderr)
+            sys.exit(1)
+        result = compute_complexity(block)
+        result["tsk_id"] = target_id
+        print(json.dumps(result, ensure_ascii=False, indent=2))
 
     # -- Dev Config --
     elif mode == "--dev-config":
@@ -671,6 +827,9 @@ def main():
         }
         if state_data and state_data.get("last"):
             result["last"] = state_data["last"]
+        if state_data and state_data.get("bypassed"):
+            result["bypassed"] = True
+            result["bypassed_reason"] = state_data.get("bypassed_reason", "")
         # Drift detection: warn if state.json and wbs.md disagree on status
         if state_data is not None:
             wbs_status = get_field(block, "status") or "[ ]"
