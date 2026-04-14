@@ -29,6 +29,18 @@ python3 ${CLAUDE_PLUGIN_ROOT}/scripts/wbs-parse.py --feat {FEAT_DIR} --dev-confi
 
 ## E2E 테스트
 
+### Reachability 강제 (frontend / fullstack 필수)
+
+`effective_domain`이 `frontend` 또는 `fullstack`인 경우, E2E 테스트는 **반드시 실사용자 진입 경로(메뉴·사이드바·버튼 클릭)**로 대상 페이지에 도달하도록 작성·실행되어야 한다.
+
+- **금지**: 테스트 첫 단계로 `page.goto('/target-path')` 또는 `cy.visit('/target-path')`를 사용해 목표 페이지에 **직접 진입**하는 것. 진입 수단이 끊긴 orphan page여도 테스트가 통과해 실서비스 배포 시 접근 불가 상태가 된다.
+- **권장 패턴**: 초기 URL(`/`, `/login` 등 서비스 진입점)로만 `goto`를 호출하고, 이후는 `getByRole('link', { name: '...' }).click()` 등 네비게이션 클릭으로 이동한다.
+- **예외**: 인증 쿠키 주입·세션 복원·딥링크 보안 검증처럼 "URL 직접 진입 자체가 시나리오 요구사항"인 경우는 허용. 이 경우 design.md의 "진입점" 섹션에 예외 사유를 명시해야 한다.
+- **QA 체크리스트 매핑**: dev-design `template.md`의 "fullstack/frontend 필수 — 메뉴 클릭 경로로 도달" 항목이 본 규칙의 pass/fail 기준이다.
+- **위반 탐지**: E2E 소스에서 대상 페이지에 해당하는 URL로의 `page.goto`/`cy.visit` 사용이 있으면 reviewer/리뷰어가 "reachability 미검증"으로 반려한다 (자동 정적 검사 규칙은 후속 확장 여지).
+
+### 실행 판정
+
 - `domains[{domain}].e2e_test`가 null이 아니면: 해당 명령을 실행. 실행 실패(명령 없음, 스크립트 없음 등)는 N/A가 아니라 실패로 기록
 - `domains[{domain}].e2e_test`가 null이면 **도메인에 따라 처리가 달라진다** (v1.4.1부터, lect 사고 대응):
   - **frontend / fullstack 도메인**: 설정 공백으로 간주하여 **`test.fail`**. UI 도메인은 E2E 명령 누락을 silent skip으로 처리하지 않는다. 이 차단은 `skills/dev-test/SKILL.md` **단계 1-5 (UI E2E 정합성 게이트)**에서 서브에이전트 스폰 전에 수행된다

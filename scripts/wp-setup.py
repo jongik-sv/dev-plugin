@@ -468,8 +468,9 @@ exec claude --dangerously-skip-permissions --model {wp_leader_model} "$(<../{wt_
             run_cmd(["tmux", "set-option", "-w", "-t", win_target, "automatic-rename", "off"])
             run_cmd(["tmux", "set-option", "-w", "-t", win_target, "allow-rename", "off"])
             run_cmd(["tmux", "set-option", "-w", "-t", win_target, "pane-border-status", "top"])
+            # Unified label format with team-mode: @label + pane_index
             run_cmd(["tmux", "set-option", "-w", "-t", win_target,
-                     "pane-border-format", " #{pane_title} "])
+                     "pane-border-format", " #{pane_index}: #{@label} "])
 
             wt_abs_path = os.path.join(os.getcwd(), f".claude/worktrees/{wt_name}")
             for wi in range(1, team_size + 1):
@@ -494,12 +495,14 @@ exec claude --dangerously-skip-permissions --model {wp_leader_model} "$(<../{wt_
                 if len(parts) == 2:
                     pane_map[parts[0]] = parts[1]
 
+            # Initial labels via @label (unified with team-mode). Runtime updates
+            # from WP leader also use `tmux set-option -p -t {paneId} @label "..."`.
             if "0" in pane_map:
-                run_cmd(["tmux", "select-pane", "-t", pane_map["0"], "-T", f"{wp_id} Leader"])
+                run_cmd(["tmux", "set-option", "-p", "-t", pane_map["0"], "@label", f"{wp_id} Leader"])
             for wi in range(1, team_size + 1):
                 idx = str(wi)
                 if idx in pane_map:
-                    run_cmd(["tmux", "select-pane", "-t", pane_map[idx], "-T", f"팀원{wi}"])
+                    run_cmd(["tmux", "set-option", "-p", "-t", pane_map[idx], "@label", f"팀원{wi} 대기"])
 
             print(f"[{wp_id}] spawn: tmux window {wt_name} (leader + {team_size} workers)")
 

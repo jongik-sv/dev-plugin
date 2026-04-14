@@ -104,12 +104,67 @@ def extract_wp_block(wbs_text: str, wp_id: str) -> str:
 
 
 def get_field(block: str, field_name: str) -> str:
-    """Extract a single field value from a block."""
+    """Extract a single-line field value from a block.
+
+    Matches ``- field: value`` on a single line. Returns "" if the field is
+    absent or uses the multi-line bullet-list form (see ``parse_list_field``).
+    """
     for line in block.splitlines():
         pattern = f"- {field_name}:"
         if line.startswith(pattern):
             return line[len(pattern):].strip()
     return ""
+
+
+def parse_list_field(block: str, field_name: str) -> list:
+    """Extract a list-valued field (single-line CSV or multi-line bullet list).
+
+    Supports three shapes:
+      1. ``- field: -``            → []  (explicit empty marker)
+      2. ``- field: v1, v2, v3``   → ["v1", "v2", "v3"]  (inline CSV)
+      3. ``- field:`` + ``  - item1`` lines → ["item1", ...]  (bullet list)
+         Nested bullets (4+ space indent) are appended to the previous item as
+         sub-detail, preserving the original text verbatim.
+    """
+    lines = block.splitlines()
+    pattern = f"- {field_name}:"
+    items: list = []
+    capturing = False
+
+    for line in lines:
+        if not capturing:
+            if line.startswith(pattern):
+                inline = line[len(pattern):].strip()
+                if inline and inline != "-":
+                    # Inline CSV form
+                    return [s.strip() for s in inline.split(",") if s.strip()]
+                if inline == "-":
+                    return []
+                capturing = True
+            continue
+
+        stripped = line.strip()
+        # Terminate when a new top-level ``- name:`` field appears
+        if re.match(r"^- [a-zA-Z][a-zA-Z0-9_-]*:", line):
+            break
+        # Blank line or heading → terminate
+        if not stripped or stripped.startswith("#"):
+            break
+
+        # 2-space indented bullet: primary list item
+        if re.match(r"^  - ", line):
+            items.append(line[4:].rstrip())
+            continue
+        # 4+ space indented bullet: sub-detail, fold into last item
+        if re.match(r"^    -", line) and items:
+            items[-1] = items[-1] + "\n" + line.rstrip()
+            continue
+        # Continuation text (4+ spaces without bullet): fold into last item
+        if line.startswith("    ") and items:
+            items[-1] = items[-1] + "\n" + line.rstrip()
+            continue
+
+    return items
 
 
 def parse_tasks_from_wp(wp_block: str, pending_only: bool = False) -> list:
@@ -145,9 +200,7 @@ def parse_tasks_from_wp(wp_block: str, pending_only: bool = False) -> list:
     return tasks
 
 
-DEV_CONFIG_TEMPLATE = """\
-wbs.md에 '## Dev Config' 섹션이 없습니다. 아래 내용을 wbs.md 헤더와 첫 번째 WP 사이에 추가하세요:
-
+_DEV_CONFIG_TEMPLATE_FALLBACK = """\
 ## Dev Config
 
 ### Domains
@@ -174,6 +227,35 @@ wbs.md에 '## Dev Config' 섹션이 없습니다. 아래 내용을 wbs.md 헤더
 ### Cleanup Processes
 node, vitest
 """
+
+
+def _dev_config_template_body() -> str:
+    """Load the canonical Dev Config section from dev-config-template.md.
+
+    Extracts the ```markdown fenced block, falling back to an embedded copy if
+    the file is missing or the fence is absent. Keeps the Python template in
+    sync with the markdown reference (F08).
+    """
+    plugin_root = os.environ.get("CLAUDE_PLUGIN_ROOT") or \
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    path = os.path.join(plugin_root, "skills", "wbs", "references", "dev-config-template.md")
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            text = f.read()
+    except OSError:
+        return _DEV_CONFIG_TEMPLATE_FALLBACK
+    # Pull out the first ```markdown fenced block; if absent, use whole file.
+    m = re.search(r"```markdown\n(.*?)\n```", text, re.DOTALL)
+    if m:
+        return m.group(1)
+    return _DEV_CONFIG_TEMPLATE_FALLBACK
+
+
+def _dev_config_missing_message() -> str:
+    return (
+        "wbs.md에 '## Dev Config' 섹션이 없습니다. 아래 내용을 wbs.md 헤더와 첫 번째 WP 사이에 추가하세요:\n\n"
+        + _dev_config_template_body()
+    )
 
 
 def _parse_md_table(lines: list, header_name: str, expected_cols: list) -> list:
@@ -269,7 +351,7 @@ def parse_dev_config(wbs_text: str) -> dict:
                 break
 
     if start is None:
-        return {"error": "DEV_CONFIG_MISSING", "message": DEV_CONFIG_TEMPLATE}
+        return {"error": "DEV_CONFIG_MISSING", "message": _dev_config_missing_message()}
 
     section = lines[start:end]
 
@@ -704,19 +786,27 @@ def main():
         # Remove heading prefix and task ID
         title = re.sub(r'^#{2,4}\s+[^:]*:\s*', '', first_line)
 
-        result = {
-            "tsk_id": target_id,
-            "title": title,
-            "category": get_field(block, "category"),
-            "domain": get_field(block, "domain"),
-            "status": get_field(block, "status"),
-            "priority": get_field(block, "priority"),
-            "assignee": get_field(block, "assignee"),
-            "schedule": get_field(block, "schedule"),
-            "tags": get_field(block, "tags"),
-            "depends": get_field(block, "depends"),
-            "block": block,
-        }
+        # Single-line scalar fields
+        scalar_fields = [
+            "category", "domain", "model", "status", "priority",
+            "assignee", "schedule", "tags", "depends", "blocked-by",
+            "note", "entry-point", "prd-ref",
+        ]
+        # Multi-line list fields (support both CSV and bullet-list shapes)
+        list_fields = [
+            "requirements", "acceptance", "constraints", "test-criteria",
+            "tech-spec", "api-spec", "data-model", "ui-spec",
+        ]
+
+        result: dict = {"tsk_id": target_id, "title": title}
+        for f in scalar_fields:
+            # Output JSON keys use underscores to match Python convention downstream.
+            key = f.replace("-", "_")
+            result[key] = get_field(block, f)
+        for f in list_fields:
+            key = f.replace("-", "_")
+            result[key] = parse_list_field(block, f)
+        result["block"] = block
         print(json.dumps(result, ensure_ascii=False, indent=2))
 
     # -- WP child tasks (all) --

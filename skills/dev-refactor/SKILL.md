@@ -62,9 +62,12 @@ Domain: {domain}
 
 ## 규칙
 - 코드 품질 개선(중복/네이밍/긴 함수 분리/타입 안전성/성능/에러 핸들링) 관점에서 리뷰한다
-- 동작을 변경하지 않는다 (리팩토링만)
+- 동작을 변경하지 않는다 (리팩토링만). dev-build가 생성/통과시킨 단위 테스트가 "동작 보존의 기준선"이다
 - 수정 후 반드시 단위 테스트 실행하여 통과 확인 (`${CLAUDE_PLUGIN_ROOT}/references/test-commands.md`의 "단위 테스트" 섹션 참조)
-- 테스트 실패 시 수정을 되돌린다
+- 테스트 실패 시 리팩토링 변경을 **전부 되돌린다** (부분 되돌림 금지):
+  - 권장: 서브에이전트 진입 시점에 `git stash push -u -m "dev-refactor {TSK-ID/FEAT_NAME}"`로 베이스라인을 찍고, 실패 시 `git checkout -- .` (변경된 파일만) 또는 `git stash pop`으로 완전 복구
+  - 금지: "파일 A는 되돌리고 B는 유지" 같은 선택적 되돌림 — 리팩토링은 원자 단위로 성공/실패해야 다음 반복의 입력(Task 경계)이 깨지지 않음
+  - 되돌림 후에도 테스트가 실패하면 `refactor.fail`을 발행하고 상태는 `[ts]` 유지 (단계 3 참조)
 
 ## 결과 작성
 {ARTIFACT_DIR}/refactor.md 파일에 작성한다.
@@ -75,7 +78,14 @@ Domain: {domain}
 
 서브에이전트의 결과(PASS/FAIL)에 따라 전이 이벤트를 결정한다:
 - 리팩토링 + 단위 테스트 통과 → `refactor.ok` → `status=[xx]` (완료)
-- 리팩토링 후 테스트 실패 (되돌렸지만 실패) → `refactor.fail` → status는 `[ts]` 유지, `last.event=refactor.fail`로 기록 (테스트 regression 발생)
+- 리팩토링을 **전부 되돌렸는데도** 단위 테스트 실패 → `refactor.fail` → status는 `[ts]` 유지, `last.event=refactor.fail`로 기록
+
+**케이스 분류** (서브에이전트가 refactor.md "비고" 섹션에 기록):
+- **(A) 리팩토링 성공**: 변경 적용 후 테스트 통과. → `refactor.ok`
+- **(B) 리팩토링 실패 → 전체 되돌림 후 통과**: 리팩토링을 취소했으므로 코드는 dev-test 통과 시점 상태. **결과적으로 동작 보존에 성공했으므로 `refactor.ok`** (비고에 "리팩토링 시도 후 rollback, 다음 반복에서 재시도 여지"로 기록). "리팩토링 없음 = 완료"가 허용되는 이유는 DDTR의 R이 "품질 개선 **시도**"이지 "반드시 변경"이 아니기 때문.
+- **(C) 전체 되돌림 후에도 테스트 실패**: 기존 코드 자체에 regression 의심. → `refactor.fail`, status `[ts]` 유지. 비고에 "pre-existing regression suspected"를 명시하여 사용자 개입을 유도.
+
+**재진입 규약**: `/dev {TSK-ID}` 재실행 시 `status=[ts]`, `last.event=refactor.fail` 상태에서는 phase_start가 `refactor`이므로 본 스킬이 다시 호출된다. 이전 시도의 부작용은 이미 되돌려져 있어야 하며 (규칙의 "전부 되돌린다" 참조), 본 스킬은 **현재 코드 상태 기준으로 처음부터 리팩토링을 재시작**한다. 이전 실패 원인은 서브에이전트 의사결정에 영향을 주지 않는다 (ref refactor.md 비고는 사용자용 기록).
 
 **(A) SOURCE=wbs**:
 ```bash
