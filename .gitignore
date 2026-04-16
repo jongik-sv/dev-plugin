@@ -1,1 +1,8 @@
 .DS_Store
+
+# Python bytecode
+__pycache__/
+*.pyc
+
+# Claude Code local state (scheduled tasks, session data)
+.claude/
