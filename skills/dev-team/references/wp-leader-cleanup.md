@@ -12,7 +12,7 @@
 tmux send-keys -t {paneId} Escape
 ```
 ```bash
-tmux send-keys -t {paneId} '/exit' Enter
+{PYTHON_BIN} {PLUGIN_ROOT}/scripts/send-prompt.py {paneId} --slash-command exit
 ```
 모든 worker에 `/exit`을 보낸 뒤, 프로세스 정리:
 ```bash

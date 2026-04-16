@@ -29,20 +29,16 @@ WP 내 모든 Task에 대해 아래 파일이 존재하는지 확인한다:
 
 ### 1. tmux 창 종료
 
-해당 WP의 tmux 창(window) 종료 (pane_id 기반):
+`graceful-shutdown.py --no-marker`로 해당 WP 창을 정상 종료한다 (Escape → `/exit` → kill-window). 헬퍼가 absolute `window_id`(`@N`)로 타겟을 해석하므로 `session:name` prefix 매칭 폴백으로 팀리더 자기 window를 지우는 사고를 방지한다(self-protection은 기본 ON):
+
 ```bash
-for PANE_ID in $(tmux list-panes -t "${SESSION}:${WT_NAME}" -F '#{pane_id}'); do
-  tmux send-keys -t "${PANE_ID}" Escape 2>/dev/null
-done
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/graceful-shutdown.py \
+  "${SESSION}" "${WT_NAME}" "${SHARED_SIGNAL_DIR}" \
+  --no-marker --reason merge-cleanup
 ```
-```bash
-for PANE_ID in $(tmux list-panes -t "${SESSION}:${WT_NAME}" -F '#{pane_id}'); do
-  tmux send-keys -t "${PANE_ID}" '/exit' Enter 2>/dev/null
-done
-```
-```bash
-tmux kill-window -t "${SESSION}:${WT_NAME}" 2>/dev/null
-```
+
+> `--no-marker`는 `.shutdown` 마커를 쓰지 않아 "사용자 종료" 경로와 구분된다 (머지 트리거/재개 로직에 영향 없음).
+
 > ⚠️ 팀리더가 직접 `pkill`이나 `taskkill`을 실행하지 마라 — 다른 세션의 claude 프로세스를 오살할 수 있다. WP 리더의 cleanup 절차(`wp-leader-cleanup.md`)가 pane별 자식 프로세스를 정리한다. 테스트 프로세스는 `run-test.py`가 프로세스 그룹 단위로 자동 정리한다.
 
 ### 2. 코드 리뷰 확인

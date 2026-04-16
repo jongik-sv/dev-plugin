@@ -128,6 +128,7 @@ def substitute_vars(text: str, **kwargs) -> str:
         "{SUBPROJECT}": subproject,
         "{MODEL_ARG}": model_arg,
         "{PLUGIN_ROOT}": kwargs.get("plugin_root", ""),
+        "{PYTHON_BIN}": sys.executable,
         "{INIT_FILE}": kwargs.get("init_file", ""),
         "{CLEANUP_FILE}": kwargs.get("cleanup_file", ""),
         "{ON_FAIL}": kwargs.get("on_fail", "bypass"),
@@ -556,16 +557,21 @@ def main():
                 if idx in pane_map:
                     run_cmd([mux_bin, "set-option", "-p", "-t", pane_map[idx], "@label", f"팀원{wi} 대기"], check=opt_check)
 
-            # Send initial prompt to leader pane via send-keys (team-mode pattern).
-            # Wait for claude to start before sending.
+            # Send initial prompt to leader pane via send-prompt.py helper.
+            # The helper handles the Windows/psmux bracketed-paste quirk that
+            # swallows a trailing Enter when text + Enter are passed to
+            # send-keys in a single call. On macOS/Linux the helper keeps the
+            # original one-call behavior.
             if "0" in pane_map:
                 leader_pane_id = pane_map["0"]
                 time.sleep(3)
                 run_cmd([mux_bin, "send-keys", "-t", leader_pane_id, "Escape"], check=False)
                 time.sleep(1)
-                run_cmd([mux_bin, "send-keys", "-t", leader_pane_id,
-                         f"{leader_prompt_abs} 파일을 Read 도구로 읽고 그 안의 지시를 따르라.",
-                         "Enter"], check=False)
+                send_prompt = os.path.join(plugin_root, "scripts", "send-prompt.py")
+                run_cmd([sys.executable, send_prompt, leader_pane_id,
+                         "--text",
+                         f"{leader_prompt_abs} 파일을 Read 도구로 읽고 그 안의 지시를 따르라."],
+                        check=False)
 
             print(f"[{wp_id}] spawn: {mux} window {wt_name} (leader + {team_size} workers)")
 

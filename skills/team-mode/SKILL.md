@@ -259,10 +259,10 @@ fi
 # 1단계: pane 라벨 업데이트
 tmux set-option -p -t {paneId} @label "worker{N} {task-id}"
 
-# 2단계: Escape로 깨운 뒤 짧은 지시 전송
+# 2단계: Escape로 깨운 뒤 짧은 지시 전송 (헬퍼 사용 — 플랫폼별 bracketed-paste 처리)
 tmux send-keys -t {paneId} Escape
 sleep 1
-tmux send-keys -t {paneId} '{prompt_file} 파일을 Read 도구로 읽고 그 안의 작업을 수행하라.' Enter
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/send-prompt.py {paneId} --text '{prompt_file} 파일을 Read 도구로 읽고 그 안의 작업을 수행하라.'
 
 # 3단계: 할당 수신 검증 (15초 후)
 sleep 15
@@ -276,9 +276,11 @@ else
   sleep 1
   tmux send-keys -t {paneId} i
   sleep 1
-  tmux send-keys -t {paneId} '{prompt_file} 파일을 Read 도구로 읽고 그 안의 작업을 수행하라.' Enter
+  python3 ${CLAUDE_PLUGIN_ROOT}/scripts/send-prompt.py {paneId} --text '{prompt_file} 파일을 Read 도구로 읽고 그 안의 작업을 수행하라.'
 fi
 ```
+
+> ⚠️ **헬퍼를 사용하는 이유**: `send-prompt.py`는 플랫폼 차이를 내부적으로 흡수한다. Windows/psmux에서는 텍스트와 Enter를 분리 호출(bracketed-paste 회피), macOS/Linux tmux에서는 기존대로 한 번에 전송. 직접 `tmux send-keys '...' Enter`를 호출하면 Windows에서 Claude Code TUI가 Enter를 삼켜 프롬프트가 submit되지 않는다.
 
 > **왜 Escape를 보내는가?** Claude Code가 idle/churned 상태에 빠지면 send-keys 입력을 무시한다. Escape를 먼저 전송해야 입력 수용 상태로 복귀한다.
 
@@ -311,12 +313,13 @@ fi
 #### DONE 시그널인 경우
 1. **시그널 내용 확인**: `head -50 {SIGNAL_DIR}/{task-id}.done`
 1b. **idle 시그널 정리**: `rm -f {SIGNAL_DIR}/worker-{N}.idle` (남아 있다면 제거)
-2. **컨텍스트 초기화**:
+2. **컨텍스트 초기화** (헬퍼 사용):
    ```bash
    tmux send-keys -t {paneId} Escape
    sleep 1
-   tmux send-keys -t {paneId} '/clear' Enter
+   python3 ${CLAUDE_PLUGIN_ROOT}/scripts/send-prompt.py {paneId} --slash-command clear
    sleep 10
+   # /clear 확인 다이얼로그에 응답
    tmux send-keys -t {paneId} Enter
    ```
 3. **다음 task 할당**: 의존성이 해소된 다음 task를 "3. Task 할당 프로토콜"에 따라 1건 할당
@@ -386,7 +389,7 @@ worker 프롬프트에 아래 지시를 포함할 수 있다:
 for i in $(seq {WORKER_OFFSET} $((WORKER_OFFSET + TEAM_SIZE - 1))); do
   tmux send-keys -t "${PANE_IDS[$i]}" Escape 2>/dev/null
   sleep 1
-  tmux send-keys -t "${PANE_IDS[$i]}" '/exit' Enter 2>/dev/null
+  python3 ${CLAUDE_PLUGIN_ROOT}/scripts/send-prompt.py "${PANE_IDS[$i]}" --slash-command exit 2>/dev/null
 done
 sleep 5
 ```
