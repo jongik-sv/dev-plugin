@@ -25,6 +25,10 @@ import subprocess
 import sys
 import time
 
+# Import cross-platform path normalizer
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _platform import normalize_path
+
 
 def find_mux_binary() -> str | None:
     """Prefer the one currently backing this session ($TMUX), fall back to PATH."""
@@ -99,6 +103,8 @@ def main() -> int:
     if not mux:
         print("ERROR: neither tmux nor psmux on PATH", file=sys.stderr)
         return 1
+
+    args.signal_dir = normalize_path(args.signal_dir)
 
     marker = write_shutdown_marker(args.signal_dir, args.wt_name, args.reason)
     print(f"[shutdown] marker: {marker}")

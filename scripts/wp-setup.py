@@ -17,6 +17,10 @@ import time
 import pathlib
 import glob
 
+# Import cross-platform path normalizer
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _platform import normalize_path
+
 # Resume protocol: .running files older than this are considered stale
 # (heartbeat interval is 2 min per signal-protocol.md; 5 min = 2.5x grace)
 STALE_RUNNING_SECONDS = 300
@@ -126,6 +130,7 @@ def substitute_vars(text: str, **kwargs) -> str:
         "{PLUGIN_ROOT}": kwargs.get("plugin_root", ""),
         "{INIT_FILE}": kwargs.get("init_file", ""),
         "{CLEANUP_FILE}": kwargs.get("cleanup_file", ""),
+        "{ON_FAIL}": kwargs.get("on_fail", "bypass"),
     }
     model_display = model_override if model_override else "\uc5c6\uc74c"
     replacements['{MODEL_OVERRIDE}'] = model_display
@@ -179,15 +184,16 @@ def main():
 
     project_name = config.get("project_name", "")
     window_suffix = config.get("window_suffix", "").replace(".", "_")  # dot breaks tmux target syntax (session:window.pane)
-    temp_dir = config.get("temp_dir", tempfile.gettempdir())
-    shared_signal_dir = config["shared_signal_dir"]
+    temp_dir = normalize_path(config.get("temp_dir", tempfile.gettempdir()))
+    shared_signal_dir = normalize_path(config["shared_signal_dir"])
     docs_dir = config.get("docs_dir", "docs")
-    wbs_path = config["wbs_path"]
+    wbs_path = normalize_path(config["wbs_path"])
     session = config.get("session", "")
     model_override = config.get("model_override", "")
     worker_model = config.get("worker_model", "sonnet")
     wp_leader_model = config.get("wp_leader_model", "sonnet")
-    plugin_root = config["plugin_root"]
+    plugin_root = normalize_path(config["plugin_root"])
+    on_fail = config.get("on_fail", "bypass")
 
     # Validate model names
     if model_override:
@@ -223,6 +229,7 @@ def main():
         worker_model=worker_model,
         model_override=model_override,
         plugin_root=plugin_root,
+        on_fail=on_fail,
     )
 
     mux, mux_bin = detect_mux()
@@ -441,85 +448,60 @@ def main():
                           **sub_kwargs)
 
         wp_leader_out = f".claude/worktrees/{wt_name}-prompt.txt"
-        if os.path.isfile(wp_leader_out):
-            print(f"[{wp_id}] leader: reuse ({wp_leader_out})")
-        else:
-            content = wp_leader_raw
-            content = substitute_vars(content, **var_kwargs)
-            content = insert_blocks(
-                content,
-                "[WP \ub0b4 \ubaa8\ub4e0 Task \ube14\ub85d", all_task_blocks,
-                "[\ud300\ub9ac\ub354\uac00 \uc0b0\ucd9c\ud55c \ub808\ubca8\ubcc4 \uc2e4\ud589 \uacc4\ud68d]", execution_plan,
-            )
-            tmp_out = wp_leader_out + ".tmp"
-            with open(tmp_out, "w", encoding="utf-8", newline="\n") as f:
-                f.write(content)
-            os.replace(tmp_out, wp_leader_out)
-            print(f"[{wp_id}] leader: {wp_leader_out}")
+        # Always regenerate — settings like on_fail may change between runs
+        content = wp_leader_raw
+        content = substitute_vars(content, **var_kwargs)
+        content = insert_blocks(
+            content,
+            "[WP \ub0b4 \ubaa8\ub4e0 Task \ube14\ub85d", all_task_blocks,
+            "[\ud300\ub9ac\ub354\uac00 \uc0b0\ucd9c\ud55c \ub808\ubca8\ubcc4 \uc2e4\ud589 \uacc4\ud68d]", execution_plan,
+        )
+        tmp_out = wp_leader_out + ".tmp"
+        with open(tmp_out, "w", encoding="utf-8", newline="\n") as f:
+            f.write(content)
+        os.replace(tmp_out, wp_leader_out)
+        print(f"[{wp_id}] leader: {wp_leader_out}")
 
-        # Init file (read once at startup)
+        # Init file (read once at startup) — always regenerate
         wp_init_out = f".claude/worktrees/{wt_name}-init.txt"
-        if not os.path.isfile(wp_init_out):
-            init_content = substitute_vars(wp_leader_init_raw, **var_kwargs)
-            tmp_out = wp_init_out + ".tmp"
-            with open(tmp_out, "w", encoding="utf-8", newline="\n") as f:
-                f.write(init_content)
-            os.replace(tmp_out, wp_init_out)
-            print(f"[{wp_id}] leader-init: {wp_init_out}")
+        init_content = substitute_vars(wp_leader_init_raw, **var_kwargs)
+        tmp_out = wp_init_out + ".tmp"
+        with open(tmp_out, "w", encoding="utf-8", newline="\n") as f:
+            f.write(init_content)
+        os.replace(tmp_out, wp_init_out)
+        print(f"[{wp_id}] leader-init: {wp_init_out}")
 
-        # Cleanup file (read at end)
+        # Cleanup file (read at end) — always regenerate
         wp_cleanup_out = f".claude/worktrees/{wt_name}-cleanup.txt"
-        if not os.path.isfile(wp_cleanup_out):
-            cleanup_content = substitute_vars(wp_leader_cleanup_raw, **var_kwargs)
-            tmp_out = wp_cleanup_out + ".tmp"
-            with open(tmp_out, "w", encoding="utf-8", newline="\n") as f:
-                f.write(cleanup_content)
-            os.replace(tmp_out, wp_cleanup_out)
-            print(f"[{wp_id}] leader-cleanup: {wp_cleanup_out}")
+        cleanup_content = substitute_vars(wp_leader_cleanup_raw, **var_kwargs)
+        tmp_out = wp_cleanup_out + ".tmp"
+        with open(tmp_out, "w", encoding="utf-8", newline="\n") as f:
+            f.write(cleanup_content)
+        os.replace(tmp_out, wp_cleanup_out)
+        print(f"[{wp_id}] leader-cleanup: {wp_cleanup_out}")
 
-        # --- 6. Runner + tmux/psmux spawn ---
-        # Python runner — shell-agnostic. Locates the worktree via __file__, so
-        # the same script works under cmd.exe, PowerShell, bash (Git Bash / WSL),
-        # and zsh regardless of drive-path convention (C:\, /c/, /mnt/c/).
-        leader_runner = f".claude/worktrees/{wt_name}-run.py"
-        leader_content = f'''#!/usr/bin/env python3
-"""WP leader runner for {wt_name}. Spawned by tmux/psmux new-window."""
-import os, pathlib, subprocess, sys
-here = pathlib.Path(__file__).resolve().parent
-prompt = (here / "{wt_name}-prompt.txt").read_text(encoding="utf-8")
-os.chdir(here / "{wt_name}")
-sys.exit(subprocess.call(["claude", "--dangerously-skip-permissions",
-                          "--model", "{wp_leader_model}", prompt]))
-'''
-        with open(leader_runner, "w", encoding="utf-8", newline="\n") as f:
-            f.write(leader_content)
-        os.chmod(leader_runner, 0o755)
+        # --- 6. tmux/psmux spawn (team-mode compatible) ---
+        # Use the same spawn pattern as team-mode: pass a shell command string
+        # to new-window / split-window.  This works on both native tmux and
+        # psmux (Windows) because psmux executes the command in its default
+        # shell context — Python runner scripts fail under psmux because it
+        # opens PowerShell/WSL where Windows Python paths are invalid.
+        #
+        # Leader receives its initial prompt via send-keys after spawn, the
+        # same way team-mode dispatches tasks to workers.
+        worktree_abs = os.path.abspath(wt_path)
+        leader_model_flag = f" --model {wp_leader_model}" if wp_leader_model else ""
+        worker_model_flag = f" --model {worker_model}" if worker_model else ""
+        leader_prompt_abs = os.path.abspath(wp_leader_out)
 
-        worker_runner = f".claude/worktrees/{wt_name}-worker.py"
-        worker_content = f'''#!/usr/bin/env python3
-"""Worker pane runner for {wt_name}. Leader dispatches tasks via tmux send-keys."""
-import os, pathlib, subprocess, sys
-here = pathlib.Path(__file__).resolve().parent
-os.chdir(here / "{wt_name}")
-sys.exit(subprocess.call(["claude", "--dangerously-skip-permissions",
-                          "--model", "{worker_model}"]))
-'''
-        with open(worker_runner, "w", encoding="utf-8", newline="\n") as f:
-            f.write(worker_content)
-        os.chmod(worker_runner, 0o755)
-
-        # Spawn command passed to {tmux,psmux} new-window / split-window. On
-        # Windows we call `sys.executable` explicitly to bypass PATH ambiguity
-        # (bare `python3` is hijacked by the MS Store App Execution Alias).
-        # On POSIX the shebang + chmod +x is enough.
-        leader_abs = os.path.abspath(leader_runner)
-        worker_abs = os.path.abspath(worker_runner)
-        if is_windows:
-            leader_spawn = f'"{sys.executable}" "{leader_abs}"'
-            worker_spawn = f'"{sys.executable}" "{worker_abs}"'
+        if mux == "psmux":
+            # psmux opens PowerShell by default — use semicolon and
+            # PowerShell-compatible Set-Location instead of bash &&
+            leader_spawn = f'Set-Location "{worktree_abs}"; claude --dangerously-skip-permissions{leader_model_flag}'
+            worker_spawn = f'Set-Location "{worktree_abs}"; claude --dangerously-skip-permissions{worker_model_flag}'
         else:
-            leader_spawn = leader_abs
-            worker_spawn = worker_abs
+            leader_spawn = f'cd "{worktree_abs}" && claude --dangerously-skip-permissions{leader_model_flag}'
+            worker_spawn = f'cd "{worktree_abs}" && claude --dangerously-skip-permissions{worker_model_flag}'
 
         if mux and mux_bin and session:
             run_cmd([mux_bin, "new-window", "-t", f"{session}:", "-n", wt_name, leader_spawn])
@@ -574,10 +556,21 @@ sys.exit(subprocess.call(["claude", "--dangerously-skip-permissions",
                 if idx in pane_map:
                     run_cmd([mux_bin, "set-option", "-p", "-t", pane_map[idx], "@label", f"팀원{wi} 대기"], check=opt_check)
 
+            # Send initial prompt to leader pane via send-keys (team-mode pattern).
+            # Wait for claude to start before sending.
+            if "0" in pane_map:
+                leader_pane_id = pane_map["0"]
+                time.sleep(3)
+                run_cmd([mux_bin, "send-keys", "-t", leader_pane_id, "Escape"], check=False)
+                time.sleep(1)
+                run_cmd([mux_bin, "send-keys", "-t", leader_pane_id,
+                         f"{leader_prompt_abs} 파일을 Read 도구로 읽고 그 안의 지시를 따르라.",
+                         "Enter"], check=False)
+
             print(f"[{wp_id}] spawn: {mux} window {wt_name} (leader + {team_size} workers)")
 
         else:
-            print(f"[{wp_id}] runner: {leader_runner} (no tmux — manual execution required)")
+            print(f"[{wp_id}] runner: manual execution required (no tmux)")
 
         print(f"=== [{wp_id}] setup complete ===")
 

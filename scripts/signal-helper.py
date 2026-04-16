@@ -9,6 +9,10 @@ import os
 import time
 import pathlib
 
+# Import cross-platform path normalizer
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _platform import normalize_path
+
 MAX_LINES = 50
 
 USAGE = """\
@@ -57,7 +61,7 @@ def main():
 
     cmd = sys.argv[1]
     sig_id = sys.argv[2]
-    sig_dir = pathlib.Path(sys.argv[3])
+    sig_dir = pathlib.Path(normalize_path(sys.argv[3]))
     msg = sys.argv[4] if len(sys.argv) > 4 else ""
 
     sig_dir.mkdir(parents=True, exist_ok=True)
