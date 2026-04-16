@@ -9,7 +9,7 @@
       "name": "dev",
       "source": "./",
       "description": "WBS/Feature 기반 TDD 개발 자동화 플러그인 (설계→TDD구현→테스트→리팩토링, 팀 병렬 개발, WBS 독립 Feature 지원)",
-      "version": "1.4.5"
+      "version": "1.4.6"
     }
   ]
 }
