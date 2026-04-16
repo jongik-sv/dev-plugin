@@ -65,7 +65,7 @@ git merge --no-ff dev/${WT_NAME} -m "Merge dev/${WT_NAME}: {WP 제목} ({TSK-ID 
    ```bash
    git worktree remove --force .claude/worktrees/${WT_NAME}
    git branch -d dev/${WT_NAME}
-   rm -f .claude/worktrees/${WT_NAME}-prompt.txt .claude/worktrees/${WT_NAME}-init.txt .claude/worktrees/${WT_NAME}-cleanup.txt .claude/worktrees/${WT_NAME}-run.sh
+   rm -f .claude/worktrees/${WT_NAME}-prompt.txt .claude/worktrees/${WT_NAME}-init.txt .claude/worktrees/${WT_NAME}-cleanup.txt .claude/worktrees/${WT_NAME}-run.py .claude/worktrees/${WT_NAME}-worker.py
    rm -f ${TEMP_DIR}/team-manifest-${WT_NAME}.md
    ```
    머지 실패/건너뛴 WP의 워크트리는 보존한다 (재시도 대비).
@@ -88,7 +88,7 @@ git merge --no-ff dev/${WT_NAME} -m "Merge dev/${WT_NAME}: {WP 제목} ({TSK-ID 
    ```bash
    git worktree remove --force .claude/worktrees/${WT_NAME}
    git branch -d dev/${WT_NAME}
-   rm -f .claude/worktrees/${WT_NAME}-prompt.txt .claude/worktrees/${WT_NAME}-init.txt .claude/worktrees/${WT_NAME}-cleanup.txt .claude/worktrees/${WT_NAME}-run.sh
+   rm -f .claude/worktrees/${WT_NAME}-prompt.txt .claude/worktrees/${WT_NAME}-init.txt .claude/worktrees/${WT_NAME}-cleanup.txt .claude/worktrees/${WT_NAME}-run.py .claude/worktrees/${WT_NAME}-worker.py
    rm -f ${TEMP_DIR}/team-manifest-${WT_NAME}.md
    ```
    머지 실패/건너뛴 WP의 워크트리는 보존한다 (재시도 대비).

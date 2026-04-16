@@ -31,6 +31,7 @@ Skills delegate deterministic work to Python scripts (cross-platform: Mac/Linux/
 | `scripts/run-test.py` | Test command wrapper with timeout + process-group cleanup | dev-test, dev-build, dev-refactor |
 | `scripts/e2e-server.py` | E2E server lifecycle management (check/start/stop). URL health check + background server + PID file. 서버 기동과 테스트 실행을 분리하여 타임아웃 체인 충돌 해소 | dev-test |
 | `scripts/cleanup-orphaned.py` | Orphaned test process cleanup (legacy fallback) | manual use |
+| `scripts/graceful-shutdown.py` | WP 창 정상 종료 (마커 → Escape → `/exit` → kill-window). absolute pane ID 사용으로 psmux target-parser 차이 흡수 | dev-team |
 | `scripts/_platform.py` | Cross-platform utilities (temp dir, JSON escape) | available for scripts |
 
 All scripts use `${CLAUDE_PLUGIN_ROOT}/scripts/` as base path. Python 3 standard library only — no pip dependencies.
@@ -145,8 +146,8 @@ Test commands, design guidance, and cleanup process names are **project-configur
 |-------------|--------|----------|-------|
 | macOS / Linux | ✅ Native support | `$TMPDIR` or `/tmp` | tmux from package manager. Shell is bash/zsh. |
 | WSL2 (Windows) | ✅ Native support | `/tmp` | tmux inside WSL. Shell is bash. |
-| Native Windows | ⚠️ Partial via **psmux** | `%TEMP%` | psmux aliased to `tmux` passes the `command -v tmux` gate. **BUT psmux's default pane shell is PowerShell**, not bash. Current skill examples are POSIX bash (`rm -rf`, heredoc, `for ... do ... done`) and do NOT run in PowerShell panes as written. Treat native Windows as a known target whose full support requires rewriting shell examples or routing everything through Python wrappers. Python scripts themselves (`pathlib` + `tempfile`) are already platform-neutral. |
+| Native Windows | ✅ Supported via **psmux** (dev-team 경로) | `%TEMP%` | psmux를 `tmux` alias로 등록하면 `detect_mux()`가 `tmux -V` 프로브로 psmux를 식별하여 별도 분기 없이 동작한다. `/dev-team` 런처는 bash 스크립트가 아닌 **Python 런처**(`{WT_NAME}-run.py`, `{WT_NAME}-worker.py`)를 생성하므로 pane 기본 쉘이 cmd.exe/PowerShell/bash 무엇이든 무관하다. 런처는 `__file__` + `pathlib`로 경로를 해석하여 `C:\`, `/c/`, `/mnt/c/` 규칙 차이를 흡수한다. 단 **team-mode·agent-pool 스킬의 bash 예제**(`cd {dir} && claude ...`)는 아직 POSIX 의존이며 psmux 환경에서 cmd.exe pane으로 보내지면 실패한다 — 이 두 스킬은 `/dev-team` 처럼 Python 런처로 이관이 필요하다. |
 
 **Shared signal directory** resolves from `tempfile.gettempdir()` via `scripts/_platform.py:TEMP_DIR`. All three platforms produce a per-user local path, so cross-WP signal sharing works automatically — there is no need for NFS/SMB. **Do not override this with a network-mounted path**: signal file atomicity (create → rename → check) is not guaranteed on NFS v3, SMB, or sshfs. Keep `SHARED_SIGNAL_DIR` on local disk.
 
-**Do not assume "Windows = unsupported".** psmux keeps the plugin's `tmux` detection valid on native Windows. The remaining gap is shell example compatibility (PowerShell vs bash), which is a separate workstream from signal routing.
+**Windows 네이티브 지원 원칙** — `detect_mux()`가 psmux를 명시적으로 식별하고, 모든 pane-측 런처는 Python으로 생성된다. `python3` 하드코딩 금지 (MS Store App Execution Alias가 가로채 rc=9009를 흘림) — 내부 서브프로세스에는 `sys.executable`을, tmux/psmux에 전달하는 명령에는 `"{sys.executable}" "{abs_path}"` 형태를 사용한다. 모든 파일 쓰기는 `open(..., "w", encoding="utf-8", newline="\n")` — 기본 text 모드가 Windows에서 `\n`→`\r\n`으로 바꿔 bash 런처가 CRLF로 깨지는 문제 방지.
