@@ -491,7 +491,7 @@ monitor-server.py, python3
 - category: infrastructure
 - domain: infra
 - model: sonnet
-- status: [ ]
+- status: [dd]
 - priority: high
 - assignee: -
 - schedule: 2026-05-05 ~ 2026-05-06
