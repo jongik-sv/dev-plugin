@@ -134,7 +134,7 @@ monitor-server.py, python3
 - category: development
 - domain: backend
 - model: sonnet
-- status: [ts]
+- status: [xx]
 - priority: high
 - assignee: -
 - schedule: 2026-04-23 ~ 2026-04-23
