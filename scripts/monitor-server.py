@@ -134,6 +134,25 @@ def _signal_entry(path: str, scope: str) -> Optional[SignalEntry]:
     )
 
 
+def _walk_signal_entries(root: str, scope: str) -> List[SignalEntry]:
+    """Recursively collect valid ``SignalEntry`` items under *root* with *scope*.
+
+    Returns ``[]`` if *root* is not an existing directory — callers do not need to
+    pre-check ``os.path.isdir``. Files with unknown extensions are silently
+    skipped by ``_signal_entry``.
+    """
+    if not os.path.isdir(root):
+        return []
+    collected: List[SignalEntry] = []
+    for dirpath, _dirnames, filenames in os.walk(root):
+        for fn in filenames:
+            full = os.path.join(dirpath, fn)
+            entry = _signal_entry(full, scope)
+            if entry is not None:
+                collected.append(entry)
+    return collected
+
+
 def scan_signals() -> List[SignalEntry]:
     """Enumerate signal files under ``${TMPDIR}``.
 
@@ -153,30 +172,14 @@ def scan_signals() -> List[SignalEntry]:
     entries: List[SignalEntry] = []
 
     # (A) Shared scope — recursive walk under claude-signals/
-    shared_root = os.path.join(tmp_root, "claude-signals")
-    if os.path.isdir(shared_root):
-        for dirpath, _dirnames, filenames in os.walk(shared_root):
-            for fn in filenames:
-                full = os.path.join(dirpath, fn)
-                entry = _signal_entry(full, "shared")
-                if entry is not None:
-                    entries.append(entry)
+    entries.extend(_walk_signal_entries(os.path.join(tmp_root, "claude-signals"), "shared"))
 
     # (B) Agent-pool scope — each agent-pool-signals-{timestamp}/ directory
-    pool_pattern = os.path.join(tmp_root, "agent-pool-signals-*")
-    for pool_dir in glob.glob(pool_pattern):
-        if not os.path.isdir(pool_dir):
-            continue
+    prefix = "agent-pool-signals-"
+    for pool_dir in glob.glob(os.path.join(tmp_root, f"{prefix}*")):
         pool_name = os.path.basename(pool_dir)
-        prefix = "agent-pool-signals-"
         timestamp = pool_name[len(prefix):] if pool_name.startswith(prefix) else pool_name
-        scope = f"agent-pool:{timestamp}"
-        for dirpath, _dirnames, filenames in os.walk(pool_dir):
-            for fn in filenames:
-                full = os.path.join(dirpath, fn)
-                entry = _signal_entry(full, scope)
-                if entry is not None:
-                    entries.append(entry)
+        entries.extend(_walk_signal_entries(pool_dir, f"agent-pool:{timestamp}"))
 
     return entries
 
@@ -209,13 +212,11 @@ def list_tmux_panes() -> Optional[List[PaneInfo]]:
             cmd,
             capture_output=True,
             text=True,
-            timeout=2,
+            timeout=_LIST_PANES_TIMEOUT,
             check=False,
             shell=False,
         )
-    except subprocess.TimeoutExpired:
-        return []
-    except (OSError, subprocess.SubprocessError):
+    except (subprocess.TimeoutExpired, OSError, subprocess.SubprocessError):
         return []
 
     if completed.returncode != 0:
@@ -274,26 +275,25 @@ def capture_pane(pane_id: str) -> str:
     if not isinstance(pane_id, str) or not _PANE_ID_RE.fullmatch(pane_id):
         raise ValueError(f"invalid pane_id: {pane_id!r} (must match ^%\\d+$)")
 
-    cmd = ["tmux", "capture-pane", "-t", pane_id, "-p", "-S", "-500"]
+    cmd = ["tmux", "capture-pane", "-t", pane_id, "-p", "-S", _CAPTURE_PANE_SCROLLBACK]
     try:
         completed = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
-            timeout=3,
+            timeout=_CAPTURE_PANE_TIMEOUT,
             check=False,
             shell=False,
         )
     except subprocess.TimeoutExpired:
-        return f"tmux capture-pane timed out after 3s for {pane_id}"
+        return f"tmux capture-pane timed out after {_CAPTURE_PANE_TIMEOUT}s for {pane_id}"
     except (OSError, subprocess.SubprocessError) as exc:
         return f"tmux capture-pane failed for {pane_id}: {exc}"
 
     if completed.returncode != 0:
         stderr = (completed.stderr or "").strip()
-        if stderr:
-            return f"{stderr} (pane {pane_id})"
-        return f"tmux capture-pane exited with code {completed.returncode} for {pane_id}"
+        detail = stderr if stderr else f"exited with code {completed.returncode}"
+        return f"{detail} (pane {pane_id})"
 
     return _ANSI_RE.sub("", completed.stdout or "")
 
@@ -391,28 +391,36 @@ def _read_state_json(path: Path) -> Tuple[Optional[dict], Optional[str]]:
     return data, None
 
 
+def _normalize_elapsed(value) -> Optional[float]:
+    """Return *value* if it is numeric (int/float, not bool), else None.
+
+    Centralises the defensive coercion used for both ``state.json.elapsed_seconds``
+    and ``phase_history[*].elapsed_seconds`` so both call sites share one rule.
+    ``bool`` is excluded because ``isinstance(True, int) is True`` in Python, and a
+    state.json serialising a boolean into this slot is almost certainly corrupt.
+    """
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return value
+    return None
+
+
 def _build_phase_history_tail(history) -> List[PhaseEntry]:
     """phase_history[-10:] 를 ``PhaseEntry`` 리스트로 변환. 비정상 원소는 스킵."""
     if not isinstance(history, list):
         return []
-    tail = history[-_PHASE_TAIL_LIMIT:]
     result: List[PhaseEntry] = []
-    for entry in tail:
+    for entry in history[-_PHASE_TAIL_LIMIT:]:
         if not isinstance(entry, dict):
             continue
-        elapsed = entry.get("elapsed_seconds")
-        if elapsed is not None and not isinstance(elapsed, (int, float)):
-            elapsed = None
-        try:
-            result.append(PhaseEntry(
-                event=entry.get("event"),
-                from_status=entry.get("from"),
-                to_status=entry.get("to"),
-                at=entry.get("at"),
-                elapsed_seconds=elapsed,
-            ))
-        except TypeError:
-            continue
+        result.append(PhaseEntry(
+            event=entry.get("event"),
+            from_status=entry.get("from"),
+            to_status=entry.get("to"),
+            at=entry.get("at"),
+            elapsed_seconds=_normalize_elapsed(entry.get("elapsed_seconds")),
+        ))
     return result
 
 
@@ -521,9 +529,6 @@ def _make_workitem_from_state(
     last_block = data.get("last")
     if not isinstance(last_block, dict):
         last_block = {}
-    elapsed = data.get("elapsed_seconds")
-    if elapsed is not None and not isinstance(elapsed, (int, float)):
-        elapsed = None
     return WorkItem(
         id=item_id,
         kind=kind,
@@ -532,7 +537,7 @@ def _make_workitem_from_state(
         status=data.get("status"),
         started_at=data.get("started_at"),
         completed_at=data.get("completed_at"),
-        elapsed_seconds=elapsed,
+        elapsed_seconds=_normalize_elapsed(data.get("elapsed_seconds")),
         bypassed=bool(data.get("bypassed", False)),
         bypassed_reason=data.get("bypassed_reason"),
         last_event=last_block.get("event"),
@@ -544,6 +549,52 @@ def _make_workitem_from_state(
     )
 
 
+def _resolve_abs_path(path: Path) -> str:
+    """Return ``str(path.resolve())``, falling back to ``str(path)`` on OSError.
+
+    ``resolve()`` can raise on FIFO/socket nodes or broken symlinks — the scan
+    loop must never abort mid-iteration, so we degrade to the raw path string.
+    """
+    try:
+        return str(path.resolve())
+    except OSError:
+        return str(path)
+
+
+# Lookup callable signature: (item_id, state_path) -> (title, wp_id, depends)
+# Used by ``_scan_dir`` so ``scan_tasks`` and ``scan_features`` can share the
+# filesystem-walking skeleton while supplying their own metadata sources.
+
+
+def _scan_dir(docs_dir: Path, subdir: str, kind: str, lookup) -> List[WorkItem]:
+    """Walk ``{docs_dir}/{subdir}/*/state.json`` and build ``WorkItem`` list.
+
+    Common skeleton for ``scan_tasks`` (kind="wbs") and ``scan_features``
+    (kind="feat"). Per-kind metadata is resolved via the ``lookup`` callable so
+    the iteration/error-handling pattern stays in one place.
+    """
+    docs_dir = Path(docs_dir)
+    root = docs_dir / subdir
+    if not root.is_dir():
+        return []
+
+    items: List[WorkItem] = []
+    for state_path in sorted(root.glob("*/state.json")):
+        item_id = state_path.parent.name
+        abs_path = _resolve_abs_path(state_path)
+        title, wp_id, depends = lookup(item_id, state_path)
+        data, err = _read_state_json(state_path)
+        if err is not None:
+            items.append(_make_workitem_from_error(
+                item_id, kind, abs_path, err, wp_id, depends,
+            ))
+            continue
+        items.append(_make_workitem_from_state(
+            item_id, kind, abs_path, data, title, wp_id, depends,
+        ))
+    return items
+
+
 def scan_tasks(docs_dir: Path) -> List[WorkItem]:
     """``{docs_dir}/tasks/*/state.json`` 을 순회하며 ``WorkItem`` 리스트를 반환.
 
@@ -552,29 +603,12 @@ def scan_tasks(docs_dir: Path) -> List[WorkItem]:
     - wbs.md 가 있으면 title/wp_id/depends 를 함께 채운다 (1회 파싱).
     """
     docs_dir = Path(docs_dir)
-    tasks_root = docs_dir / "tasks"
-    if not tasks_root.is_dir():
-        return []
+    title_map = _load_wbs_title_map(docs_dir) if (docs_dir / "tasks").is_dir() else {}
 
-    title_map = _load_wbs_title_map(docs_dir)
-    items: List[WorkItem] = []
-    for state_path in sorted(tasks_root.glob("*/state.json")):
-        tsk_id = state_path.parent.name
-        try:
-            abs_path = str(state_path.resolve())
-        except OSError:
-            abs_path = str(state_path)
-        title, wp_id, depends = title_map.get(tsk_id, (None, None, []))
-        data, err = _read_state_json(state_path)
-        if err is not None:
-            items.append(_make_workitem_from_error(
-                tsk_id, "wbs", abs_path, err, wp_id, depends,
-            ))
-            continue
-        items.append(_make_workitem_from_state(
-            tsk_id, "wbs", abs_path, data, title, wp_id, depends,
-        ))
-    return items
+    def _task_lookup(item_id, _state_path):
+        return title_map.get(item_id, (None, None, []))
+
+    return _scan_dir(docs_dir, "tasks", "wbs", _task_lookup)
 
 
 def scan_features(docs_dir: Path) -> List[WorkItem]:
@@ -584,29 +618,10 @@ def scan_features(docs_dir: Path) -> List[WorkItem]:
     - title 은 개별 feature 의 ``spec.md`` 첫 non-empty 줄에서 얻는다.
     - ``wp_id=None``, ``depends=[]`` 고정 — feature 는 WBS 의존성 매핑이 없다.
     """
-    docs_dir = Path(docs_dir)
-    feat_root = docs_dir / "features"
-    if not feat_root.is_dir():
-        return []
+    def _feat_lookup(_item_id, state_path):
+        return _load_feature_title(state_path.parent), None, []
 
-    items: List[WorkItem] = []
-    for state_path in sorted(feat_root.glob("*/state.json")):
-        feat_name = state_path.parent.name
-        try:
-            abs_path = str(state_path.resolve())
-        except OSError:
-            abs_path = str(state_path)
-        title = _load_feature_title(state_path.parent)
-        data, err = _read_state_json(state_path)
-        if err is not None:
-            items.append(_make_workitem_from_error(
-                feat_name, "feat", abs_path, err, None, [],
-            ))
-            continue
-        items.append(_make_workitem_from_state(
-            feat_name, "feat", abs_path, data, title, None, [],
-        ))
-    return items
+    return _scan_dir(docs_dir, "features", "feat", _feat_lookup)
 
 
 # ---------------------------------------------------------------------------
