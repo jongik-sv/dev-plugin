@@ -45,7 +45,7 @@ python3
 - category: development
 - domain: frontend
 - model: sonnet
-- status: [ ]
+- status: [xx]
 - priority: medium
 - assignee: -
 - schedule: 2026-04-21 ~ 2026-04-21
@@ -91,7 +91,7 @@ python3
 - category: development
 - domain: frontend
 - model: sonnet
-- status: [ ]
+- status: [xx]
 - priority: critical
 - assignee: -
 - schedule: 2026-04-22 ~ 2026-04-22
@@ -135,7 +135,7 @@ python3
 - category: development
 - domain: fullstack
 - model: sonnet
-- status: [ ]
+- status: [xx]
 - priority: critical
 - assignee: -
 - schedule: 2026-04-23 ~ 2026-04-23
@@ -180,7 +180,7 @@ python3
 - category: development
 - domain: fullstack
 - model: sonnet
-- status: [ ]
+- status: [xx]
 - priority: critical
 - assignee: -
 - schedule: 2026-04-23 ~ 2026-04-23
@@ -221,7 +221,7 @@ python3
 - category: development
 - domain: fullstack
 - model: opus
-- status: [ ]
+- status: [xx]
 - priority: critical
 - assignee: -
 - schedule: 2026-04-24 ~ 2026-04-24
@@ -267,7 +267,7 @@ python3
 - category: development
 - domain: fullstack
 - model: sonnet
-- status: [ ]
+- status: [xx]
 - priority: high
 - assignee: -
 - schedule: 2026-04-24 ~ 2026-04-24
@@ -307,7 +307,7 @@ python3
 - category: development
 - domain: fullstack
 - model: opus
-- status: [ ]
+- status: [xx]
 - priority: critical
 - assignee: -
 - schedule: 2026-04-25 ~ 2026-04-25
@@ -351,7 +351,7 @@ python3
 - category: development
 - domain: frontend
 - model: opus
-- status: [ ]
+- status: [xx]
 - priority: critical
 - assignee: -
 - schedule: 2026-04-26 ~ 2026-04-26
@@ -394,7 +394,7 @@ python3
 - category: development
 - domain: frontend
 - model: sonnet
-- status: [ ]
+- status: [xx]
 - priority: high
 - assignee: -
 - schedule: 2026-04-26 ~ 2026-04-26
@@ -430,7 +430,7 @@ python3
 - category: development
 - domain: frontend
 - model: sonnet
-- status: [ ]
+- status: [xx]
 - priority: critical
 - assignee: -
 - schedule: 2026-04-27 ~ 2026-04-27
@@ -477,7 +477,7 @@ python3
 - category: development
 - domain: frontend
 - model: sonnet
-- status: [ ]
+- status: [xx]
 - priority: medium
 - assignee: -
 - schedule: 2026-04-28 ~ 2026-04-28
@@ -514,7 +514,7 @@ python3
 - category: development
 - domain: frontend
 - model: sonnet
-- status: [ ]
+- status: [xx]
 - priority: medium
 - assignee: -
 - schedule: 2026-04-28 ~ 2026-04-28
