@@ -6,3 +6,6 @@ __pycache__/
 
 # Claude Code local state (scheduled tasks, session data)
 .claude/
+
+# Playwright MCP test artifacts (transient console logs / page snapshots)
+.playwright-mcp/
