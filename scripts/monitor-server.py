@@ -893,6 +893,11 @@ ol.phase-list li { margin-bottom: 0.25rem; font-size: 0.88rem; font-family: var(
   max-height: 4.5em;
   overflow: hidden;
   white-space: pre;
+  margin: 0.25rem 0 0;
+  word-break: break-all;
+}
+.pane-preview.empty {
+  font-style: italic;
 }
 .drawer-backdrop {
   display: none;
@@ -1083,6 +1088,18 @@ _SPARK_COLORS = {
     "pending": "var(--light-gray)",
 }
 
+# Display labels for each KPI kind (CSS handles text-transform: uppercase)
+_KPI_LABELS = {
+    "running": "Running",
+    "failed": "Failed",
+    "bypass": "Bypass",
+    "done": "Done",
+    "pending": "Pending",
+}
+
+# Ordered KPI kinds for rendering
+_KPI_ORDER = ["running", "failed", "bypass", "done", "pending"]
+
 
 def _parse_iso(s: Optional[str]) -> Optional[datetime]:
     """Parse ISO-8601 string to UTC-aware datetime. Returns None on failure.
@@ -1132,7 +1149,7 @@ def _kpi_counts(tasks, features, signals) -> dict:
     running_ids = (raw_running & all_ids) - bypass_ids - failed_ids
     done_ids = (raw_done & all_ids) - bypass_ids - failed_ids - running_ids
 
-    n_bypass = len(bypass_ids & all_ids)
+    n_bypass = len(bypass_ids)  # bypass_ids is already a subset of all_ids
     n_failed = len(failed_ids)
     n_running = len(running_ids)
     n_done = len(done_ids)
@@ -1219,16 +1236,11 @@ def _kpi_spark_svg(buckets: List[int], color: str) -> str:
         # Flat baseline
         points = f"0,24 {vb_right},24"
     else:
-        pts = []
-        for i, val in enumerate(buckets):
-            x = i
-            y = 24 - int(24 * val / max_val)
-            pts.append(f"{x},{y}")
+        pts = [f"{i},{24 - int(24 * val / max_val)}" for i, val in enumerate(buckets)]
         points = " ".join(pts)
 
     return (
-        f'<svg class="kpi-sparkline" viewBox="{viewbox}" '
-        f'xmlns="http://www.w3.org/2000/svg">'
+        f'<svg class="kpi-sparkline" viewBox="{viewbox}">'
         f'<title>{_esc(title_text)}</title>'
         f'<polyline points="{points}" stroke="{color}" fill="none" stroke-width="1.5"/>'
         f'</svg>'
@@ -1267,22 +1279,13 @@ def _section_kpi(model: dict) -> str:
     all_items = list(tasks) + list(features)
     now = datetime.now(timezone.utc)
 
-    kpi_order = ["running", "failed", "bypass", "done", "pending"]
-    kpi_labels = {
-        "running": "RUNNING",
-        "failed": "FAILED",
-        "bypass": "BYPASS",
-        "done": "DONE",
-        "pending": "PENDING",
-    }
-
     cards_html = []
-    for kind in kpi_order:
+    for kind in _KPI_ORDER:
         color = _SPARK_COLORS[kind]
         buckets = _spark_buckets(all_items, kind, now)
         svg = _kpi_spark_svg(buckets, color)
         n = counts[kind]
-        label = kpi_labels[kind]
+        label = _KPI_LABELS[kind]
         cards_html.append(
             f'<div class="kpi-card {kind}" data-kpi="{kind}">\n'
             f'  <span class="kpi-label">{label}</span>\n'
@@ -1573,23 +1576,68 @@ def _pane_attr(pane, key: str, default=""):
     return getattr(pane, key, default)
 
 
-def _render_pane_row(pane) -> str:
-    """Render a single ``<div class="pane-row">`` for a tmux pane."""
-    pane_id_esc = _esc(_pane_attr(pane, "pane_id", ""))
+def _pane_last_n_lines(pane_id: str, n: int = 3) -> str:
+    """Return the last *n* non-blank lines from a tmux pane's scrollback.
+
+    Calls ``capture_pane(pane_id)`` and strips trailing whitespace-only lines
+    before taking the tail.  Returns an empty string on any error or when the
+    result is entirely blank.
+    """
+    try:
+        raw = capture_pane(pane_id)
+    except Exception:
+        return ""
+    # rstrip removes trailing whitespace/newlines; splitlines() handles all
+    # line-ending variants and produces no trailing empty element.
+    lines = raw.rstrip().splitlines()
+    if not lines:
+        return ""
+    return "\n".join(lines[-n:])
+
+
+def _render_pane_row(pane, preview_lines: "Optional[str]" = "") -> str:
+    """Render a single ``<div class="pane-row">`` for a tmux pane.
+
+    Args:
+        pane: PaneInfo dataclass or its dict form.
+        preview_lines: Last-N-lines text to show in the preview ``<pre>``.
+            - ``str`` (including empty string): renders
+              ``<pre class="pane-preview">{preview_lines}</pre>``
+            - ``None``: renders the "too many panes" placeholder
+              ``<pre class="pane-preview empty">no preview (too many panes)</pre>``
+    """
+    pane_id_raw = _pane_attr(pane, "pane_id", "")
+    pane_id_esc = _esc(pane_id_raw)
     pane_idx = _esc(_pane_attr(pane, "pane_index", ""))
     cmd = _esc(_pane_attr(pane, "pane_current_command", ""))
     pid = _esc(_pane_attr(pane, "pane_pid", ""))
+
+    if preview_lines is None:
+        preview_html = '<pre class="pane-preview empty">no preview (too many panes)</pre>'
+    else:
+        preview_html = f'<pre class="pane-preview">{_esc(preview_lines)}</pre>'
+
     return (
         '<div class="pane-row">\n'
         f'  <span class="id">{pane_id_esc}</span>'
         f' <span class="elapsed">#{pane_idx} {cmd} (pid {pid})</span>'
-        f' <a class="pane-link" href="/pane/{pane_id_esc}">[show output]</a>\n'
+        f' <a class="pane-link" href="/pane/{pane_id_esc}">[show output]</a>'
+        f' <button data-pane-expand="{pane_id_esc}">[expand ↗]</button>\n'
+        f'{preview_html}\n'
         '</div>'
     )
 
 
+_TOO_MANY_PANES_THRESHOLD = 20
+
+
 def _section_team(panes) -> str:
-    """Team section: tmux panes + pane-output entry links (orphan-endpoint guard)."""
+    """Team section: tmux panes + inline preview + expand button.
+
+    When ``panes`` contains ≥ ``_TOO_MANY_PANES_THRESHOLD`` entries the
+    preview is suppressed (``preview_lines=None``) to control subprocess cost.
+    ``capture_pane()`` is the v1 implementation and is not called in that case.
+    """
     if panes is None:
         return _empty_section(
             "team",
@@ -1598,16 +1646,30 @@ def _section_team(panes) -> str:
             " other sections work normally.",
             css="info",
         )
-    if not panes:
+
+    all_panes = list(panes)
+    if not all_panes:
         return _empty_section("team", "Team Agents (tmux)", "no tmux panes running")
 
+    too_many = len(all_panes) >= _TOO_MANY_PANES_THRESHOLD
+
     groups, order = _group_preserving_order(
-        panes, lambda pane: _pane_attr(pane, "window_name", None) or "(unnamed)"
+        all_panes, lambda pane: _pane_attr(pane, "window_name", None) or "(unnamed)"
     )
 
     blocks: List[str] = []
     for window_name in order:
-        rows = "\n".join(_render_pane_row(pane) for pane in groups[window_name])
+        row_parts = [
+            _render_pane_row(
+                pane,
+                preview_lines=(
+                    None if too_many
+                    else _pane_last_n_lines(_pane_attr(pane, "pane_id", ""))
+                ),
+            )
+            for pane in groups[window_name]
+        ]
+        rows = "\n".join(row_parts)
         blocks.append(
             '<details open>\n'
             f'  <summary>{_esc(window_name)} ({len(groups[window_name])} panes)</summary>\n'
@@ -2035,6 +2097,8 @@ def render_dashboard(model: dict) -> str:
     features = model.get("features") or []
 
     sections = [
+        _section_sticky_header(model),
+        _section_kpi(model),
         _section_header(model),
         _section_wp_cards(tasks, running_ids, failed_ids),
         _section_features(features, running_ids, failed_ids),

@@ -528,9 +528,9 @@ class TestSectionKpi(unittest.TestCase):
         self.assertIn("chip-group", html)
 
     def test_kpi_card_labels(self):
-        """KPI 라벨 텍스트(RUNNING/FAILED/BYPASS/DONE/PENDING) 존재"""
+        """KPI 라벨 텍스트(Running/Failed/Bypass/Done/Pending) 존재 (CSS text-transform:uppercase로 화면 표시)"""
         html = _section_kpi(self._make_model())
-        for label in ("RUNNING", "FAILED", "BYPASS", "DONE", "PENDING"):
+        for label in ("Running", "Failed", "Bypass", "Done", "Pending"):
             self.assertIn(label, html)
 
     def test_color_vars_in_kpi(self):
