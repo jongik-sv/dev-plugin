@@ -933,16 +933,22 @@ ol.phase-list li { margin-bottom: 0.25rem; font-size: 0.88rem; font-family: var(
 }
 @media (max-width: 767px) {
   .sticky-hdr { padding: 0.5rem 1rem; }
-  .kpi-row { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 0.25rem; }
+  .kpi-row { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 0.25rem; scroll-snap-type: x mandatory; -webkit-overflow-scrolling: touch; }
+  .kpi-row > * { scroll-snap-align: start; flex-shrink: 0; }
   .kpi-card { min-width: 6rem; flex-shrink: 0; }
   .page { padding: 0.75rem 1rem; }
   .drawer { width: 100vw; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .badge-run { animation: none; }
-  .run-line  { animation: none; }
-  .activity-row { animation: none; }
-  .drawer { transition: none; }
+  .badge-run,
+  .run-line,
+  .activity-row { animation: none !important; }
+  .drawer { transition: none !important; }
+  * {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
 }
 """
 
@@ -1623,7 +1629,8 @@ def _render_pane_row(pane, preview_lines: "Optional[str]" = "") -> str:
         f'  <span class="id">{pane_id_esc}</span>'
         f' <span class="elapsed">#{pane_idx} {cmd} (pid {pid})</span>'
         f' <a class="pane-link" href="/pane/{pane_id_esc}">[show output]</a>'
-        f' <button data-pane-expand="{pane_id_esc}">[expand ↗]</button>\n'
+        f' <button class="expand-btn" data-pane-expand="{pane_id_esc}"'
+        f' aria-label="Expand pane {pane_id_esc}">[expand ↗]</button>\n'
         f'{preview_html}\n'
         '</div>'
     )
@@ -2084,8 +2091,9 @@ def _drawer_skeleton() -> str:
     """
     return (
         '<div class="drawer-backdrop" aria-hidden="true" data-drawer-backdrop></div>\n'
-        '<aside class="drawer" role="dialog" aria-modal="true" aria-hidden="true" data-drawer>\n'
-        '  <div class="drawer-header" data-drawer-header></div>\n'
+        '<aside class="drawer" role="dialog" aria-modal="true" aria-hidden="true"'
+        ' aria-labelledby="drawer-title" data-drawer>\n'
+        '  <div class="drawer-header" id="drawer-title" data-drawer-header></div>\n'
         '  <div class="drawer-body" data-drawer-body></div>\n'
         '</aside>'
     )
