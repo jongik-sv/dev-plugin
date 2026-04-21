@@ -15,7 +15,7 @@
 | domain | description | unit-test | e2e-test | e2e-server | e2e-url |
 |--------|-------------|-----------|----------|------------|---------|
 | backend | monitor-server.py 렌더·라우팅 (Python stdlib) | `python3 -m unittest discover scripts/ -v` | - | - | - |
-| frontend | 인라인 CSS/JS 대시보드 UI | - | - | `python3 scripts/monitor-launcher.py --port 7321 --docs docs` | `http://localhost:7321` |
+| frontend | 인라인 CSS/JS 대시보드 UI | `python3 -m unittest discover scripts/ -v` | `python3 scripts/test_monitor_e2e.py` | `python3 scripts/monitor-launcher.py --port 7321 --docs docs` | `http://localhost:7321` |
 | fullstack | 렌더 레이어(Python → HTML/CSS/JS) | `python3 -m unittest discover scripts/ -v` | - | `python3 scripts/monitor-launcher.py --port 7321 --docs docs` | `http://localhost:7321` |
 | test | 테스트 스위트 (unittest) | `python3 -m unittest discover scripts/ -v` | - | - | - |
 
@@ -91,7 +91,7 @@ python3
 - category: development
 - domain: frontend
 - model: sonnet
-- status: [dd]
+- status: [im]
 - priority: critical
 - assignee: -
 - schedule: 2026-04-22 ~ 2026-04-22
