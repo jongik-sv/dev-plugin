@@ -637,7 +637,7 @@ python3
 - category: infrastructure
 - domain: test
 - model: sonnet
-- status: [dd]
+- status: [xx]
 - priority: medium
 - assignee: -
 - schedule: 2026-05-01 ~ 2026-05-01
