@@ -1876,10 +1876,9 @@ def _section_live_activity(model):
         elapsed_str = _fmt_elapsed_short(elapsed_s)
         detail_str = _esc(from_s) + " → " + _esc(to_s)
         event_esc = _esc(event or "")
-        event_data = _esc(event or "")
 
         row_html = (
-            '<div class="activity-row" data-event="' + event_data + '">\n'
+            '<div class="activity-row" data-event="' + event_esc + '">\n'
             '  <span class="a-time">' + _esc(time_str) + '</span>\n'
             '  <span class="a-id">' + _esc(item_id) + '</span>\n'
             '  <span class="a-event ' + ev_cls + '">' + event_esc + '</span>\n'
@@ -1955,8 +1954,7 @@ def _timeline_rows(tasks, features, now, span_minutes=_TIMELINE_SPAN_MINUTES):
 
 def _x_of(t, now, span_minutes, W=600):
     """t 시각을 SVG X 좌표로 변환한다 (0.0 ~ W 클램프)."""
-    from datetime import timedelta as _td
-    origin = now - _td(minutes=span_minutes)
+    origin = now - timedelta(minutes=span_minutes)
     delta_sec = (t - origin).total_seconds()
     total_sec = span_minutes * 60
     return max(0.0, min(float(W), W * delta_sec / total_sec))
@@ -2000,7 +1998,7 @@ def _timeline_svg(rows, span_minutes, now, max_rows=_TIMELINE_MAX_ROWS, W=600):
     for i in range(13):
         x = i * W / 12
         minutes_ago = span_minutes - i * (span_minutes / 12)
-        label = "0m" if minutes_ago == 0 else ("-" + str(int(minutes_ago)) + "m")
+        label = "0m" if i == 12 else ("-" + str(int(minutes_ago)) + "m")
         tick_parts.append(
             '    <line x1="' + ("%.1f" % x) + '" y1="0" x2="' + ("%.1f" % x) + '" y2="' + str(H) + '" '
             'stroke="var(--border)" stroke-width="0.5"/>'
