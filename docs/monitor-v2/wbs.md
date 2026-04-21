@@ -599,7 +599,7 @@ python3
 - category: infrastructure
 - domain: test
 - model: sonnet
-- status: [ ]
+- status: [dd]
 - priority: high
 - assignee: -
 - schedule: 2026-04-30 ~ 2026-04-30
@@ -637,7 +637,7 @@ python3
 - category: infrastructure
 - domain: test
 - model: sonnet
-- status: [ ]
+- status: [dd]
 - priority: medium
 - assignee: -
 - schedule: 2026-05-01 ~ 2026-05-01
