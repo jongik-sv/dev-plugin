@@ -934,12 +934,24 @@ def _section_features(features, running_ids: set, failed_ids: set) -> str:
     return _section_wrap("features", "Features", rows)
 
 
+def _pane_attr(pane, key: str, default=""):
+    """Read ``key`` from a PaneInfo dataclass *or* its ``asdict`` dict form.
+
+    ``_build_state_snapshot`` coerces panes via ``_asdict_or_none`` so the
+    dashboard model receives ``list[dict]``; unit tests pass raw dataclasses.
+    Support both so the renderer doesn't silently emit empty fields.
+    """
+    if isinstance(pane, dict):
+        return pane.get(key, default)
+    return getattr(pane, key, default)
+
+
 def _render_pane_row(pane) -> str:
     """Render a single ``<div class="pane-row">`` for a tmux pane."""
-    pane_id_esc = _esc(getattr(pane, "pane_id", ""))
-    pane_idx = _esc(getattr(pane, "pane_index", ""))
-    cmd = _esc(getattr(pane, "pane_current_command", ""))
-    pid = _esc(getattr(pane, "pane_pid", ""))
+    pane_id_esc = _esc(_pane_attr(pane, "pane_id", ""))
+    pane_idx = _esc(_pane_attr(pane, "pane_index", ""))
+    cmd = _esc(_pane_attr(pane, "pane_current_command", ""))
+    pid = _esc(_pane_attr(pane, "pane_pid", ""))
     return (
         '<div class="pane-row">\n'
         f'  <span class="id">{pane_id_esc}</span>'
@@ -963,7 +975,7 @@ def _section_team(panes) -> str:
         return _empty_section("team", "Team Agents (tmux)", "no tmux panes running")
 
     groups, order = _group_preserving_order(
-        panes, lambda pane: getattr(pane, "window_name", None) or "(unnamed)"
+        panes, lambda pane: _pane_attr(pane, "window_name", None) or "(unnamed)"
     )
 
     blocks: List[str] = []
