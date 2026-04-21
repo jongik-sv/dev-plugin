@@ -1,0 +1,9 @@
+- generic [active] [ref=e1]:
+  - navigation [ref=e2]:
+    - link "← back to dashboard" [ref=e3] [cursor=pointer]:
+      - /url: /
+  - heading "pane %25139" [level=1] [ref=e4]:
+    - text: pane
+    - code [ref=e5]: "%25139"
+  - generic [ref=e6]: "can't find pane: %25139 (pane %25139)"
+  - generic [ref=e7]: captured at 2026-04-21T13:27:51Z

@@ -1,0 +1,95 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - heading "dev-plugin Monitor" [level=1] [ref=e3]
+    - generic [ref=e4]:
+      - term [ref=e5]: generated_at
+      - definition [ref=e6]: 2026-04-21T13:18:27Z
+      - term [ref=e7]: project_root
+      - definition [ref=e8]: /Users/jji/project/dev-plugin/.claude/worktrees/WP-02-monitor-v2
+      - term [ref=e9]: docs_dir
+      - definition [ref=e10]: docs
+    - navigation [ref=e11]:
+      - link "Wbs" [ref=e12] [cursor=pointer]:
+        - /url: "#wbs"
+      - link "Features" [ref=e13] [cursor=pointer]:
+        - /url: "#features"
+      - link "Team" [ref=e14] [cursor=pointer]:
+        - /url: "#team"
+      - link "Subagents" [ref=e15] [cursor=pointer]:
+        - /url: "#subagents"
+      - link "Phases" [ref=e16] [cursor=pointer]:
+        - /url: "#phases"
+      - button "◐ auto" [pressed] [ref=e17] [cursor=pointer]
+    - group "filter" [ref=e18]:
+      - button "All" [pressed] [ref=e19] [cursor=pointer]
+      - button "Running" [ref=e20] [cursor=pointer]
+      - button "Failed" [ref=e21] [cursor=pointer]
+      - button "Bypass" [ref=e22] [cursor=pointer]
+  - generic [ref=e23]:
+    - heading "WBS Tasks" [level=2] [ref=e24]
+    - paragraph [ref=e25]: no tasks found — docs/tasks/ is empty
+  - generic [ref=e26]:
+    - heading "Features" [level=2] [ref=e27]
+    - paragraph [ref=e28]: no features found — docs/features/ is empty
+  - generic [ref=e29]:
+    - heading "Team Agents (tmux)" [level=2] [ref=e30]
+    - group [ref=e31]:
+      - generic "zsh (2 panes)" [ref=e32] [cursor=pointer]
+      - generic [ref=e33]:
+        - text: "%0 #0 zsh (pid 77225)"
+        - link "[show output]" [ref=e34] [cursor=pointer]:
+          - /url: /pane/%0
+        - button "[expand ↗]" [ref=e35] [cursor=pointer]
+      - generic [ref=e36]:
+        - text: "%63 #0 zsh (pid 91582)"
+        - link "[show output]" [ref=e37] [cursor=pointer]:
+          - /url: /pane/%63
+        - button "[expand ↗]" [ref=e38] [cursor=pointer]
+    - group [ref=e39]:
+      - generic "claude.exe (2 panes)" [ref=e40] [cursor=pointer]
+      - generic [ref=e41]:
+        - text: "%64 #0 claude.exe (pid 97013)"
+        - link "[show output]" [ref=e42] [cursor=pointer]:
+          - /url: /pane/%64
+        - button "[expand ↗]" [ref=e43] [cursor=pointer]
+      - generic [ref=e44]:
+        - text: "%65 #0 claude.exe (pid 4883)"
+        - link "[show output]" [ref=e45] [cursor=pointer]:
+          - /url: /pane/%65
+        - button "[expand ↗]" [ref=e46] [cursor=pointer]
+    - group [ref=e47]:
+      - generic "WP-02-monitor-v2 (1 panes)" [ref=e48] [cursor=pointer]
+      - generic [ref=e49]:
+        - text: "%131 #0 Python (pid 67884)"
+        - link "[show output]" [ref=e50] [cursor=pointer]:
+          - /url: /pane/%131
+        - button "[expand ↗]" [ref=e51] [cursor=pointer]
+    - group [ref=e52]:
+      - generic "WP-04-monitor-v2 (4 panes)" [ref=e53] [cursor=pointer]
+      - generic [ref=e54]:
+        - text: "%139 #0 Python (pid 68164)"
+        - link "[show output]" [ref=e55] [cursor=pointer]:
+          - /url: /pane/%139
+        - button "[expand ↗]" [ref=e56] [cursor=pointer]
+      - generic [ref=e57]:
+        - text: "%140 #1 Python (pid 68223)"
+        - link "[show output]" [ref=e58] [cursor=pointer]:
+          - /url: /pane/%140
+        - button "[expand ↗]" [ref=e59] [cursor=pointer]
+      - generic [ref=e60]:
+        - text: "%141 #2 Python (pid 68245)"
+        - link "[show output]" [ref=e61] [cursor=pointer]:
+          - /url: /pane/%141
+        - button "[expand ↗]" [ref=e62] [cursor=pointer]
+      - generic [ref=e63]:
+        - text: "%142 #3 Python (pid 68310)"
+        - link "[show output]" [ref=e64] [cursor=pointer]:
+          - /url: /pane/%142
+        - button "[expand ↗]" [ref=e65] [cursor=pointer]
+  - generic [ref=e66]:
+    - heading "Subagents (agent-pool)" [level=2] [ref=e67]
+    - paragraph [ref=e68]: agent-pool subagents run inside the parent Claude session — output capture is unavailable (signals only).
+    - paragraph [ref=e69]: no agent-pool signals
+  - generic [ref=e70]:
+    - heading "Recent Phase History" [level=2] [ref=e71]
+    - paragraph [ref=e72]: no phase history yet

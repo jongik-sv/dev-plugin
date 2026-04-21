@@ -1,0 +1,100 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - heading "dev-plugin Monitor" [level=1] [ref=e3]
+    - generic [ref=e4]:
+      - term [ref=e5]: generated_at
+      - definition [ref=e6]: 2026-04-21T13:29:17Z
+      - term [ref=e7]: project_root
+      - definition [ref=e8]: /Users/jji/project/dev-plugin/.claude/worktrees/WP-04-monitor-v2
+      - term [ref=e9]: docs_dir
+      - definition [ref=e10]: docs/monitor-v2
+    - navigation [ref=e11]:
+      - link "Wbs" [ref=e12] [cursor=pointer]:
+        - /url: "#wbs"
+      - link "Features" [ref=e13] [cursor=pointer]:
+        - /url: "#features"
+      - link "Team" [ref=e14] [cursor=pointer]:
+        - /url: "#team"
+      - link "Subagents" [ref=e15] [cursor=pointer]:
+        - /url: "#subagents"
+      - link "Phases" [ref=e16] [cursor=pointer]:
+        - /url: "#phases"
+  - generic [ref=e17]:
+    - heading "WBS Tasks" [level=2] [ref=e18]
+    - group [ref=e19]:
+      - generic "WP-04 (3 tasks)" [ref=e20] [cursor=pointer]
+      - generic [ref=e21]:
+        - generic [ref=e22]: TSK-04-01
+        - generic [ref=e23]: 🟠 RUNNING
+        - generic [ref=e24]: 단위 테스트 추가 (unittest)
+        - generic [ref=e25]: 00:23:06
+        - generic [ref=e26]: ×1
+      - generic [ref=e27]:
+        - generic [ref=e28]: TSK-04-02
+        - generic [ref=e29]: 🟠 RUNNING
+        - generic [ref=e30]: 브라우저 수동 QA (Chrome / Safari / Firefox × 3 뷰포트)
+        - generic [ref=e31]: "-"
+        - generic [ref=e32]: ×0
+      - generic [ref=e33]:
+        - generic [ref=e34]: TSK-04-03
+        - generic [ref=e35]: 🔵 DESIGN
+        - generic [ref=e36]: 4-플랫폼 Smoke 테스트 (macOS / Linux / WSL2 / Windows psmux)
+        - generic [ref=e37]: "-"
+        - generic [ref=e38]: ×0
+  - generic [ref=e39]:
+    - heading "Features" [level=2] [ref=e40]
+    - paragraph [ref=e41]: no features found — docs/features/ is empty
+  - generic [ref=e42]:
+    - heading "Team Agents (tmux)" [level=2] [ref=e43]
+    - group [ref=e44]:
+      - generic "zsh (2 panes)" [ref=e45] [cursor=pointer]
+      - generic [ref=e46]:
+        - text: "%0 #0 zsh (pid 77225)"
+        - link "[show output]" [ref=e47] [cursor=pointer]:
+          - /url: /pane/%0
+      - generic [ref=e48]:
+        - text: "%63 #0 zsh (pid 91582)"
+        - link "[show output]" [ref=e49] [cursor=pointer]:
+          - /url: /pane/%63
+    - group [ref=e50]:
+      - generic "claude.exe (2 panes)" [ref=e51] [cursor=pointer]
+      - generic [ref=e52]:
+        - text: "%64 #0 claude.exe (pid 97013)"
+        - link "[show output]" [ref=e53] [cursor=pointer]:
+          - /url: /pane/%64
+      - generic [ref=e54]:
+        - text: "%65 #0 claude.exe (pid 4883)"
+        - link "[show output]" [ref=e55] [cursor=pointer]:
+          - /url: /pane/%65
+    - group [ref=e56]:
+      - generic "WP-04-monitor-v2 (4 panes)" [ref=e57] [cursor=pointer]
+      - generic [ref=e58]:
+        - text: "%139 #0 Python (pid 68164)"
+        - link "[show output]" [ref=e59] [cursor=pointer]:
+          - /url: /pane/%139
+      - generic [ref=e60]:
+        - text: "%140 #1 Python (pid 68223)"
+        - link "[show output]" [ref=e61] [cursor=pointer]:
+          - /url: /pane/%140
+      - generic [ref=e62]:
+        - text: "%141 #2 Python (pid 68245)"
+        - link "[show output]" [ref=e63] [cursor=pointer]:
+          - /url: /pane/%141
+      - generic [ref=e64]:
+        - text: "%142 #3 Python (pid 68310)"
+        - link "[show output]" [ref=e65] [cursor=pointer]:
+          - /url: /pane/%142
+  - generic [ref=e66]:
+    - heading "Subagents (agent-pool)" [level=2] [ref=e67]
+    - paragraph [ref=e68]: agent-pool subagents run inside the parent Claude session — output capture is unavailable (signals only).
+    - paragraph [ref=e69]: no agent-pool signals
+  - generic [ref=e70]:
+    - heading "Recent Phase History" [level=2] [ref=e71]
+    - list [ref=e72]:
+      - listitem [ref=e73]: 2026-04-21T12:56:00Z · TSK-04-01 · refactor.ok · [ts] → [xx] · 279s
+      - listitem [ref=e74]: 2026-04-21T12:51:21Z · TSK-04-01 · test.ok · [im] → [ts] · 429s
+      - listitem [ref=e75]: 2026-04-21T12:44:12Z · TSK-04-01 · test.fail · [im] → [im] · 365s
+      - listitem [ref=e76]: 2026-04-21T12:38:07Z · TSK-04-01 · build.ok · [dd] → [im] · 313s
+      - listitem [ref=e77]: 2026-04-21T12:32:54Z · TSK-04-01 · design.ok · [ ] → [dd] · 0s
+      - listitem [ref=e78]: 2026-04-21T12:30:45Z · TSK-04-03 · design.ok · [ ] → [dd] · 0s
+      - listitem [ref=e79]: 2026-04-21T12:30:30Z · TSK-04-02 · design.ok · [ ] → [dd] · 0s
