@@ -307,7 +307,7 @@ python3
 - category: development
 - domain: fullstack
 - model: opus
-- status: [ ]
+- status: [dd]
 - priority: critical
 - assignee: -
 - schedule: 2026-04-25 ~ 2026-04-25
