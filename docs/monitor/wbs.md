@@ -358,6 +358,59 @@ monitor-server.py, python3
   - TRD §5.1 WorkItem / §5.2 SignalEntry / §5.3 PaneInfo
 - ui-spec: -
 
+### TSK-01-07: Feature 섹션 스캔·렌더 (DEFECT-1 후속)
+- category: development
+- domain: fullstack
+- model: sonnet
+- status: [ ]
+- priority: high
+- assignee: -
+- schedule: 2026-05-04 ~ 2026-05-04
+- tags: server, feature, scan, renderer
+- depends: TSK-01-02, TSK-01-04
+- blocked-by: -
+- entry-point: scripts/monitor-server.py
+- note: TSK-03-02 QA에서 발견된 DEFECT-1. `docs/features/*/state.json`을 스캔하여 대시보드 Feature 섹션에 렌더. 현재 `_section_features`는 빈 리스트만 처리. Feature 모드(`/feat`) 사용자에게 진행 상황 노출.
+
+#### 구현 스펙
+- `scan_features(docs_dir)` → List[FeatureInfo] — `docs/features/*/state.json` 읽어 반환
+- `_section_features(features, running_ids, failed_ids)` — 테이블/카드 렌더
+- `_build_state_snapshot`의 `features` 필드 채우기
+- api/state JSON에 `features` 배열 포함
+
+#### 수락 기준
+1. `docs/features/sample/state.json`이 존재하면 대시보드 Feature 섹션에 행이 렌더된다.
+2. Feature 없으면 "no features" 안내 렌더.
+3. `/api/state` 응답 `features` 필드에 동일 데이터 포함.
+
+#### 테스트
+- unit: `scan_features` 함수 직접 호출 (fixture docs dir)
+- E2E: 임시 features 디렉토리 생성 후 대시보드 HTTP GET 검증
+
+### TSK-01-08: 손상 state.json 경고 배지 (DEFECT-2 후속)
+- category: development
+- domain: backend
+- model: sonnet
+- status: [ ]
+- priority: medium
+- assignee: -
+- schedule: 2026-05-04 ~ 2026-05-04
+- tags: server, error-handling, ui
+- depends: TSK-01-02, TSK-01-04
+- blocked-by: -
+- entry-point: scripts/monitor-server.py
+- note: TSK-03-02 QA에서 발견된 DEFECT-2. `scan_tasks`가 손상된 state.json을 silent skip하여 사용자가 문제를 인식할 수 없음. 에러 Task에 경고 배지 또는 로그 렌더링 필요.
+
+#### 구현 스펙
+- `scan_tasks`에 `error: Optional[str]` 필드 추가 — JSON 파싱 실패 시 에러 메시지 기록
+- 대시보드 WBS 섹션 렌더 시 `error != None`인 Task에 ⚠ 배지 + 툴팁
+- `/api/state`의 `wbs_tasks` 엔트리에도 `error` 필드 포함
+
+#### 수락 기준
+1. state.json이 문법 오류면 해당 Task 행에 경고 배지 표시
+2. 정상 Task와 시각적으로 구분
+3. `/api/state`에서 `error` 필드로 노출
+
 ---
 
 ## WP-02: /dev-monitor 스킬
