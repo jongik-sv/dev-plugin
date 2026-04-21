@@ -32,6 +32,7 @@ Skills delegate deterministic work to Python scripts (cross-platform: Mac/Linux/
 | `scripts/e2e-server.py` | E2E server lifecycle management (check/start/stop). URL health check + background server + PID file. 서버 기동과 테스트 실행을 분리하여 타임아웃 체인 충돌 해소 | dev-test |
 | `scripts/cleanup-orphaned.py` | Orphaned test process cleanup (legacy fallback) | manual use |
 | `scripts/graceful-shutdown.py` | WP 창 정상 종료 (Mac/Linux tmux 전용). absolute `window_id`(`@N`)로 타겟 해석(`=name` exact-match + 결과 검증 → `list-windows` 스캔 폴백) + self-protection(기본 ON: 자기 window 타겟 시 abort). `--no-marker`로 머지 정리 경로(`.shutdown` 마커 생략) 겸용. **Windows(psmux)에서는 no-op** — psmux window 해석 신뢰성 문제로 엉뚱한 창을 kill하는 사고가 반복되어 창 종료를 사용자에게 위임한다(merge는 `.done` 시그널 기반이라 영향 없음) | dev-team, merge-procedure |
+| `scripts/leader-autopsy.py` | WP 리더 비정상 사망 시 포렌식 덤프 (pane scrollback + signals + git + env → `docs/dev-team/autopsy/{WT_NAME}-{UTC_TS}/`). zero-LLM 스크립트 — 팀리더는 `summary.txt`만 Read. 가성비 기본값으로 transcript 생략, `--include-transcript`/`--transcript-tail N` 토글 | dev-team (Leader Death 복구 step 0) |
 | `scripts/_platform.py` | Cross-platform utilities (temp dir, JSON escape) | available for scripts |
 
 All scripts use `${CLAUDE_PLUGIN_ROOT}/scripts/` as base path. Python 3 standard library only — no pip dependencies.
