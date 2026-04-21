@@ -21,17 +21,20 @@ HTTP 레이어와 독립적인 순수 함수만 배치하므로 병렬·후행 T
 
 from __future__ import annotations
 
+import argparse
 import glob
 import html
 import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
 from dataclasses import asdict, dataclass, field, is_dataclass
 from datetime import datetime, timezone
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 from urllib.parse import urlsplit
@@ -1111,6 +1114,250 @@ def render_dashboard(model: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Pane capture endpoints (TSK-01-05)
+# ---------------------------------------------------------------------------
+
+_PANE_PATH_PREFIX = "/pane/"
+_API_PANE_PATH_PREFIX = "/api/pane/"
+_DEFAULT_MAX_PANE_LINES = 500
+
+# Inline vanilla JS for 2-second partial refresh of <pre class="pane-capture">.
+# No external src — fetch + setInterval are browser built-ins.
+_PANE_JS = """\
+(function(){
+  var pre = document.querySelector('pre.pane-capture');
+  var ftr = document.querySelector('.footer');
+  if (!pre) return;
+  var paneId = pre.getAttribute('data-pane');
+  function tick(){
+    fetch('/api/pane/' + encodeURIComponent(paneId), {cache:'no-store'})
+      .then(function(r){ return r.ok ? r.json() : null; })
+      .then(function(j){
+        if (!j) return;
+        pre.textContent = (j.lines || []).join('\\n');
+        if (ftr) ftr.textContent = 'captured at ' + j.captured_at;
+      })
+      .catch(function(){ /* silent: loop continues on next tick */ });
+  }
+  setInterval(tick, 2000);
+})();"""
+
+_PANE_CSS = """\
+:root {
+  --bg: #0d1117; --fg: #e6edf3; --muted: #8b949e; --border: #30363d;
+  --panel: #161b22; --accent: #58a6ff; --warn: #f85149;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; padding: 1.25rem 1.5rem;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg); color: var(--fg); line-height: 1.5;
+}
+h1 { font-size: 1.25rem; margin: 0 0 0.5rem; }
+nav.top-nav { margin: 0 0 1rem; padding: 0.25rem 0; border-bottom: 1px solid var(--border); }
+nav.top-nav a { color: var(--accent); text-decoration: none; }
+nav.top-nav a:hover { text-decoration: underline; }
+pre.pane-capture {
+  background: #0d1117; border: 1px solid var(--border); border-radius: 4px;
+  padding: 0.75rem; margin: 0.5rem 0;
+  white-space: pre-wrap; word-break: break-all;
+  max-height: 75vh; overflow: auto;
+  font-family: "SFMono-Regular", Consolas, monospace; font-size: 0.85rem;
+}
+.error { color: var(--warn); font-weight: 600; margin: 0.5rem 0; }
+.footer { color: var(--muted); font-size: 0.8rem; margin-top: 0.5rem; }"""
+
+
+def _is_pane_html_path(path: str) -> bool:
+    """Return True iff *path* starts with ``/pane/`` but NOT ``/api/pane/``."""
+    if not isinstance(path, str):
+        return False
+    return path.startswith(_PANE_PATH_PREFIX) and not path.startswith(_API_PANE_PATH_PREFIX)
+
+
+def _is_pane_api_path(path: str) -> bool:
+    """Return True iff *path* starts with ``/api/pane/``."""
+    if not isinstance(path, str):
+        return False
+    return path.startswith(_API_PANE_PATH_PREFIX)
+
+
+def _pane_capture_payload(
+    pane_id: str,
+    capture: Callable[[str], str],
+    max_lines: int = _DEFAULT_MAX_PANE_LINES,
+) -> dict:
+    """Build the shared payload dict for both HTML and JSON pane endpoints.
+
+    Validation: ``^%\\d+$`` regex. Raises ``ValueError`` on format violation so the
+    HTTP layer can map to 400 without ever spawning a subprocess.
+
+    On subprocess failure the returned dict has ``error`` populated and ``lines``
+    contains a single error message line. HTTP status stays 200 (acceptance §1).
+    On success ``error`` is ``None``.
+
+    Truncation: the *last* ``max_lines`` lines are kept; ``truncated_from`` holds
+    the original line count before truncation.
+    """
+    if not isinstance(pane_id, str) or not _PANE_ID_RE.fullmatch(pane_id):
+        raise ValueError(f"invalid pane id: {pane_id!r}")
+
+    error: Optional[str] = None
+    try:
+        raw_text = capture(pane_id)
+    except FileNotFoundError:
+        error = "tmux not available"
+        raw_text = f"capture failed: {error}"
+    except Exception as exc:  # noqa: BLE001
+        error = str(exc)
+        raw_text = f"capture failed: {error}"
+
+    all_lines = raw_text.splitlines()
+    original_count = len(all_lines)
+    lines = all_lines[-max_lines:] if original_count > max_lines else all_lines
+
+    captured_at = (
+        datetime.now(timezone.utc)
+        .isoformat(timespec="seconds")
+        .replace("+00:00", "Z")
+    )
+
+    return {
+        "pane_id": pane_id,
+        "captured_at": captured_at,
+        "lines": lines,
+        "line_count": len(lines),
+        "truncated_from": original_count,
+        "error": error,
+    }
+
+
+def _render_pane_html(
+    pane_id: str,
+    payload: dict,
+    *,
+    refresh_seconds: int = 2,
+) -> str:
+    """Render a complete HTML document for the pane detail page.
+
+    All user-derived strings are escaped with ``html.escape``. No external
+    resources are loaded — CSS and JS are fully inline. The page uses vanilla
+    JS ``setInterval + fetch`` for partial refresh (no ``<meta http-equiv=refresh>``).
+    """
+    escaped_id = html.escape(pane_id, quote=True)
+    escaped_ts = html.escape(payload.get("captured_at") or "", quote=True)
+    lines = payload.get("lines") or []
+    escaped_lines = "\n".join(html.escape(ln, quote=True) for ln in lines)
+    error_val = payload.get("error")
+    error_block = (
+        f'<p class="error">capture failed: {html.escape(str(error_val), quote=True)}</p>\n'
+        if error_val is not None
+        else ""
+    )
+
+    return (
+        '<!DOCTYPE html>\n'
+        '<html lang="en">\n'
+        '<head>\n'
+        '  <meta charset="utf-8">\n'
+        f'  <title>pane {escaped_id}</title>\n'
+        f'  <style>{_PANE_CSS}</style>\n'
+        '</head>\n'
+        '<body>\n'
+        '<nav class="top-nav"><a href="/">&#x2190; back to dashboard</a></nav>\n'
+        f'<h1>pane <code>{escaped_id}</code></h1>\n'
+        f'{error_block}'
+        f'<pre class="pane-capture" data-pane="{escaped_id}">{escaped_lines}</pre>\n'
+        f'<div class="footer">captured at {escaped_ts}</div>\n'
+        f'<script>{_PANE_JS}</script>\n'
+        '</body>\n'
+        '</html>\n'
+    )
+
+
+def _render_pane_json(payload: dict) -> bytes:
+    """Serialize the pane payload dict to UTF-8 JSON bytes.
+
+    ``line_count`` is always present (acceptance §3).
+    """
+    return json.dumps(payload, ensure_ascii=False).encode("utf-8")
+
+
+def _send_html_response(handler, status: int, body_str: str) -> None:
+    """Write a text/html; charset=utf-8 response to *handler*."""
+    body = body_str.encode("utf-8")
+    handler.send_response(status)
+    handler.send_header("Content-Type", "text/html; charset=utf-8")
+    handler.send_header("Content-Length", str(len(body)))
+    handler.send_header("Cache-Control", "no-store")
+    handler.end_headers()
+    handler.wfile.write(body)
+
+
+def _handle_pane_html(
+    handler,
+    pane_id: str,
+    *,
+    capture: Callable[[str], str] = capture_pane,
+    max_lines: Optional[int] = None,
+) -> None:
+    """Handle ``GET /pane/{pane_id}`` — respond with HTML.
+
+    - Invalid pane_id → 400 HTML error page.
+    - Subprocess failure (any returncode) → 200 HTML with error message.
+    - tmux binary missing (FileNotFoundError) → 200 HTML with 'tmux not available'.
+    """
+    if max_lines is None:
+        server_obj = getattr(handler, "server", None)
+        max_lines = int(getattr(server_obj, "max_pane_lines", _DEFAULT_MAX_PANE_LINES))
+
+    try:
+        payload = _pane_capture_payload(pane_id, capture, max_lines=max_lines)
+    except ValueError:
+        error_html = (
+            '<!DOCTYPE html><html><body>'
+            '<div class="error">invalid pane id</div>'
+            '</body></html>'
+        )
+        _send_html_response(handler, 400, error_html)
+        return
+
+    html_body = _render_pane_html(pane_id, payload)
+    _send_html_response(handler, 200, html_body)
+
+
+def _handle_pane_api(
+    handler,
+    pane_id: str,
+    *,
+    capture: Callable[[str], str] = capture_pane,
+    max_lines: Optional[int] = None,
+) -> None:
+    """Handle ``GET /api/pane/{pane_id}`` — respond with JSON.
+
+    - Invalid pane_id → 400 JSON ``{"error":"invalid pane id","code":400}``.
+    - Subprocess failure → 200 JSON with ``error`` field; ``line_count`` always present.
+    """
+    if max_lines is None:
+        server_obj = getattr(handler, "server", None)
+        max_lines = int(getattr(server_obj, "max_pane_lines", _DEFAULT_MAX_PANE_LINES))
+
+    try:
+        payload = _pane_capture_payload(pane_id, capture, max_lines=max_lines)
+    except ValueError:
+        _json_error(handler, 400, "invalid pane id")
+        return
+
+    body = _render_pane_json(payload)
+    handler.send_response(200)
+    handler.send_header("Content-Type", "application/json; charset=utf-8")
+    handler.send_header("Content-Length", str(len(body)))
+    handler.send_header("Cache-Control", "no-store")
+    handler.end_headers()
+    handler.wfile.write(body)
+
+
+# ---------------------------------------------------------------------------
 # /api/state JSON snapshot endpoint (TSK-01-06)
 # ---------------------------------------------------------------------------
 
@@ -1305,12 +1552,244 @@ def _handle_api_state(
 
 
 # ---------------------------------------------------------------------------
-# Entry point (skeleton — real CLI arrives with TSK-01-01)
+# HTTP Handler & Server (TSK-01-01)
 # ---------------------------------------------------------------------------
 
-if __name__ == "__main__":  # pragma: no cover - skeleton placeholder
-    # TSK-01-01 will replace this block with argparse + HTTPServer bootstrap.
-    sys.stderr.write(
-        "monitor-server.py: HTTP bootstrap not yet wired (TSK-01-01 pending).\n"
+
+class MonitorHandler(BaseHTTPRequestHandler):
+    """HTTP request handler for the dev-plugin monitor server.
+
+    Routing:
+        GET /              → HTML dashboard (render_dashboard)
+        GET /api/state     → JSON snapshot (_handle_api_state)
+        GET /pane/{id}     → HTML pane detail (_handle_pane_html)
+        GET /api/pane/{id} → JSON pane payload (_handle_pane_api)
+        GET <other>        → 404
+        non-GET methods    → 405 Method Not Allowed
+
+    Binding is always ``127.0.0.1`` (set by ThreadingMonitorServer).
+    ``log_message`` is overridden to write only the request line to stderr
+    and leave stdout untouched.
+    """
+
+    def log_message(self, format: str, *args) -> None:  # noqa: A002
+        """Override: write request line to stderr only; leave stdout empty."""
+        sys.stderr.write(f"{self.requestline}\n")
+
+    # ------------------------------------------------------------------
+    # Non-GET methods → 405
+    # ------------------------------------------------------------------
+
+    def _send_405(self) -> None:
+        self.send_response(405)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def do_POST(self) -> None:  # noqa: N802
+        self._send_405()
+
+    def do_PUT(self) -> None:  # noqa: N802
+        self._send_405()
+
+    def do_DELETE(self) -> None:  # noqa: N802
+        self._send_405()
+
+    def do_PATCH(self) -> None:  # noqa: N802
+        self._send_405()
+
+    def do_HEAD(self) -> None:  # noqa: N802
+        self._send_405()
+
+    # ------------------------------------------------------------------
+    # GET routing
+    # ------------------------------------------------------------------
+
+    def do_GET(self) -> None:  # noqa: N802
+        path = urlsplit(self.path).path
+
+        if path == "/":
+            self._route_root()
+        elif _is_api_state_path(self.path):
+            self._route_api_state()
+        elif _is_pane_api_path(path):
+            pane_id = path[len(_API_PANE_PATH_PREFIX):]
+            _handle_pane_api(self, pane_id)
+        elif _is_pane_html_path(path):
+            pane_id = path[len(_PANE_PATH_PREFIX):]
+            _handle_pane_html(self, pane_id)
+        else:
+            self._route_not_found()
+
+    # ------------------------------------------------------------------
+    # Route implementations
+    # ------------------------------------------------------------------
+
+    def _route_root(self) -> None:
+        """GET / — build model dict and render dashboard HTML."""
+        server = getattr(self, "server", None)
+        project_root = str(getattr(server, "project_root", ""))
+        docs_dir_val = str(getattr(server, "docs_dir", ""))
+        refresh_seconds = int(getattr(server, "refresh_seconds", _DEFAULT_REFRESH_SECONDS))
+
+        docs_path = Path(docs_dir_val) if docs_dir_val else Path("docs")
+        tasks = scan_tasks(docs_path)
+        features = scan_features(docs_path)
+        all_signals = scan_signals()
+        shared_sigs, pool_sigs = _classify_signal_scopes(all_signals)
+        panes = list_tmux_panes()
+
+        model = {
+            "generated_at": _now_iso_z(),
+            "project_root": project_root,
+            "docs_dir": docs_dir_val,
+            "refresh_seconds": refresh_seconds,
+            "wbs_tasks": tasks,
+            "features": features,
+            "shared_signals": shared_sigs,
+            "agent_pool_signals": pool_sigs,
+            "tmux_panes": panes,
+        }
+        html_body = render_dashboard(model)
+        _send_html_response(self, 200, html_body)
+
+    def _route_api_state(self) -> None:
+        """GET /api/state — delegate to _handle_api_state."""
+        _handle_api_state(self)
+
+    def _route_not_found(self) -> None:
+        """Unmatched GET path → 404."""
+        body = b"404 Not Found"
+        self.send_response(404)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
+class ThreadingMonitorServer(ThreadingHTTPServer):
+    """ThreadingHTTPServer subclass that carries server-wide config attributes.
+
+    Attributes injected by ``main()``:
+        project_root (str): resolved project root path.
+        docs_dir (str): docs directory path.
+        max_pane_lines (int): scrollback line cap for pane capture.
+        refresh_seconds (int): dashboard meta-refresh interval.
+        no_tmux (bool): when True, tmux calls should be skipped.
+
+    ``allow_reuse_address = True`` prevents ``OSError: Address already in use``
+    when the server restarts quickly (e.g., during test runs).
+    """
+
+    allow_reuse_address = True
+
+    def __init__(self, server_address, RequestHandlerClass, **kwargs):
+        super().__init__(server_address, RequestHandlerClass, **kwargs)
+        # Attributes will be set by main() after construction.
+        self.project_root: str = ""
+        self.docs_dir: str = ""
+        self.max_pane_lines: int = 500
+        self.refresh_seconds: int = 3
+        self.no_tmux: bool = False
+
+
+# ---------------------------------------------------------------------------
+# CLI entry point (TSK-01-01)
+# ---------------------------------------------------------------------------
+
+
+def build_arg_parser() -> argparse.ArgumentParser:
+    """Return the ArgumentParser for monitor-server.py.
+
+    All arguments have defaults as specified in the TSK-01-01 PRD:
+        --port             7321
+        --docs             "docs"
+        --project-root     os.getcwd()
+        --max-pane-lines   500
+        --refresh-seconds  3
+        --no-tmux          False (store_true flag)
+    """
+    parser = argparse.ArgumentParser(
+        prog="monitor-server.py",
+        description="dev-plugin monitor HTTP server",
     )
-    sys.exit(0)
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=7321,
+        metavar="PORT",
+        help="TCP port to listen on (default: 7321)",
+    )
+    parser.add_argument(
+        "--docs",
+        default="docs",
+        metavar="DIR",
+        help="docs directory path (default: docs)",
+    )
+    parser.add_argument(
+        "--project-root",
+        default=os.getcwd(),
+        metavar="DIR",
+        help="project root directory (default: $PWD)",
+    )
+    parser.add_argument(
+        "--max-pane-lines",
+        type=int,
+        default=500,
+        metavar="N",
+        help="maximum scrollback lines for pane capture (default: 500)",
+    )
+    parser.add_argument(
+        "--refresh-seconds",
+        type=int,
+        default=3,
+        metavar="N",
+        help="dashboard meta-refresh interval in seconds (default: 3)",
+    )
+    parser.add_argument(
+        "--no-tmux",
+        action="store_true",
+        default=False,
+        help="disable tmux integration (no pane listing/capture)",
+    )
+    return parser
+
+
+def main(argv: Optional[List[str]] = None) -> None:
+    """Parse CLI args, create ThreadingMonitorServer, and serve_forever.
+
+    Binds exclusively to ``127.0.0.1`` (0.0.0.0 is prohibited per PRD §4.1).
+    Config attributes (docs_dir, project_root, max_pane_lines, refresh_seconds,
+    no_tmux) are injected into the server instance so MonitorHandler can read
+    them via ``self.server.<attr>``.
+
+    Graceful shutdown on SIGTERM or KeyboardInterrupt.
+    """
+    parser = build_arg_parser()
+    args = parser.parse_args(argv)
+
+    server = ThreadingMonitorServer(("127.0.0.1", args.port), MonitorHandler)
+    server.project_root = args.project_root
+    server.docs_dir = args.docs
+    server.max_pane_lines = args.max_pane_lines
+    server.refresh_seconds = args.refresh_seconds
+    server.no_tmux = args.no_tmux
+
+    def _shutdown(signum, frame):  # noqa: ANN001
+        server.shutdown()
+
+    # signal.signal() requires the main thread; skip gracefully in test/worker threads.
+    try:
+        signal.signal(signal.SIGTERM, _shutdown)
+    except (ValueError, OSError):
+        pass  # not in main thread — SIGTERM handler not registered, SIGINT still works
+
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()
+
+
+if __name__ == "__main__":
+    main()

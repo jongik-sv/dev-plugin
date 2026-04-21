@@ -122,5 +122,100 @@ class MetaRefreshLiveTests(unittest.TestCase):
         self.assertGreaterEqual(int(matches[0]), 1)
 
 
+@unittest.skipUnless(_SERVER_UP, f"monitor-server not reachable at {_E2E_URL}")
+class PaneCaptureEndpointTests(unittest.TestCase):
+    """TSK-01-05 — /pane/{id} and /api/pane/{id} endpoint live tests.
+
+    Reachability gate: navigates dashboard first, finds a pane link in the Team
+    section (or skips when tmux is not available), then follows the link —
+    matching the QA checklist click-path requirement (URL direct entry forbidden).
+
+    400 / invalid-id paths do not require a live pane so they run unconditionally
+    once the server is up.
+    """
+
+    def _dashboard_html(self) -> str:
+        with urllib.request.urlopen(_E2E_URL + "/", timeout=3) as resp:
+            return resp.read().decode("utf-8")
+
+    def test_invalid_pane_id_returns_400_html(self) -> None:
+        """GET /pane/abc → 400 HTML with 'invalid pane id'."""
+        try:
+            with urllib.request.urlopen(_E2E_URL + "/pane/abc", timeout=3):
+                pass
+            self.fail("expected HTTPError 400")
+        except urllib.error.HTTPError as exc:
+            self.assertEqual(exc.code, 400)
+            body = exc.read().decode("utf-8")
+            self.assertIn("invalid pane id", body)
+
+    def test_invalid_pane_id_returns_400_json(self) -> None:
+        """GET /api/pane/abc → 400 JSON {"error":"invalid pane id","code":400}."""
+        import json as _json
+        try:
+            with urllib.request.urlopen(_E2E_URL + "/api/pane/abc", timeout=3):
+                pass
+            self.fail("expected HTTPError 400")
+        except urllib.error.HTTPError as exc:
+            self.assertEqual(exc.code, 400)
+            body = _json.loads(exc.read().decode("utf-8"))
+            self.assertEqual(body.get("error"), "invalid pane id")
+            self.assertEqual(body.get("code"), 400)
+
+    def test_pane_endpoint_reachable_via_dashboard_link(self) -> None:
+        """Click-path: dashboard Team section pane link → /pane/%N returns 200.
+
+        If tmux is not running (no /pane/ links in dashboard) the test is skipped
+        — you cannot click a link that does not exist.
+        """
+        html_body = self._dashboard_html()
+        pane_links = re.findall(r'href="(/pane/%\d+)"', html_body)
+        if not pane_links:
+            self.skipTest("no tmux pane links in dashboard — tmux not running")
+
+        pane_path = pane_links[0]
+        with urllib.request.urlopen(_E2E_URL + pane_path, timeout=3) as resp:
+            self.assertEqual(resp.status, 200)
+            ctype = resp.headers.get("Content-Type", "").lower()
+            self.assertIn("text/html", ctype)
+            self.assertIn("charset=utf-8", ctype)
+            body = resp.read().decode("utf-8")
+
+        self.assertIn('<pre class="pane-capture"', body)
+        self.assertIn('<div class="footer">', body)
+        self.assertIn('<a href="/">', body)  # back link
+        ext = re.findall(
+            r'<(?:script|link|img|iframe)[^>]*\s(?:src|href)=["\']?https?://',
+            body,
+        )
+        self.assertEqual(ext, [], f"external resources found: {ext!r}")
+
+    def test_api_pane_json_has_line_count_field(self) -> None:
+        """GET /api/pane/%N → 200 JSON with line_count field (acceptance 3).
+
+        Skipped when no tmux panes are listed in the dashboard.
+        """
+        import json as _json
+        import urllib.parse
+        html_body = self._dashboard_html()
+        pane_ids = re.findall(r'href="/pane/(%\d+)"', html_body)
+        if not pane_ids:
+            self.skipTest("no tmux pane links in dashboard — tmux not running")
+
+        pane_id = pane_ids[0]
+        api_url = _E2E_URL + "/api/pane/" + urllib.parse.quote(pane_id, safe="")
+        with urllib.request.urlopen(api_url, timeout=3) as resp:
+            self.assertEqual(resp.status, 200)
+            ctype = resp.headers.get("Content-Type", "").lower()
+            self.assertIn("application/json", ctype)
+            body = _json.loads(resp.read().decode("utf-8"))
+
+        self.assertIn("line_count", body)
+        self.assertIn("lines", body)
+        self.assertIn("pane_id", body)
+        self.assertIn("captured_at", body)
+        self.assertIn("truncated_from", body)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
