@@ -32,6 +32,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 from dataclasses import asdict, dataclass, field, is_dataclass
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -1755,6 +1756,35 @@ def build_arg_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def pid_file_path(port: int) -> Path:
+    return Path(tempfile.gettempdir()) / f"dev-monitor-{port}.pid"
+
+
+def cleanup_pid_file(pid_path: Path) -> None:
+    try:
+        pid_path.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def _setup_signal_handler(server, pid_path: Path) -> None:
+    if sys.platform == "win32":
+        return
+
+    def _handler(signum, frame):  # noqa: ANN001
+        t = threading.Thread(target=server.shutdown, daemon=True)
+        t.start()
+
+    try:
+        signal.signal(signal.SIGTERM, _handler)
+    except (ValueError, OSError):
+        pass
+
+
+def parse_args(argv=None):
+    return build_arg_parser().parse_args(argv)
+
+
 def main(argv: Optional[List[str]] = None) -> None:
     """Parse CLI args, create ThreadingMonitorServer, and serve_forever.
 
@@ -1765,24 +1795,21 @@ def main(argv: Optional[List[str]] = None) -> None:
 
     Graceful shutdown on SIGTERM or KeyboardInterrupt.
     """
-    parser = build_arg_parser()
-    args = parser.parse_args(argv)
+    args = parse_args(argv)
+    
+    port = args.port
+    pid_path = pid_file_path(port)
+    with open(str(pid_path), "w", encoding="utf-8", newline="\n") as _f:
+        _f.write(str(os.getpid()))
 
-    server = ThreadingMonitorServer(("127.0.0.1", args.port), MonitorHandler)
+    server = ThreadingMonitorServer(("127.0.0.1", port), MonitorHandler)
     server.project_root = args.project_root
     server.docs_dir = args.docs
     server.max_pane_lines = args.max_pane_lines
     server.refresh_seconds = args.refresh_seconds
     server.no_tmux = args.no_tmux
 
-    def _shutdown(signum, frame):  # noqa: ANN001
-        server.shutdown()
-
-    # signal.signal() requires the main thread; skip gracefully in test/worker threads.
-    try:
-        signal.signal(signal.SIGTERM, _shutdown)
-    except (ValueError, OSError):
-        pass  # not in main thread — SIGTERM handler not registered, SIGINT still works
+    _setup_signal_handler(server, pid_path)
 
     try:
         server.serve_forever()
@@ -1790,6 +1817,7 @@ def main(argv: Optional[List[str]] = None) -> None:
         pass
     finally:
         server.server_close()
+        cleanup_pid_file(pid_path)
 
 
 if __name__ == "__main__":

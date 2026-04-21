@@ -27,14 +27,19 @@ import tempfile
 _TEMP_DIR = pathlib.Path(tempfile.gettempdir())
 
 
+def _temp_path(port: int, ext: str) -> pathlib.Path:
+    """내부 헬퍼: {TMPDIR}/dev-monitor-{port}.{ext} 경로 반환."""
+    return _TEMP_DIR / f"dev-monitor-{port}.{ext}"
+
+
 def pid_file_path(port: int) -> pathlib.Path:
     """PID 파일 경로 반환: {TMPDIR}/dev-monitor-{port}.pid"""
-    return _TEMP_DIR / f"dev-monitor-{port}.pid"
+    return _temp_path(port, "pid")
 
 
 def log_file_path(port: int) -> pathlib.Path:
     """로그 파일 경로 반환: {TMPDIR}/dev-monitor-{port}.log"""
-    return _TEMP_DIR / f"dev-monitor-{port}.log"
+    return _temp_path(port, "log")
 
 
 def is_alive(pid: int) -> bool:
@@ -132,7 +137,13 @@ def stop_server(port: int) -> None:
 
     if is_alive(pid):
         try:
-            os.kill(pid, signal.SIGTERM)
+            if sys.platform == "win32":
+                subprocess.run(
+                    ["taskkill", "/PID", str(pid), "/F"],
+                    check=False, timeout=3, shell=False,
+                )
+            else:
+                os.kill(pid, signal.SIGTERM)
             print(f"  dev-monitor (port {port}): PID {pid} 종료 요청 완료.")
         except OSError as e:
             print(f"  dev-monitor (port {port}): 종료 실패 — {e}")
@@ -203,7 +214,7 @@ def main(argv=None):
         return
 
     # 좀비 PID 파일 정리: PID 파일은 있으나 프로세스가 이미 죽은 경우
-    if existing_pid is not None and pid_path.exists():
+    if existing_pid is not None:
         pid_path.unlink(missing_ok=True)
 
     # 2. socket bind 테스트
