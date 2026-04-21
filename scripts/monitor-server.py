@@ -2981,13 +2981,16 @@ class MonitorHandler(BaseHTTPRequestHandler):
         server = getattr(self, "server", None)
         refresh_seconds = int(getattr(server, "refresh_seconds", _DEFAULT_REFRESH_SECONDS))
 
+        no_tmux = bool(getattr(server, "no_tmux", False))
+        _tmux_fn = (lambda: None) if no_tmux else list_tmux_panes
+
         state = _build_render_state(
             project_root=_server_attr(self, "project_root"),
             docs_dir=_server_attr(self, "docs_dir"),
             scan_tasks=scan_tasks,
             scan_features=scan_features,
             scan_signals=scan_signals,
-            list_tmux_panes=list_tmux_panes,
+            list_tmux_panes=_tmux_fn,
         )
         model = {**state, "refresh_seconds": refresh_seconds}
         html_body = render_dashboard(model)
@@ -2995,7 +2998,10 @@ class MonitorHandler(BaseHTTPRequestHandler):
 
     def _route_api_state(self) -> None:
         """GET /api/state — delegate to _handle_api_state."""
-        _handle_api_state(self)
+        server = getattr(self, "server", None)
+        no_tmux = bool(getattr(server, "no_tmux", False))
+        _tmux_fn = (lambda: None) if no_tmux else list_tmux_panes
+        _handle_api_state(self, list_tmux_panes=_tmux_fn)
 
     def _route_not_found(self) -> None:
         """Unmatched GET path → 404."""

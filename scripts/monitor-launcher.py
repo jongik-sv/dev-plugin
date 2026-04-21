@@ -79,13 +79,18 @@ def test_port(port: int) -> bool:
         s.close()
 
 
-def start_server(port: int, docs: str, project_root: str) -> None:
+def start_server(port: int, docs: str, project_root: str, no_tmux: bool = False) -> None:
     """
     monitor-server.py를 백그라운드 detach로 기동하고 PID 파일을 기록.
     플랫폼 분기:
       - macOS/Linux: start_new_session=True
       - Windows psmux: DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
     sys.executable 사용 — python3 하드코딩 금지.
+
+    Args:
+        no_tmux: True이면 --no-tmux 플래그를 monitor-server.py에 전달한다.
+                 Team 섹션에 "tmux not available" 안내가 표시되며,
+                 tmux 미설치 환경 시뮬레이션 또는 테스트 용도로 사용한다.
     """
     server_script = pathlib.Path(project_root) / "scripts" / "monitor-server.py"
     log_path = log_file_path(port)
@@ -97,6 +102,8 @@ def start_server(port: int, docs: str, project_root: str) -> None:
         "--port", str(port),
         "--docs", docs,
     ]
+    if no_tmux:
+        cmd.append("--no-tmux")
 
     with open(str(log_path), "a", encoding="utf-8") as log_fh:
         if sys.platform == "win32":
@@ -181,6 +188,11 @@ def parse_args(argv=None):
         "--status", action="store_true", default=False,
         help="서버 실행 상태 확인"
     )
+    parser.add_argument(
+        "--no-tmux", action="store_true", default=False,
+        dest="no_tmux",
+        help="tmux 미설치 환경 시뮬레이션 — Team 섹션에 'tmux not available' 표시"
+    )
     return parser.parse_args(argv)
 
 
@@ -225,7 +237,7 @@ def main(argv=None):
         sys.exit(1)
 
     # 3 & 4. 서버 기동 + PID 파일 기록
-    start_server(port, args.docs, args.project_root)
+    start_server(port, args.docs, args.project_root, no_tmux=args.no_tmux)
 
     # 5. URL 출력
     print(f"  dev-monitor 기동 완료")
