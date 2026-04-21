@@ -15,8 +15,8 @@
 | domain | description | unit-test | e2e-test | e2e-server | e2e-url |
 |--------|-------------|-----------|----------|------------|---------|
 | backend | monitor-server.py 렌더·라우팅 (Python stdlib) | `python3 -m unittest discover scripts/ -v` | - | - | - |
-| frontend | 인라인 CSS/JS 대시보드 UI | - | `python3 scripts/validate-prototype.py docs/monitor-v2/prototype.html` | `python3 scripts/monitor-launcher.py --port 7321 --docs docs` | `http://localhost:7321` |
-| fullstack | 렌더 레이어(Python → HTML/CSS/JS) | `python3 -m unittest discover scripts/ -v` | - | `python3 scripts/monitor-launcher.py --port 7321 --docs docs` | `http://localhost:7321` |
+| frontend | 인라인 CSS/JS 대시보드 UI | `python3 -m unittest discover scripts/ -v` | `python3 scripts/test_monitor_e2e.py` | `python3 scripts/monitor-launcher.py --port 7321 --docs docs` | `http://localhost:7321` |
+| fullstack | 렌더 레이어(Python → HTML/CSS/JS) | `python3 -m unittest discover scripts/ -v` | `python3 scripts/test_monitor_e2e.py` | `python3 scripts/monitor-launcher.py --port 7321 --docs docs` | `http://localhost:7321` |
 | test | 테스트 스위트 (unittest) | `python3 -m unittest discover scripts/ -v` | - | - | - |
 
 ### Design Guidance
@@ -91,7 +91,7 @@ python3
 - category: development
 - domain: frontend
 - model: sonnet
-- status: [dd]
+- status: [xx]
 - priority: critical
 - assignee: -
 - schedule: 2026-04-22 ~ 2026-04-22
@@ -135,7 +135,7 @@ python3
 - category: development
 - domain: fullstack
 - model: sonnet
-- status: [dd]
+- status: [xx]
 - priority: critical
 - assignee: -
 - schedule: 2026-04-23 ~ 2026-04-23
@@ -180,7 +180,7 @@ python3
 - category: development
 - domain: fullstack
 - model: sonnet
-- status: [ ]
+- status: [xx]
 - priority: critical
 - assignee: -
 - schedule: 2026-04-23 ~ 2026-04-23
@@ -221,7 +221,7 @@ python3
 - category: development
 - domain: fullstack
 - model: opus
-- status: [dd]
+- status: [xx]
 - priority: critical
 - assignee: -
 - schedule: 2026-04-24 ~ 2026-04-24
@@ -267,7 +267,7 @@ python3
 - category: development
 - domain: fullstack
 - model: sonnet
-- status: [ ]
+- status: [xx]
 - priority: high
 - assignee: -
 - schedule: 2026-04-24 ~ 2026-04-24
@@ -307,7 +307,7 @@ python3
 - category: development
 - domain: fullstack
 - model: opus
-- status: [ ]
+- status: [xx]
 - priority: critical
 - assignee: -
 - schedule: 2026-04-25 ~ 2026-04-25

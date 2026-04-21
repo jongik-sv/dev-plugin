@@ -2,204 +2,201 @@
 
 ## 요구사항 확인
 
-- `scripts/monitor-server.py`에 v2 전용 렌더 함수 두 개를 신규 추가한다 — `_section_live_activity(model)`와 `_section_phase_timeline(tasks, features)`. 각 함수는 v1 `_section_*` 함수군과 동일한 시그니처/반환 규약(완결 `<section>` HTML 문자열)을 따른다.
-- **Live Activity**: 모든 WBS Task + Feature의 `phase_history_tail`을 평탄화하여 `at` 타임스탬프 기준 내림차순 정렬 후 상위 20건을 `HH:MM:SS · TSK-ID · event · elapsed` 포맷의 `<li>`로 렌더한다 (fade-in 애니메이션은 CSS 담당).
-- **Phase Timeline**: 태스크(피처 제외) 별 row를 생성, 각 row에 phase별 `<rect>`를 그려 60분 시간축(`현재-60분=x0`, `현재=xW`) 상에 시각화한다. 실패 구간은 `class="tl-fail"` 해칭, bypass 태스크는 row 우측 끝 `🟡` 마커. 태스크가 50개를 초과하면 상위 50개만 렌더하고 "+N more" 링크로 축약한다. `<rect>` 색상 클래스(`tl-dd/tl-im/tl-ts/tl-xx/tl-fail`)는 TSK-01-01의 `DASHBOARD_CSS`에 이미 정의되어 있으므로 그대로 참조한다.
+- `_section_live_activity(model)`: WBS 태스크 + 피처의 `phase_history_tail`을 평탄화하여 최신 20건을 내림차순으로 나열하고, `HH:MM:SS · TSK-ID · event · elapsed` 포맷으로 auto-scroll + fade-in 렌더한다. 상태 칩 색상은 KPI 팔레트(ok → green, fail → red, bypass → yellow)와 동일 팔레트를 재사용한다.
+- `_section_phase_timeline(tasks, features)`: Task row × 시간축 가로 스트립. 각 phase(`dd/im/ts/xx`)를 색 `<rect>`로 렌더하고, fail 구간은 해칭(`<pattern id="hatch">`) + `class="tl-fail"`, bypass row 우측에 🟡 마커. 시간축은 `현재 - 60분 = x=0 / 현재 = x=W(600)`, 5분 간격 tick(13개 포함). Task 수 50 초과 시 상위 50건만 렌더 후 "+N more" 링크.
+- `_timeline_svg(rows, span_minutes)`는 순수 SVG 생성 유틸로, 빈 입력에서 empty-state를 반환해야 하며 외부 자원 참조 금지, 시간 파싱 실패 시 해당 이벤트만 skip.
 
 ## 타겟 앱
 
-- **경로**: N/A (단일 앱)
-- **근거**: `scripts/monitor-server.py` 단일 Python 파일이 서버 + 렌더 레이어 전체를 담당하며 모노레포가 아님.
+- **경로**: N/A (단일 앱 — `scripts/monitor-server.py` 한 파일에 렌더 함수가 인라인으로 존재)
+- **근거**: dev-plugin의 monitor 서버는 단일 Python 파일 구조. 모든 `_section_*` 함수는 동일 파일 내에 추가된다 (TSK-01-01/02/03 동일 규약).
 
 ## 구현 방향
 
-- `_section_live_activity(model)`: `model.get("wbs_tasks") + model.get("features")`의 `phase_history_tail`을 flatten → `(item_id, PhaseEntry)` 튜플 리스트로 수집 → `at` 타임스탬프 내림차순 정렬 → 상위 `_LIVE_ACTIVITY_LIMIT`(20) 추출 → `<ol class="activity-list">` + `<li class="activity-item">` 렌더. `event`에 `.fail` 접미사가 있으면 `⚠` 아이콘과 `activity-item--fail` 모디파이어 클래스를 추가한다. 빈 상태는 `_empty_section("activity", "Live Activity", "no recent activity")`로 처리.
-- `_section_phase_timeline(tasks, features)`: WBS Task만 대상으로(피처는 Phase Timeline 표시 대상이 아님 — §4.5.6 "태스크 ID × 시간축") `phase_history_tail`이 비어 있지 않은 태스크를 필터링 → `datetime.now(timezone.utc)`을 기준으로 `span_minutes=60` 시간창을 설정 → 각 태스크를 `(task_id, bypassed, [phase_segments])` row로 변환 → `_timeline_svg()`에 전달하여 인라인 SVG 생성. 태스크 수 > `_TIMELINE_TASK_LIMIT`(50)이면 상위 50개만 유지하고 추가분을 "+N more" `<a href="#wbs">` 링크로 렌더한다.
-- `_timeline_svg(rows, span_minutes, now)`: 순수 SVG 문자열 생성 함수. `rows`가 비면 empty-state 마크업(`<svg>` 내 중앙 텍스트)을 반환. rows가 있으면 `viewBox="0 0 600 {row_count*20+24}"`, row 높이 16px (row spacing 4px 포함해 20px), 상단 24px 헤더에 5분 간격 tick 라벨, 각 row마다 phase별 `<rect class="tl-dd|tl-im|tl-ts|tl-xx">`, fail 구간은 `class="tl-fail"` + `fill="url(#tl-hatch)"` 해칭, bypass row는 `x=598` 위치에 `<text>🟡</text>` 마커 렌더.
-- **종료 시각 추론 (핵심 복잡도)**: 각 PhaseEntry의 `at`을 `start`, 같은 task의 **다음 PhaseEntry의 `at`**을 `end`로 삼는다. 마지막 Entry는 `end = now`(인자 주입). 파싱 실패 시 해당 Entry만 skip하고 나머지는 렌더 (예외 비전파).
-- **해칭 패턴**: SVG 문서 상단에 단일 `<defs><pattern id="tl-hatch" ...></pattern></defs>` 정의 1회, fail 구간 `<rect>`는 `fill="url(#tl-hatch)"`로 참조.
-- `render_dashboard()` 수정: 기존 `sections` 리스트에 신규 두 섹션을 **추가**만 하며 순서 재배치는 하지 않는다. 최종 2단 grid 레이아웃으로의 조립은 v2 WP-01 내 별도 조립 Task(`render_dashboard` 리팩터)가 담당한다 — 이 Task는 함수 구현 + 조립 리스트 삽입 + 단위 테스트까지.
+- `scripts/monitor-server.py`에 신규 함수 8개를 추가한다: `_parse_iso_utc`, `_fmt_hms`, `_fmt_elapsed_short`, `_live_activity_rows`, `_section_live_activity`, `_timeline_rows`, `_timeline_svg`, `_section_phase_timeline`. 기존 헬퍼(`_esc`, `_format_elapsed`, `PhaseEntry`, `WorkItem.phase_history_tail`)를 그대로 재사용한다.
+- 종료 시각 추론 정책: 같은 Task의 `phase_history_tail`을 `at` 오름차순으로 정렬한 뒤, 각 이벤트의 종료 시각을 **다음 이벤트 `at`** 으로 본다. 마지막 이벤트만 `model["generated_at"]`(없으면 `datetime.now(timezone.utc)`)로 연장한다.
+- 시간 파싱은 `_parse_iso_utc(s) -> Optional[datetime]` 단일 헬퍼로 집약: `datetime.fromisoformat`에서 `Z` 접미를 `+00:00`으로 정규화하고, naive 결과에는 `tzinfo=timezone.utc`를 강제 부여한다. 실패 시 `None` 반환 — 호출부는 None 이벤트를 skip한다 (예외 미발생).
+- 모든 HTML/SVG 문자열은 순수 Python `str.format`/f-string 조합. 외부 CDN·스크립트·폰트 참조 없음. SVG 해칭 패턴(`<pattern id="hatch">`)은 `_timeline_svg` 내부에서 `<defs>` 블록으로 인라인 정의한다 (CSS는 `fill: url(#hatch)`를 이미 TSK-01-01에서 참조).
+- `render_dashboard` 호출 교체는 이 Task의 범위 **밖**이다 (TSK-01-04에서 `_section_live_activity`/`_section_phase_timeline` 함수 정의만 수행; 실제 조립 변경은 WP 상위 조립 Task에서 일괄 처리 — 본 설계의 파일 계획과 QA 체크리스트는 단위 테스트 기반으로 통과 가능하게 설계한다).
 
 ## 파일 계획
 
-**경로 기준:** 모든 파일 경로는 **프로젝트 루트 기준**으로 작성한다.
+**경로 기준:** 모든 파일 경로는 **프로젝트 루트 기준**.
 
 | 파일 경로 | 역할 | 신규/수정 |
 |-----------|------|-----------|
-| `scripts/monitor-server.py` | `_section_live_activity`, `_section_phase_timeline`, `_timeline_svg` + 헬퍼 `_parse_iso_utc`, `_timeline_rows_from_tasks`, `_timeline_x_for` 함수 추가. 상수 `_LIVE_ACTIVITY_LIMIT = 20`, `_TIMELINE_TASK_LIMIT = 50`, `_TIMELINE_SPAN_MINUTES = 60` 추가. `render_dashboard()`의 `sections` 리스트(line 1103)에 두 섹션 호출을 삽입 | 수정 |
-| `scripts/tests/test_monitor_server_live_activity.py` | `_section_live_activity`에 대한 unittest (정렬/상한/fail 마커/빈 입력/HTML escape) | 신규 |
-| `scripts/tests/test_monitor_server_phase_timeline.py` | `_section_phase_timeline` + `_timeline_svg` + 헬퍼에 대한 unittest (종료시각 추론, 50 초과, bypass 마커, fail 해칭, 빈 입력, 파싱 실패 스킵, 0/1/50/100건 스모크) | 신규 |
+| `scripts/monitor-server.py` | 신규 함수 8개 추가: `_parse_iso_utc`, `_fmt_hms`, `_fmt_elapsed_short`, `_live_activity_rows`, `_section_live_activity`, `_timeline_rows`, `_timeline_svg`, `_section_phase_timeline`. `_SECTION_ANCHORS`(있을 경우)에 `activity`, `timeline` 앵커 추가 | 수정 |
+| `scripts/test_monitor_server.py` | 단위 테스트 8 케이스 신규 (상세는 QA 체크리스트) — dev-test 단계 시 작성 예정, 설계 단계에서는 파일만 계획 | 신규 |
 
-> Python 렌더 함수 추가로 라우팅/메뉴 배선 변경은 불필요하다 (`render_dashboard()`의 `sections` 리스트가 단일 조립 지점이며 섹션 순서가 DOM 순서). "진입점" 섹션에 `render_dashboard` 수정 라인을 명시한다.
+> 이 Task는 Python 렌더 함수 정의 레벨이므로 라우터·메뉴 파일 배선은 후속 조립 Task에서 수행한다 (비-페이지 UI). 대신 아래 "진입점" 섹션의 "적용될 상위 페이지"에 명시된 `/` 루트에서 렌더되는 구조를 유지한다.
 
 ## 진입점 (Entry Points)
 
-- **사용자 진입 경로**: 브라우저에서 `http://localhost:7321/` 로드 → 페이지에 `<section id="activity">` (Live Activity)와 `<section id="phase-timeline">` (Phase Timeline)이 렌더됨. 별도 클릭 경로 없음 (대시보드 루트 페이지 자체가 진입점).
-- **URL / 라우트**: `/` (GET). 신규 라우트 없음 — 대시보드 HTML 응답에 두 섹션이 포함됨.
-- **수정할 라우터 파일**: `scripts/monitor-server.py`의 `render_dashboard()` 함수 (현재 line 1080~1126) — `sections` 리스트(현재 line 1103)에 `_section_live_activity(model)`과 `_section_phase_timeline(tasks, features)` 호출 2줄을 기존 `_section_phase_history(tasks, features)` **앞**에 삽입한다. Phase Timeline이 v2에서 Phase History를 시각적으로 대체하지만 v1 Phase History 섹션은 즉시 제거하지 않고 함께 유지(제거는 v2 조립 Task에서 결정).
-- **수정할 메뉴·네비게이션 파일**: 해당 없음. 대시보드는 단일 페이지이며 별도 사이드바/네비게이션 파일이 없다. `render_dashboard()`의 `sections` 조립 순서가 곧 레이아웃이며 위 "수정할 라우터 파일"에 포함된다.
-- **연결 확인 방법**: `python3 -m unittest discover scripts/ -v` 통과 + `python3 scripts/monitor-launcher.py --port 7321 --docs docs` 기동 후 `http://localhost:7321/` 로드 → DOM에 `<section id="activity">`와 `<section id="phase-timeline">`이 존재하고, `phase-timeline` 섹션의 `<svg>` 안에 `<rect class="tl-dd">` 혹은 `<rect class="tl-im">` 등 최소 1개 이상이 렌더됨(해당 프로젝트 상태의 phase_history가 있는 경우).
+이 Task는 공통 렌더 함수 2개를 `scripts/monitor-server.py`에 추가하는 것으로, 새 라우트·페이지를 생성하지 않는다. **적용될 상위 페이지는 `/` (대시보드)** 이며, 후속 조립 Task가 `render_dashboard()` 내에서 이 함수들을 호출한다.
 
-> **비-페이지 UI**: Live Activity와 Phase Timeline은 대시보드 페이지 내 섹션이며 독립 라우트/메뉴가 없다. 적용될 상위 페이지: `http://localhost:7321/` (대시보드 루트). E2E는 이 URL에서 두 섹션 DOM 존재 및 SVG 렌더를 검증한다.
+- **사용자 진입 경로**: 좌측 네비게이션 메뉴는 TSK-01-02의 sticky 헤더에 포함된 anchor 링크다. `http://localhost:7321/` 접속 → sticky 헤더의 nav 링크(`#activity`, `#timeline`)를 클릭 → 해당 섹션으로 스크롤 이동하여 Live Activity / Phase Timeline 영역이 화면에 표시된다.
+- **URL / 라우트**: `/` (앵커 `#activity`, `#timeline`) — v1 `/` 라우트 그대로 사용, 신규 라우트 없음
+- **수정할 라우터 파일**: `scripts/monitor-server.py` — `render_dashboard(model)` 함수가 `_section_live_activity(model)`, `_section_phase_timeline(tasks, features)` 두 함수를 호출해 섹션을 조립한다. 본 Task에서는 **함수 정의만 추가**하며, `render_dashboard` 내 실제 `sections` 리스트에 삽입하는 라인은 TSK-01-07(상위 조립) 담당 — 본 설계의 "파일 계획" 표에 해당 조립 라인 범위를 포함시켜두되 구현 시 주석으로 표기한다.
+- **수정할 메뉴·네비게이션 파일**: `scripts/monitor-server.py`의 `_SECTION_ANCHORS` 상수(TSK-01-03에서 `wp-cards` 앵커를 이미 등록) — `activity`와 `timeline` 앵커 2개를 배열에 추가하여 TSK-01-02 sticky 헤더의 `_section_header`가 생성하는 nav 링크에 노출되도록 한다. 이 상수는 `_section_header()`가 읽어 `<a href="#{anchor}">` 링크를 생성한다.
+- **연결 확인 방법**: 통합 E2E에서 `http://localhost:7321/` 접속 → sticky 헤더 nav 영역의 `#activity`, `#timeline` 링크 클릭 → 각각 `<section data-section="activity">` 또는 `<section data-section="timeline">` 요소로 스크롤 이동됨. URL 직접 입력(`page.goto('#timeline')`) 사용 금지. 단위 테스트는 `_section_live_activity(model)` / `_section_phase_timeline(tasks, features)` 반환 HTML을 직접 검증한다.
 
 ## 주요 구조
 
-1. **`_parse_iso_utc(value) -> Optional[datetime]`** — ISO 8601 파싱 헬퍼
-   - Python 3.8 호환: `"Z"` → `"+00:00"` 치환 후 `datetime.fromisoformat()` 호출. 실패 시 `None` 반환(예외 비전파).
-   - `_spark_buckets`(TSK-01-02)가 같은 패턴을 로컬에서 처리하므로, 이 Task에서 공용 헬퍼로 추출하여 두 곳에서 재사용한다(리팩터 적용 여부는 build 단계에서 결정).
+### 시간 유틸 (3개)
 
-2. **`_section_live_activity(model) -> str`**
-   - `tasks = model.get("wbs_tasks") or []`, `features = model.get("features") or []`
-   - `collected: List[Tuple[str, PhaseEntry]]` = 모든 item의 `phase_history_tail` 평탄화
-   - 정렬: `at` 문자열이 ISO 8601 형식이므로 사전식 내림차순 정렬이 시간순 내림차순과 일치 (`sort(key=..., reverse=True)`).
-   - 상위 20건 슬라이싱 → `<ol class="activity-list">`로 래핑 → 각 `<li class="activity-item{--fail?}">` 렌더.
-   - `<li>` 포맷: `HH:MM:SS` (at에서 시간 부분만 추출, 파싱 실패 시 원문 `at` 앞 8자) · `TSK-ID` · `event` · `elapsed s` (elapsed_seconds가 숫자면 `int(x)s`, 아니면 `-`) · fail이면 `⚠`
-   - 모든 문자열은 `_esc()` 경유. 빈 입력은 `_empty_section(...)`로 처리.
+| 함수 | 책임 |
+|------|------|
+| `_parse_iso_utc(s: Optional[str]) -> Optional[datetime]` | `datetime.fromisoformat` 래퍼. `Z` 접미를 `+00:00` 대체, naive datetime은 `tzinfo=timezone.utc` 부여. 입력 None·빈문자열·파싱 실패 시 `None`. 예외 없음. |
+| `_fmt_hms(dt: datetime) -> str` | `dt.astimezone(timezone.utc).strftime("%H:%M:%S")`. Live activity 첫 컬럼 포맷. |
+| `_fmt_elapsed_short(seconds: Optional[float]) -> str` | 숫자→문자열 순수 함수. None/음수는 `-`, 60초 미만은 `{n}s`, 3600초 미만은 `{m}m {s}s`, 그 이상은 `{h}h {m}m`. WorkItem 결합을 피하기 위해 기존 `_format_elapsed(item)` 재사용 대신 얇은 순수 함수로 별도 구현. |
 
-3. **`_timeline_rows_from_tasks(tasks, now) -> List[TimelineRow]`**
-   - `phase_history_tail`이 비어 있는 태스크는 skip (empty row 안 생성).
-   - 각 태스크의 PhaseEntry를 `at` 오름차순 정렬 → 연속된 쌍을 `(start, end, event)` 세그먼트로 변환. 마지막 Entry는 `end = now`.
-   - `at` 파싱 실패한 Entry는 skip (해당 세그먼트 1개만 누락, 태스크 전체는 살림).
-   - 반환: `TimelineRow(task_id: str, bypassed: bool, segments: List[TimelineSeg])`, `TimelineSeg(start: datetime, end: datetime, event: str)`
-   - dataclass 사용(frozen=True 권장) — TSK-01-02의 `WorkItem`/`PhaseEntry` 패턴과 일관.
+### Live Activity 섹션 (2개)
 
-4. **`_timeline_x_for(dt, now, span_minutes, width=600) -> float`**
-   - `x = width * (1 - (now - dt).total_seconds() / (span_minutes * 60))` — 시간축을 현재 기준 왼쪽 오래된 시각, 오른쪽 현재로 매핑.
-   - 범위 벗어남(60분 전보다 오래된 start, 혹은 미래 end)은 `max(0.0, min(float(width), x))` clamp 적용.
+| 함수 | 책임 |
+|------|------|
+| `_live_activity_rows(tasks, features, limit=20) -> List[tuple]` | `list(tasks) + list(features)`를 순회하며 각 item의 `phase_history_tail`을 평탄화. 반환 원소: `(item_id: str, entry: PhaseEntry, dt: datetime)`. `dt`는 `_parse_iso_utc(entry.at)` — None이면 skip (예외 없이 제외). 전체 리스트를 `dt` 내림차순 정렬 후 상위 `limit`개 반환. |
+| `_section_live_activity(model: dict) -> str` | `tasks = model.get("wbs_tasks") or []`, `features = model.get("features") or []`에서 `_live_activity_rows` 호출. 각 row를 `<div class="activity-row" data-event="{event}">` 5-grid(6rem 8rem 6rem 1fr auto)로 렌더. 비어있으면 `_empty_section("activity", "Live Activity", "no recent events")`. 섹션 래퍼는 `_section_wrap("activity", "Live Activity", body)`. |
 
-5. **`_section_phase_timeline(tasks, features, *, now=None) -> str`**
-   - `features` 인자는 시그니처 일관성을 위해 받지만 이 섹션은 WBS Task만 시각화한다 (PRD §4.5.6 "태스크 ID × 시간축"). features는 Live Activity에서만 반영.
-   - `now`가 `None`이면 `datetime.now(timezone.utc)`을 사용 (테스트에서는 고정값 주입).
-   - rows 생성 → `_TIMELINE_TASK_LIMIT` 초과 시 상위 50개 슬라이싱 + `+N more` 푸터 링크 준비.
-   - `_timeline_svg(rows, span_minutes=60, now=now)` 호출 → 최종 `<section id="phase-timeline">` 래핑.
+**activity-row 5-column DOM**:
 
-6. **`_timeline_svg(rows, span_minutes, *, now) -> str`**
-   - 빈 rows: `<svg viewBox="0 0 600 40"><text x="300" y="24" text-anchor="middle" class="empty">no timeline data</text></svg>` 반환 (크래시 없음).
-   - rows 있음:
-     - 높이 계산: `height = len(rows) * 20 + 24` (상단 tick 라벨용 24px 헤더).
-     - `<defs><pattern id="tl-hatch" patternUnits="userSpaceOnUse" width="6" height="6"><path d="M0,6 L6,0" stroke-width="1" /></pattern></defs>` 1회 정의 (색은 CSS `.tl-fail stroke`에서 상속).
-     - 시간축 tick: 5분 간격 × 12회 → `<line x1="{x}" y1="0" x2="{x}" y2="{height}" class="tl-tick">`. 각 tick 위에 `<text>HH:MM</text>`.
-     - row별:
-       - bypass row 배경: `<rect class="tl-row-bypass" ...>`(선택적, CSS에서 결정).
-       - 각 phase 세그먼트: event → CSS 클래스 매핑 `dd.*→tl-dd`, `im.*→tl-im`, `ts.*→tl-ts`, `xx.*→tl-xx`, `*.fail→tl-fail`(fill=url(#tl-hatch)).
-       - `<rect x="{start_x}" y="{row_y}" width="{max(1,end_x-start_x)}" height="16" class="{cls}">`.
-       - bypass 마커: row의 `bypassed=True`면 `<text x="598" y="{row_y+12}" class="tl-bypass-marker">🟡</text>`.
-   - 모든 좌표는 `f"{x:.1f}"`로 직렬화(너무 긴 소수 방지).
+```html
+<div class="activity-row" data-event="{event}">
+  <span class="a-time">{HH:MM:SS}</span>
+  <span class="a-id">{TSK-ID}</span>
+  <span class="a-event a-event-{ok|fail|bypass}">{event}</span>
+  <span class="a-detail">{from → to}</span>
+  <span class="a-elapsed">{elapsed}{ ⚠ if fail}</span>
+</div>
+```
 
-7. **`render_dashboard()` 수정 (line 1103 영역)**
-   ```python
-   sections = [
-       _section_header(model),
-       _section_wbs(tasks, running_ids, failed_ids),
-       _section_features(features, running_ids, failed_ids),
-       _section_live_activity(model),             # 신규 추가
-       _section_phase_timeline(tasks, features),  # 신규 추가
-       _section_team(model.get("tmux_panes")),
-       _section_subagents(model.get("agent_pool_signals") or []),
-       _section_phase_history(tasks, features),   # v1 호환 유지, 제거는 조립 Task에서
-   ]
-   ```
+- 이벤트 분류: `entry.event`가 `".fail"` 접미 → `fail`; `"bypass"` → `bypass`; 그 외 → `ok`. `.a-event-{ok|fail|bypass}` 클래스로 색상(TSK-01-01 CSS에서 이미 정의된 팔레트 사용: `var(--green|red|yellow)`).
+- `a-elapsed` 컬럼은 `_fmt_elapsed_short(entry.elapsed_seconds)` 뒤에 fail일 경우 ` ⚠` 추가.
+
+### Phase Timeline 섹션 (3개)
+
+| 함수 | 책임 |
+|------|------|
+| `_timeline_rows(tasks, features, now: datetime, span_minutes: int = 60) -> List[dict]` | 각 item(tasks + features)에서 `phase_history_tail`을 `at` 오름차순 정렬 후 연속된 이벤트 쌍을 `(start_dt, end_dt, phase, fail)` 튜플로 변환. phase 매핑: `entry.to_status` 값에서 대괄호 제거(`[dd]` → `dd` 등), 알려진 phase(`dd/im/ts/xx`)가 아니면 skip. fail 여부: `entry.event`가 `.fail` 접미이면 True. 마지막 이벤트의 `end_dt`는 `now`까지 연장. phase_history_tail이 0건인 item은 skip(empty row 안 생성). 반환 행: `{id, title, bypassed, segments: [(start_dt, end_dt, phase, fail), ...]}`. |
+| `_timeline_svg(rows: List[dict], span_minutes: int, now: datetime, max_rows: int = 50) -> str` | 순수 SVG 생성기. viewBox `0 0 600 {row_count*20}` (최소 row_count=1 → 20; 빈 rows는 empty-state 반환). 내부에 `<defs><pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="6" stroke="var(--red)" stroke-width="2"/></pattern></defs>` 정의. 각 row는 `<g transform="translate(0,{y})">` 안에 phase별 `<rect x width height=16 class="tl-{dd|im|ts|xx}"/>`와 fail 구간 `<rect class="tl-fail"/>` 오버레이, bypass row 우측에 `<text x="605" y="13">🟡</text>`. 상위 `max_rows` 초과 시 리스트를 잘라내고 SVG는 순수 렌더만 수행(+N more 링크는 래퍼 섹션에서 처리). 빈 rows 입력 시 `<svg class="timeline-svg" viewBox="0 0 600 40"><text ...>no phase history</text></svg>` 반환. |
+| `_section_phase_timeline(tasks, features) -> str` | `now = datetime.now(timezone.utc)`, `_timeline_rows(tasks, features, now, 60)` 호출. 결과 row 수가 50 초과면 상위 50개만 `_timeline_svg`에 전달하고, 섹션 푸터에 `<p class="timeline-more"><a href="#timeline-full">+N more</a></p>` 렌더 (현재는 hash link placeholder — 실제 full view 라우트는 v3 범위). `_section_wrap("timeline", "Phase Timeline", svg + footer)`. X축 5분 간격 tick은 `<g class="tl-ticks">` 그룹으로 `_timeline_svg` 내부에서 함께 출력. |
+
+### X축 매핑 공식
+
+```python
+# span_minutes = 60, viewBox width = W = 600
+# t: datetime (UTC-aware), now: datetime (UTC-aware)
+def _x_of(t: datetime, now: datetime, span_minutes: int, W: int = 600) -> float:
+    delta_sec = (t - (now - timedelta(minutes=span_minutes))).total_seconds()
+    total_sec = span_minutes * 60
+    return max(0.0, min(W, W * delta_sec / total_sec))
+```
+
+- 구간 rect width: `max(1.0, x_of(end) - x_of(start))` — 0-width rect는 DOM에서 보이지 않으므로 최소 1px.
+- tick: `i`가 `0..12`일 때 `x = i * W / 12 = i * 50`. 라벨 `-60m / -55m / ... / 0`, `<g class="tl-ticks">` 안에 `<line x1={x} y1=0 x2={x} y2={H}/>` + `<text x={x} y={H-4}>-{N}m</text>`.
+
+### 종료 시각 추론 세부
+
+```python
+entries = sorted(
+    [(e, _parse_iso_utc(e.at)) for e in item.phase_history_tail],
+    key=lambda pair: pair[1] or datetime.min.replace(tzinfo=timezone.utc),
+)
+entries = [(e, dt) for e, dt in entries if dt is not None]  # 파싱 실패 skip
+segments = []
+for i, (e, dt) in enumerate(entries):
+    phase = _phase_of(e.to_status)  # "[dd]" -> "dd", 알 수 없으면 None
+    if phase is None:
+        continue
+    next_dt = entries[i+1][1] if i+1 < len(entries) else now
+    fail = bool(e.event and e.event.endswith(".fail"))
+    segments.append((dt, next_dt, phase, fail))
+```
+
+- `to_status` 파싱: `to_status.strip()[1:-1]` 으로 괄호 제거, 결과가 `{"dd","im","ts","xx"}` 집합 내이면 유효 phase. 그렇지 않으면 segment 제외 (예: bypass 이벤트의 `to_status=None` 등).
+- fail 구간도 phase 색 rect 위에 `tl-fail` rect를 추가로 쌓아(stacking) 해칭이 오버레이 되도록 한다 (TRD §5.4: "실패 구간: 해칭 패턴").
 
 ## 데이터 흐름
 
-`/api/state` snapshot dict(wbs_tasks + features + generated_at) → `render_dashboard(model)` →
-- (A) Live Activity: `tasks+features의 phase_history_tail` flatten → sort(at desc) → top 20 → `<ol>` / `<li>` HTML
-- (B) Phase Timeline: `tasks의 phase_history_tail` → `_timeline_rows_from_tasks(tasks, now)` → `(start_dt, end_dt, event)` 세그먼트 → `_timeline_x_for()`로 좌표 환산 → `<svg>` + `<rect>` 조립
-→ `render_dashboard` 반환 HTML에 두 `<section>` 삽입 → 브라우저 렌더.
+입력: `model dict` (`wbs_tasks: List[WorkItem]`, `features: List[WorkItem]`, `generated_at: str`)
+→ Live: 각 item의 `phase_history_tail` 평탄화 → `_parse_iso_utc`로 UTC-aware datetime 변환 → 내림차순 정렬 → 상위 20건 → `<div class="activity-row">` 리스트
+→ Timeline: item별 phase segment 변환(`_timeline_rows`) → 상위 50 row로 cap → `_timeline_svg`로 SVG 생성(viewBox 600 × row×20) → X축 tick 13개 추가 → "+N more" 링크
+출력: 두 개의 `<section>` HTML 문자열
 
 ## 설계 결정 (대안이 있는 경우만)
 
-- **결정**: Phase Timeline에서 WBS Task만 렌더 (Feature 제외).
-- **대안**: Task + Feature 통합 타임라인 (row 타입별 아이콘 구분).
-- **근거**: PRD §4.5.6이 "태스크 ID × 시간축"으로 명시. Feature는 Live Activity에서 이벤트로만 노출. Feature는 WP 카드/도넛과 연결 없이 독립 카드로 표시되는 구조(§4.5.4)이므로 타임라인에 섞으면 축 정합성이 깨진다.
+- **결정**: SVG `<pattern id="hatch">`을 `_timeline_svg` 내부 `<defs>`에 인라인 정의 (CSS에서는 `fill: url(#hatch)` 참조만)
+- **대안**: CSS `background-image: repeating-linear-gradient(...)` 로 해칭 표현
+- **근거**: SVG `<rect>` 내부에서 CSS `background-image`는 동작하지 않는다(`fill`만 유효). TSK-01-01이 이미 `.tl-fail { fill: url(#hatch); }`을 전제로 정의되어 있으므로 인라인 SVG 패턴 정의가 필수.
 
-- **결정**: `_section_phase_timeline`이 model 대신 `tasks, features`와 kwarg `now`를 받는다.
-- **대안**: `_section_live_activity`처럼 model dict 전체를 받는다.
-- **근거**: `_section_wbs`, `_section_features` 등 v1 섹션 함수들이 이미 `(tasks, ...)` 또는 `(features, ...)` 시그니처를 쓰고 있어 일관성 유지. `now`를 kwarg로 빼면 단위 테스트에서 시간 고정이 용이하다. Live Activity는 모든 아이템을 평탄화하므로 model 편의성이 더 크다.
+- **결정**: Timeline의 "+N more" 링크는 현재 `#timeline-full` placeholder hash (실제 라우트 없음)
+- **대안**: 신규 라우트 `/timeline/full` 추가
+- **근거**: PRD/WBS 범위 내에서 v2는 "상위 50만 렌더 후 +N more 링크" 표시만 요구. 실제 full view는 v3 범위이며, 지금 라우트를 추가하면 WP-01 스코프를 벗어난다.
 
-- **결정**: 시간축은 하드코딩 60분(`_TIMELINE_SPAN_MINUTES`), 줌/팬 미지원.
-- **대안**: 사용자 선택형 30/60/120분 토글.
-- **근거**: PRD §4.8 Open Questions에서 "최근 60분 고정 vs 확대/축소"가 미결 이슈였고, 와이어프레임은 60분 고정. 복잡도↑ 회피 방침이 명시되어 있음. 확장은 별도 Task로.
+- **결정**: `_timeline_svg`는 순수 SVG 생성기로 유지하고 "+N more" 푸터는 래퍼 `_section_phase_timeline`에서 렌더
+- **대안**: "+N more" 텍스트를 SVG `<text>` 노드로 내부에 포함
+- **근거**: SVG 내부 `<text>`는 접근성(링크 role)이 약하고 CSS 클래스 적용이 번거롭다. HTML `<a>` 태그 분리가 semantic/접근성 모두 우수.
 
-- **결정**: `tl-hatch` 패턴을 SVG 내부 `<defs>`에 1회 정의, fail 구간은 `fill="url(#tl-hatch)"` 참조.
-- **대안**: 각 fail `<rect>`에 인라인 `stroke-dasharray` 적용.
-- **근거**: SVG `<pattern>`은 `url(#id)` 참조로 대역폭 절감 + 시각적 품질(대각선 해칭) 확보. TSK-01-01 CSS가 `.tl-fail { stroke: ... }`로 pattern stroke 색을 제어할 수 있게 준비되어 있음.
+- **결정**: phase 매핑은 `to_status` 괄호 파싱(`[dd]` → `dd`)
+- **대안**: `event` 문자열 파싱(`design.ok` → `dd`)
+- **근거**: `event`는 전이 **액션**이고 `to_status`는 **상태**다. SVG rect는 "어느 phase에 있었는가"를 표현해야 하므로 `to_status`가 의미적으로 정확. fail 이벤트(예: `build.fail`)는 `to_status`가 여전히 이전 phase이므로 자연스럽게 올바른 색 rect 위에 해칭 오버레이가 쌓인다.
 
-- **결정**: ISO 8601 `at` 필드 파싱 실패 시 해당 이벤트만 **skip**하고 예외를 전파하지 않는다.
-- **대안**: 파싱 실패 시 해당 태스크 row 전체 skip.
-- **근거**: PRD constraints 명시 "시간 파싱 실패 시 해당 이벤트 skip (예외 미발생)". 태스크 단위 skip은 과도함. phase_history가 길면 1~2개 불량 entry 때문에 전체 row를 잃는 것은 사용자 경험 저하.
+- **결정**: `_fmt_elapsed_short`은 `_format_elapsed`를 재사용하지 않고 얇은 순수 함수로 복제
+- **대안**: 기존 `_format_elapsed(item)` 재사용
+- **근거**: 기존 함수는 `WorkItem` 객체를 기대한다(`getattr(item, "elapsed_seconds")` 등). Live activity는 `PhaseEntry.elapsed_seconds`를 받으므로 인터페이스 어댑터를 끼는 것보다 숫자→문자열 순수 함수가 더 명확하다.
 
 ## 선행 조건
 
-- TSK-01-01 (DASHBOARD_CSS 확장) **완료 상태** — `.activity-list`, `.activity-item`, `.tl-dd`, `.tl-im`, `.tl-ts`, `.tl-xx`, `.tl-fail` 등 신규 CSS 클래스가 사전 정의되어 있어야 브라우저에서 스타일이 적용된다. WBS 상 TSK-01-04 `- depends: TSK-01-01`로 명시되어 있고, 이 worktree의 `docs/monitor-v2/tasks/TSK-01-01/design.md`에 해당 클래스 정의가 기재되어 있음.
-- Python stdlib의 `datetime`, `html` 모듈만 사용 — 외부 의존 없음.
-- 기존 `scripts/monitor-server.py` 인프라 함수 재사용: `_esc`(line 735), `_empty_section`, `_section_wrap`(line 828), `WorkItem`(line 332), `PhaseEntry`(line 317), `_format_elapsed`(line 766).
+- **TSK-01-01 (CSS 확장)** 완료 필요 — `DASHBOARD_CSS`에 `.activity-row`, `.a-event-{ok|fail|bypass}`, `.timeline-svg`, `.tl-{dd|im|ts|xx|fail}`, `.tl-ticks`, `.timeline-more` 클래스가 존재해야 시각적으로 올바르게 렌더된다. 단위 테스트는 HTML 문자열 검증이므로 CSS 없이 독립 실행 가능.
+- **v1 공통 유틸** (`scripts/monitor-server.py` 이미 존재): `_esc`, `_section_wrap`, `_empty_section`, `WorkItem`, `PhaseEntry`, `_build_phase_history_tail`.
+- Python 3.8+ `datetime.fromisoformat` 타임존 오프셋 파싱 지원 (`3.11+`에서 `"Z"` 접미 직접 지원, `3.8~3.10`은 `_parse_iso_utc`가 수동 대체).
 
 ## 리스크
 
-- **MEDIUM**: 시간축 좌표 계산 시 `end_dt > now` (즉 미래 타임스탬프가 state.json에 섞여 들어온 경우) clamp 누락하면 SVG rect가 viewBox를 벗어나 렌더 깨짐. `_timeline_x_for`에서 `max(0, min(width, x))` 명시.
-- **MEDIUM**: `_timeline_rows_from_tasks`에서 마지막 세그먼트의 `end`로 `now`를 사용할 때 `now`는 `datetime` 객체이고 PhaseEntry.at은 ISO 문자열이므로 파싱 전처리 필요. `_parse_iso_utc` 헬퍼로 중앙화.
-- **MEDIUM**: Phase Timeline row 수가 많을 때(50+ 100+) `<rect>` 수백 개를 인라인 생성하면 HTML 응답 크기 증가. `_TIMELINE_TASK_LIMIT = 50` 상한과 "+N more" 링크로 제한. 태스크 당 phase_history_tail은 이미 `_PHASE_TAIL_LIMIT = 10`으로 상한 (scripts/monitor-server.py line 421).
-- **LOW**: `_section_phase_timeline`이 기본적으로 `datetime.now(timezone.utc)`을 호출하므로, Live Activity(`generated_at` 사용)와 Phase Timeline 사이에 수 밀리초 단위 시각 차이가 발생. 사용자가 인지 불가능한 수준이지만 단위 테스트에서 `now` kwarg로 주입하여 재현성 확보.
-- **LOW**: `event` 문자열이 예상치 못한 값(예: 레거시 `*!`, `bypass`)인 경우 매핑 미스로 `<rect>`가 누락될 수 있음. 매핑 불일치 시 `class="tl-unknown"`으로 fallback하고 회색 fill을 적용.
+- **MEDIUM**: Timeline segment가 `span_minutes=60` 범위를 벗어나는 과거 시작 시각을 가질 수 있다 (예: 2시간 전 시작한 dd phase). `_x_of` 내부에서 `max(0.0, min(W, ...))` 클램프를 적용해 rect가 viewBox 밖을 탈출하지 않도록 한다. 단, 클램프로 인해 "60분 창 밖 시작 이벤트"의 실제 시간 정보는 60분 창으로 압축된다 — 이는 UI 제약이므로 acceptable.
+- **MEDIUM**: `phase_history_tail`은 v1 규약상 최근 10건만 유지한다(`_build_phase_history_tail`의 `history[-10:]`). 60분 창 내 phase 수가 10을 넘으면 일부 구간이 누락된다. 이 Task의 입력 규약이므로 해결은 데이터 모델 범위 밖. QA에서는 "10건 내에서 렌더" 사실만 검증.
+- **MEDIUM**: `entry.event`가 None일 수 있어 `event.endswith(".fail")` 호출 전 None 가드 필요 (`event and event.endswith(".fail")`). 미처리 시 AttributeError 발생.
+- **LOW**: 동시 발생(`at` 동일) 이벤트의 정렬 안정성 — Python `sorted`는 stable하므로 원본 순서 유지됨. 단 내림차순 정렬 시 key만으로는 `tie-break`이 없다. 영향은 Live activity 20건 내 1-2개 이벤트의 시각적 순서 차이뿐 — acceptable.
+- **LOW**: SVG viewBox 높이 `row_count * 20`이 0이 되지 않도록 `_timeline_svg`는 빈 rows에 대해 명시적으로 `viewBox="0 0 600 40"` + empty-state text를 반환.
+- **LOW**: 대량 데이터(50 row × 10 segment × 2 rect ≈ 1000 SVG 노드) 렌더 성능 — Python 문자열 concat은 수십 ms 이내. 브라우저 렌더도 1000 rect는 충분히 빠름. 벤치마크 불필요.
 
 ## QA 체크리스트
 
 dev-test 단계에서 검증할 항목. 각 항목은 pass/fail로 판정 가능해야 한다.
 
-**`_parse_iso_utc` 단위 테스트**
-- [ ] `"2026-04-21T11:00:00Z"` 정상 파싱 (tz-aware UTC)
-- [ ] `"2026-04-21T11:00:00+00:00"` 정상 파싱
-- [ ] `"not-a-date"` 입력 시 `None` 반환 (예외 미발생)
-- [ ] `None`/`""` 입력 시 `None` 반환
+### Live Activity
 
-**`_section_live_activity` 단위 테스트**
-- [ ] 빈 입력 (tasks=[], features=[]): `_empty_section("activity", ...)` 반환, `<ol>` 없음
-- [ ] 25건 입력: 상위 20건만 렌더 (at 내림차순), `<li>` 개수 == 20
-- [ ] 반환 HTML에 `id="activity"` 존재
-- [ ] tasks + features 혼합 입력: 양쪽 이벤트가 모두 후보에 포함됨 (task만 나오지 않음)
-- [ ] event가 `.fail`로 끝나면 `activity-item--fail` 클래스 + `⚠` 렌더
-- [ ] item_id/event/at이 HTML 특수문자(`<>&"`)여도 escape 처리됨
-- [ ] elapsed_seconds가 `None`이면 `-`, 숫자면 `{int}s` 렌더
+- [ ] `_section_live_activity({})` (빈 모델) → `_empty_section`로 렌더되며 "no recent events" 포함, 예외 없음
+- [ ] `_section_live_activity({"wbs_tasks": [t], "features": []})` (1 task, 1 entry) → `.activity-row` 1개, 첫 컬럼 HH:MM:SS 포맷, TSK-ID 포함
+- [ ] 20건 초과 이벤트 → 최신 20건만 렌더되고 내림차순 정렬됨 (첫 row의 timestamp가 가장 최근)
+- [ ] fail 이벤트 row → `class="activity-row"`에 `data-event` 속성 + `a-event-fail` 클래스 포함, `⚠` 문자 포함
+- [ ] bypass 이벤트 row → `a-event-bypass` 클래스 포함
+- [ ] `entry.at` 파싱 실패 이벤트는 렌더에서 제외되며 예외 미발생 (`entry.at="invalid"` 입력으로 검증)
+- [ ] `entry.event=None`인 레거시 이벤트도 크래시 없이 skip 또는 `a-event-ok`로 렌더
+- [ ] WBS + Feature 혼합 입력 시 두 소스의 이벤트가 하나의 리스트로 합쳐져 시간순 정렬
 
-**`_timeline_rows_from_tasks` 단위 테스트**
-- [ ] `phase_history_tail`이 빈 태스크는 결과에서 skip (row 미생성)
-- [ ] 1건 entry: 세그먼트 1개 생성, `end == now`
-- [ ] 3건 entry: 세그먼트 3개 생성, 마지막만 `end == now`
-- [ ] `at` 파싱 실패 entry: 해당 entry만 skip, 나머지는 유지
-- [ ] `bypassed=True` 태스크의 row에 `bypassed` 필드가 True로 전달됨
+### Phase Timeline
 
-**`_timeline_x_for` 단위 테스트**
-- [ ] `dt == now` → `x == 600`
-- [ ] `dt == now - 60분` → `x == 0`
-- [ ] `dt == now - 30분` → `x == 300`
-- [ ] 60분 초과 과거 → `x == 0` (clamp)
-- [ ] 미래 시각 → `x == 600` (clamp)
+- [ ] `_section_phase_timeline([], [])` → empty-state SVG(`viewBox="0 0 600 40"`) + "no phase history" 텍스트, 크래시 없음
+- [ ] `_timeline_svg([], 60, now)` 직접 호출 → 동일 empty-state SVG 반환, 예외 없음
+- [ ] phase_history_tail=0건인 Task는 timeline에서 skip (row 생성 안 됨 — viewBox 높이에 반영되지 않음)
+- [ ] 1건 이벤트만 있는 Task → 1개 segment가 `generated_at`까지 연장되어 렌더됨 (`end_dt = now` 연장 로직)
+- [ ] fail 이벤트 구간에 `class="tl-fail"` 속성이 `<rect>` 또는 오버레이 rect에 적용
+- [ ] bypass=True Task row 우측(x=605 부근)에 `🟡` 텍스트 노드 존재
+- [ ] SVG `<defs>` 블록에 `<pattern id="hatch">` 정의 포함 (외부 CSS 참조만으로 fail 해칭이 동작하려면 인라인 정의 필수)
+- [ ] X축 tick 13개(`i=0..12`) 생성, 첫 tick x=0 라벨 `-60m`, 마지막 tick x=600 라벨 `0`
+- [ ] Task 50건 초과 → 상위 50개만 렌더되고 `+N more` 링크(`<a href="#timeline-full">`)가 섹션 푸터에 표시됨
+- [ ] phase_history 100건 입력(단일 Task가 10건 × 10 Task) → 크래시 없이 렌더 완료, 처리 시간 < 100ms
+- [ ] `to_status` 파싱 실패(예: `None`, `"[invalid]"`) segment는 skip되고 나머지 segment는 정상 렌더
+- [ ] SVG 내부에 외부 자원 참조(`<image>`, `<use xlink:href>`, `<script src>`) 미포함 (grep 검증)
+- [ ] 60분 창 밖 과거 이벤트 → `_x_of` 클램프로 x=0으로 제한되며 rect 생성 (viewBox 이탈 없음)
 
-**`_timeline_svg` 단위 테스트**
-- [ ] `_timeline_svg([], 60, now=...)` → empty state SVG 반환 (크래시 없음, `<svg>` 존재, `<rect>` 없음)
-- [ ] rows 3개 입력: `viewBox="0 0 600 ..."` 포함, 높이 = `3 * 20 + 24` = 84
-- [ ] `<defs><pattern id="tl-hatch">` 정확히 1회 정의
-- [ ] fail 이벤트 세그먼트에 `class="tl-fail"` 또는 `fill="url(#tl-hatch)"` 적용
-- [ ] bypass row에 `🟡` 마커 `<text>` 존재 (x=598 근방)
-- [ ] 5분 간격 tick `<line>` 또는 `<text>` 라벨이 12개 생성됨
-- [ ] event 매핑: `dd.ok`→tl-dd, `im.ok`→tl-im, `ts.ok`→tl-ts, `xx.ok`→tl-xx, `im.fail`→tl-fail
+### 공통
 
-**`_section_phase_timeline` 단위 테스트**
-- [ ] 빈 tasks: empty-state section 반환 (크래시 없음)
-- [ ] phase_history 0건 태스크 10개: empty-state (row 0개)
-- [ ] phase_history 1건 태스크 1개: row 1개 + 세그먼트 1개 렌더
-- [ ] 50건 태스크: 모두 렌더, "+N more" 링크 없음
-- [ ] 100건 태스크: 상위 50만 렌더 + `+50 more` 링크 존재
-- [ ] `now` kwarg로 고정 시각 주입 시 결정론적 출력 (snapshot 테스트 가능)
-- [ ] features 인자는 무시됨 (feature의 phase_history가 timeline에 나타나지 않음)
-- [ ] 반환 HTML에 `id="phase-timeline"` 존재
-
-**`render_dashboard` 통합 테스트**
-- [ ] `render_dashboard(minimal_model)` 반환 HTML에 `<section id="activity">`와 `<section id="phase-timeline">` 모두 포함
-- [ ] 기존 v1 섹션(`#wbs`, `#features`, `#team`, `#subagents`, `#phases`) 그대로 존재 (회귀 방지)
-- [ ] `phase_history` 100건 스모크: 응답 HTML 생성 시간 < 500ms (성능 회귀 감지)
+- [ ] `_section_live_activity`, `_section_phase_timeline` 반환 HTML이 `_section_wrap(anchor, ...)` 래퍼로 감싸져 `<section id="activity">`, `<section id="timeline">` 형태
+- [ ] Task/Feature ID에 `<script>` 포함 시 `_esc`로 이스케이프되어 XSS 방지
+- [ ] `python3 -m py_compile scripts/monitor-server.py` 통과
 
 **fullstack/frontend Task 필수 항목 (E2E 테스트에서 검증 — dev-test reachability gate):**
-- [ ] (클릭 경로) 메뉴/사이드바/버튼을 클릭하여 목표 페이지에 도달한다 — `http://localhost:7321/` 로드 후 페이지 내 `<section id="activity">`와 `<section id="phase-timeline">`이 DOM에 모두 존재함을 확인 (URL 직접 입력 이외 경로 없음 — 루트 페이지 자체가 진입점)
-- [ ] (화면 렌더링) 핵심 UI 요소가 브라우저에서 실제 표시되고 기본 상호작용이 동작한다 — Live Activity `<ol class="activity-list">`에 `<li>` 최소 1개 이상 렌더되고, Phase Timeline `<svg>` 안에 `<rect class="tl-dd|tl-im|tl-ts|tl-xx">` 최소 1개 이상 또는 empty-state 메시지가 표시됨 (테스트 환경의 phase_history 유무에 따라)
+
+- [ ] (클릭 경로) 메뉴/사이드바/버튼을 클릭하여 목표 페이지에 도달한다 (URL 직접 입력 금지) — 구체적으로는 `http://localhost:7321/` 접속 후 sticky 헤더 nav의 `#activity` 링크 클릭 → Live Activity 섹션으로 스크롤, 이어서 `#timeline` 링크 클릭 → Phase Timeline 섹션으로 스크롤
+- [ ] (화면 렌더링) 핵심 UI 요소가 브라우저에서 실제 표시되고 기본 상호작용이 동작한다 — 구체적으로는 Live Activity 섹션에 최신 이벤트 row들이 fade-in 애니메이션과 함께 표시되고, Phase Timeline 섹션에 SVG 가로 스트립이 phase별 색상 rect로 렌더되며 `<pattern id="hatch">` 기반 fail 해칭이 시각적으로 확인된다

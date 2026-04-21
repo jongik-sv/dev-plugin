@@ -97,6 +97,8 @@ class _ServerContext:
     def stop(self) -> None:
         if self._server is not None:
             self._server.shutdown()
+        if self._thread is not None:
+            self._thread.join(timeout=10)
 
     def __enter__(self) -> "_ServerContext":
         self.start()

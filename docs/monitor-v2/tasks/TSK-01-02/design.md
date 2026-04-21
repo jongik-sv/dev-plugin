@@ -2,24 +2,22 @@
 
 ## 요구사항 확인
 
-- `scripts/monitor-server.py`에 `_section_sticky_header(model)`, `_section_kpi(model)` 두 렌더 함수를 신규 추가한다.
-- sticky 헤더는 42px 높이의 고정 헤더로 로고 dot · 제목 · project_root(말줄임) · refresh 주기 라벨 · auto-refresh 토글 버튼을 렌더링한다.
-- KPI 섹션은 Running/Failed/Bypass/Done/Pending 5장의 카드를 1줄 5등분 그리드로 렌더하며, 각 카드에 `<polyline>` 스파크라인 SVG를 포함하고, 카드 우측에 필터 칩 4개를 배치한다.
-- `_kpi_counts`, `_spark_buckets`, `_kpi_spark_svg` 헬퍼 함수를 함께 구현한다.
+- `_section_sticky_header(model)`: 로고 dot·제목·project_root(말줄임)·refresh 주기 라벨·auto-refresh 토글 버튼을 42px 고정 헤더로 렌더한다. 토글 버튼은 JS 없이 스타일만 출력(WP-02 연결 전).
+- `_section_kpi(model)`: KPI 카드 5장(Running/Failed/Bypass/Done/Pending)을 1줄 5등분으로 렌더하고, 각 카드에 1분 버킷 × 10버킷 스파크라인 SVG를 포함한다. 카드 우측에 필터 칩 4개(All/Running/Failed/Bypass)를 배치한다.
+- 우선순위 규칙(bypass > failed > running > done > pending)으로 카운트를 계산하여 중복 없는 합산이 전체 Task 수와 일치해야 한다.
 
 ## 타겟 앱
 
-- **경로**: N/A (단일 앱)
-- **근거**: `scripts/monitor-server.py` 단일 파일이 전체 서버+렌더 역할을 수행한다.
+- **경로**: N/A (단일 앱 — `scripts/monitor-server.py` 인라인 렌더 레이어)
+- **근거**: dev-plugin은 단일 Python 파일 서버 구조. 모든 렌더 함수가 `monitor-server.py`에 직접 추가된다.
 
 ## 구현 방향
 
-- `_section_sticky_header(model)`: TRD §4.2.5 HTML 구조의 `<header class="sticky-hdr" data-section="hdr">` 블록을 생성. 헤더의 auto-refresh 토글 버튼은 JS 연결 없이 `aria-pressed` 속성과 버튼 구조만 렌더 (JS 연결은 WP-02에서 담당). 모든 문자열은 `_esc()` 경유.
-- `_section_kpi(model)`: `_kpi_counts()` 헬퍼로 카운트를 계산하고 5장 카드를 `<section class="kpi-section" data-section="kpi">` 안에 배치. 각 카드는 `data-kpi="{kind}"` 속성을 가짐. `_spark_buckets()`와 `_kpi_spark_svg()`를 내부에서 호출하여 스파크라인 SVG를 카드에 삽입.
-- `_kpi_counts(tasks, features, signals)`: TRD §5.1 알고리즘. bypass > failed > running > done > pending 우선순위로 중복 없이 카운트. 반환값의 합 == `len(tasks) + len(features)`.
-- `_spark_buckets(items, kind, now, span_min=10)`: TRD §5.2 알고리즘. `phase_history_tail` 이벤트를 1분 버킷으로 집계. kind별 이벤트 매핑은 아래 "주요 구조" 참조.
-- `_kpi_spark_svg(buckets, color)`: `<polyline>` SVG 렌더. viewBox `0 0 {span-1} 24`, 경계값 0인 경우에도 유효한 SVG 반환. `<title>` 태그 필수 (스크린리더 접근성).
-- `render_dashboard()` 수정: 기존 `_section_header(model)` 앞에 `_section_sticky_header(model)`과 `_section_kpi(model)`을 삽입. 기존 `_section_header` 제거/대체는 조립 Task에서 처리.
+- `monitor-server.py` 기존 헬퍼(`_esc`, `_signal_set`, `_refresh_seconds`)를 그대로 재사용하고, 신규 함수 5개(`_kpi_counts`, `_spark_buckets`, `_kpi_spark_svg`, `_section_sticky_header`, `_section_kpi`)를 기존 `_section_header` 직후 영역에 추가한다.
+- `DASHBOARD_CSS`에 sticky header 및 KPI 카드 전용 클래스를 추가한다(`.sticky-hdr`, `.kpi-row`, `.kpi-card`, `.kpi-sparkline`, `.chip`).
+- 스파크라인은 외부 라이브러리 없이 인라인 SVG `<polyline>`으로 구현한다. viewBox `0 0 {span-1} 24`, 포인트는 정규화된 y 좌표.
+- `phase_history_tail[].at` ISO8601 타임스탬프를 파싱하여 1분 버킷으로 집계한다. `datetime` 표준 라이브러리만 사용.
+- 각 KPI 카드에 `data-kpi="{kind}"` 속성을 추가하여 단위 테스트에서 DOM 검증 가능하게 한다.
 
 ## 파일 계획
 
@@ -27,111 +25,137 @@
 
 | 파일 경로 | 역할 | 신규/수정 |
 |-----------|------|-----------|
-| `scripts/monitor-server.py` | `_section_sticky_header`, `_section_kpi`, `_kpi_counts`, `_spark_buckets`, `_kpi_spark_svg` 함수 추가. `render_dashboard()` sections 리스트 앞에 두 함수 호출 삽입 | 수정 |
-| `scripts/tests/test_monitor_server_kpi.py` | 위 5개 함수에 대한 unittest. 경계값·우선순위·중복 시그널 테스트 포함 | 신규 |
+| `scripts/monitor-server.py` | `DASHBOARD_CSS` 확장 + 신규 함수 5개 추가: `_kpi_counts`, `_spark_buckets`, `_kpi_spark_svg`, `_section_sticky_header`, `_section_kpi` | 수정 |
+
+> 이 Task는 단일 Python 파일 내 함수 추가이므로 라우터/메뉴 파일 변경이 없다. 진입점은 기존 `/` 엔드포인트가 그대로 사용된다.
 
 ## 진입점 (Entry Points)
 
-- **사용자 진입 경로**: 브라우저에서 `http://localhost:{PORT}/` 로드 → 페이지 상단에 sticky 헤더와 KPI 카드가 렌더됨. 별도 클릭 경로 없음 (대시보드 루트 페이지 그 자체가 진입점).
-- **URL / 라우트**: `/` (GET)
-- **수정할 라우터 파일**: `scripts/monitor-server.py`의 `render_dashboard()` 함수 내 `sections` 리스트 (line ~1103) — `_section_sticky_header(model)`과 `_section_kpi(model)` 호출을 기존 `_section_header(model)` 앞에 삽입
-- **수정할 메뉴·네비게이션 파일**: 해당 없음. 대시보드는 단일 페이지 구조이며 별도 사이드바/메뉴 파일이 없다. `render_dashboard()`의 `sections` 조립 순서가 레이아웃을 결정하므로 위 "수정할 라우터 파일"에 포함된다.
-- **연결 확인 방법**: `python3 -m unittest discover scripts/ -v` 통과 + `python3 scripts/monitor-launcher.py --port 7321 --docs docs` 기동 후 `http://localhost:7321/` 로드하여 sticky 헤더(`.sticky-hdr`) 및 5개 KPI 카드(`data-kpi` 속성 5개) 렌더 확인.
+이 Task는 새로운 URL/라우트 추가가 아닌, 기존 `/` 엔드포인트의 렌더 레이어 확장이다.
+
+- **사용자 진입 경로**: 브라우저에서 `http://localhost:{PORT}/` 접속 → 대시보드 최상단에 sticky header + KPI 카드 섹션이 표시된다
+- **URL / 라우트**: `/` (v1과 동일, 신규 없음)
+- **수정할 라우터 파일**: `scripts/monitor-server.py` — `render_dashboard()` 함수에서 `_section_sticky_header(model)`과 `_section_kpi(model)` 호출로 조립 (TSK-01-04 범위이나 설계상 명시). 위 "파일 계획" 표에 포함.
+- **수정할 메뉴·네비게이션 파일**: 해당 없음 — 이 Task는 헤더/KPI 섹션 함수 신규 추가이며, 기존 HTML nav 구조는 변경하지 않는다. `render_dashboard()` 조립 로직 변경은 TSK-01-04에서 수행.
+- **연결 확인 방법**: 단위 테스트에서 `_section_sticky_header({...})` 반환 HTML에 `sticky-hdr` 클래스 존재 확인; `_section_kpi(model)` 반환 HTML에 `data-kpi="running"` 등 5개 속성 존재 확인. E2E 검증은 TSK-01-04 완료 후 `/` GET 응답에서 수행.
 
 ## 주요 구조
 
 1. **`_kpi_counts(tasks, features, signals) -> dict`**
-   - 입력: `List[WorkItem]` × 2 + `List[SignalEntry]`
-   - 집합 계산: `bypass_ids = {it.id for it in all_items if it.bypassed}`, `running_ids = _signal_set(signals, "running")`, `failed_ids = _signal_set(signals, "failed")`, `done_ids = {it.id for it in all_items if it.status == "[xx]"}`
-   - 우선순위 적용: `running = running_ids - bypass_ids - failed_ids`, `failed = failed_ids - bypass_ids`, `done = done_ids - bypass_ids - failed_ids - running_ids`, `pending = max(0, total - len(bypass_ids) - len(failed) - len(running) - len(done))`
-   - 반환: `{"running": int, "failed": int, "bypass": int, "done": int, "pending": int}`
+   - `tasks + features`를 합산한 all_items를 대상으로 bypass/failed/running/done/pending을 우선순위 순으로 분류
+   - `_signal_set(signals, "running")`, `_signal_set(signals, "failed")` 재사용
+   - running 집합: `running_ids - bypass_ids - failed_ids`
+   - failed 집합: `failed_ids - bypass_ids`
+   - done 집합: `done_ids - bypass_ids - failed_ids - running_ids`
+   - pending: `len(all_items) - (bypass + failed + running + done)`
+   - 반환값: `{"running": int, "failed": int, "bypass": int, "done": int, "pending": int}`
+   - 불변 조건: 5개 값의 합 == `len(all_items)`
 
-2. **`_spark_buckets(items, kind, now, span_min=10) -> List[int]`**
-   - kind→event 매핑: `running`→`im.ok|dd.ok|ts.ok` (진행 이벤트), `failed`→`*.fail` (`.fail` 접미사), `bypass`→`"bypass"`, `done`→`xx.ok`, `pending`→빈 매핑(항상 0 반환)
-   - `now - span_min분` 이전/이후 이벤트 제외. `at` 파싱 실패 시 해당 이벤트 스킵. Python 3.8 호환: `"Z"` → `"+00:00"` 치환 후 `datetime.fromisoformat()` 호출
-   - 반환: 길이 `span_min`의 `List[int]`
+2. **`_spark_buckets(items, kind, now, span_min=10) -> list[int]`**
+   - `phase_history_tail` 이벤트를 1분 버킷으로 집계 (길이 `span_min`인 리스트)
+   - `start = now - timedelta(minutes=span_min)` 범위 외 이벤트 무시
+   - kind별 이벤트 매핑:
+     - `"done"` → `"xx.ok"` 이벤트
+     - `"bypass"` → `"bypass"` 이벤트
+     - `"failed"` → `event.endswith(".fail")` 이벤트
+     - `"running"` → `event.endswith(".ok") and event != "xx.ok"` (phase 진입 이벤트)
+     - `"pending"` → 매핑 없음, 빈 버킷 반환 (pending은 이벤트 기반 추적 불가)
+   - 내부 `_parse_iso(s)`: `datetime.fromisoformat(s)` + UTC-aware 변환
 
 3. **`_kpi_spark_svg(buckets, color) -> str`**
-   - `buckets`가 모두 0이거나 길이 1 이하: 수평선(y=12) `<polyline>` 반환
-   - max 값으로 정규화: `y_i = 24 - int(24 * buckets[i] / max_val)`
-   - `<svg viewBox="0 0 {n-1} 24" width="100%" height="24" aria-hidden="false">`, `<title>activity sparkline</title>`, `<polyline points="{x0},{y0} {x1},{y1} ..." stroke="{color}" stroke-width="1.5" fill="none"/>`
-   - 반환: 완결된 `<svg>…</svg>` 문자열
+   - `buckets: list[int]` (길이 N) → SVG `<polyline>` 생성
+   - viewBox: `0 0 {N-1} 24` (기본 N=10 → `0 0 9 24`)
+   - y 좌표: `24 - int(24 * val / max_val)` (max_val=0이면 모두 24)
+   - 포인트 수 < 2이거나 max_val=0이면 평탄선 `points="0,24 {N-1},24"` 렌더
+   - `<title>` 태그: `f"sparkline: {sum(buckets)} events in last {len(buckets)} minutes"` (스크린리더용)
+   - 반환 예: `<svg class="kpi-sparkline" viewBox="0 0 9 24"><title>sparkline: 5 events in last 10 minutes</title><polyline points="0,24 1,20 ..." stroke="{color}" fill="none" stroke-width="1.5"/></svg>`
 
 4. **`_section_sticky_header(model) -> str`**
-   - `project_root = _esc(model.get("project_root", ""))` — 말줄임은 CSS `text-overflow: ellipsis`로 처리
-   - refresh 주기: `_refresh_seconds(model)` 반환값 사용
-   - 토글 버튼: `<button class="refresh-toggle" aria-pressed="true" tabindex="0">◐ auto</button>`
-   - 반환: `<header class="sticky-hdr" data-section="hdr">…</header>`
+   - 반환: `<header class="sticky-hdr" data-section="hdr">` 블록
+   - 로고 dot: `<span class="logo-dot" aria-hidden="true">●</span>`
+   - project_root: `_esc(model.get("project_root", ""))` → CSS `text-overflow: ellipsis` 처리
+   - refresh 라벨: `f"⟳ {_refresh_seconds(model)}s"`
+   - auto-refresh 토글 버튼: `<button class="refresh-toggle" aria-pressed="true" tabindex="0">◐ auto</button>` (JS 연결은 WP-02)
 
 5. **`_section_kpi(model) -> str`**
-   - `tasks = model.get("wbs_tasks") or []`, `features = model.get("features") or []`, `signals = model.get("shared_signals") or []`
-   - `counts = _kpi_counts(tasks, features, signals)`
-   - `now = datetime.now(timezone.utc)` 기준 `_spark_buckets()` 5회 호출 (kind별)
-   - KPI 메타: `_KPI_META = [("running","RUNNING","orange"), ("failed","FAILED","red"), ("bypass","BYPASS","yellow"), ("done","DONE","green"), ("pending","PENDING","light-gray")]`
-   - 5개 카드 HTML 조립 후 필터 칩 그룹과 함께 `<section class="kpi-section" data-section="kpi">` 래핑
-   - 반환: 완결된 section 문자열
+   - `_kpi_counts(tasks, features, shared_signals)` 호출 후 5장 카드 렌더
+   - `all_items`, `now=datetime.now(timezone.utc)` 로 `_spark_buckets` × 5 호출
+   - `_kpi_spark_svg(buckets, color)` × 5 삽입
+   - 각 카드: `<div class="kpi-card {kind}" data-kpi="{kind}">`
+   - 카드 내 구성: 라벨(`<span class="kpi-label">RUNNING</span>`), 숫자(`<span class="kpi-num" aria-label="Running: {n}">{n}</span>`), 스파크라인 SVG
+   - 필터 칩: `<button class="chip" data-filter="all" aria-pressed="true" tabindex="0">All</button>` × 4개 (`all`/`running`/`failed`/`bypass`)
+   - 색상 매핑: running=`var(--orange)`, failed=`var(--red)`, bypass=`var(--yellow)`, done=`var(--green)`, pending=`var(--light-gray)`
+
+**DASHBOARD_CSS 추가 클래스:**
+
+```
+.sticky-hdr   — position:sticky; top:0; z-index:10; height:42px; display:flex; align-items:center; gap:1rem
+.logo-dot     — color:var(--green); font-size:1.2rem
+.hdr-project  — flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--muted); font-size:0.9rem
+.hdr-refresh  — font-family:monospace; color:var(--muted); font-size:0.85rem
+.refresh-toggle — padding:0.2rem 0.6rem; border:1px solid var(--border); border-radius:4px; background:transparent; color:var(--fg); cursor:pointer
+.kpi-section  — padding:0.75rem 0; margin-bottom:0.5rem
+.kpi-row      — display:grid; grid-template-columns:repeat(5,1fr); gap:0.75rem; align-items:stretch
+.kpi-card     — background:var(--panel); border-left:4px solid var(--muted); border-radius:6px; padding:0.75rem 1rem
+.kpi-card.running — border-left-color:var(--orange)
+.kpi-card.failed  — border-left-color:var(--red)
+.kpi-card.bypass  — border-left-color:var(--yellow)
+.kpi-card.done    — border-left-color:var(--green)
+.kpi-label    — font-size:0.75rem; font-weight:600; letter-spacing:0.05em; color:var(--muted); text-transform:uppercase
+.kpi-num      — font-size:1.8rem; font-weight:700; font-variant-numeric:tabular-nums; line-height:1.1
+.kpi-sparkline — display:block; width:100%; height:24px; margin-top:0.25rem
+.chip-group   — display:flex; gap:0.5rem; align-items:center
+.chip         — padding:0.2rem 0.7rem; border:1px solid var(--border); border-radius:999px; font-size:0.82rem; cursor:pointer; background:transparent; color:var(--fg)
+.chip[aria-pressed="true"] — background:var(--accent); color:var(--bg); border-color:var(--accent)
+```
 
 ## 데이터 흐름
 
-`/api/state` 모델 dict → `_kpi_counts(tasks, features, signals)`로 카운트 산출 + `_spark_buckets()`로 최근 10분 이벤트 버킷 집계 → `_kpi_spark_svg()`로 SVG 문자열 생성 → `_section_kpi()`가 HTML 조립 → `render_dashboard()` 반환값에 포함
+입력: `model dict` (`wbs_tasks`, `features`, `shared_signals`, `project_root`, `refresh_seconds`) → 처리: `_kpi_counts`로 우선순위 카운트, `_spark_buckets`로 phase_history 이벤트 집계, `_kpi_spark_svg`로 SVG polyline 생성 → 출력: `<header class="sticky-hdr">` HTML string + `<section class="kpi-section">` HTML string
 
 ## 설계 결정 (대안이 있는 경우만)
 
-- **결정**: `running` kind 스파크라인에 `im.ok|dd.ok|ts.ok` 등 phase 완료 이벤트를 활동 지표로 사용
-- **대안**: running 시그널 파일 mtime을 기준으로 버킷 집계
-- **근거**: `phase_history_tail`에만 타임스탬프가 있고 signal 파일 mtime은 정밀도가 낮다. TRD §5.2가 `phase_history_tail` 기반으로 명시했으므로 따른다.
+- **결정**: `_spark_buckets`에서 `"running"` kind는 `*.ok` (단 `xx.ok` 제외) 이벤트를 매핑
+- **대안**: `.running` 시그널 기반으로 집계
+- **근거**: TRD §5.2가 `phase_history_tail[].event` 기반 집계를 명시. 시그널은 현재 상태이지 과거 버킷 데이터가 아님. `running` 스파크라인은 "얼마나 자주 phase가 진행되었나"를 의미.
 
-- **결정**: `render_dashboard()`에서 기존 `_section_header(model)` 앞에 두 함수를 삽입하고 `_section_header` 자체는 그대로 유지
-- **대안**: `_section_header`를 즉시 `_section_sticky_header`로 대체
-- **근거**: 조립 레이아웃 전면 변경(v2 2단 grid 배치)은 별도 조립 Task에서 담당. 이 Task는 함수 구현과 단위 테스트에 집중한다.
+- **결정**: KPI 필터 칩을 `_section_kpi` 반환 HTML 내 `.kpi-section` 오른쪽에 flex로 배치
+- **대안**: 별도 `_section_filter_chips()` 함수
+- **근거**: PRD §4.5.2 "카드 우측에 필터 칩" 레이아웃 명세에 따라 KPI 섹션 내 배치가 자연스러움. 분리 시 조립 복잡도 증가.
+
+- **결정**: pending 스파크라인은 항상 빈 버킷(평탄선) 렌더
+- **대안**: pending 상태 전환 이벤트를 추적
+- **근거**: `phase_history_tail`에 pending 진입 이벤트가 없음. pending은 미착수 상태이므로 history 기반 스파크라인 의미 없음. 빈 선으로 렌더하면 사용자는 "활동 없음"으로 해석.
 
 ## 선행 조건
 
-- TSK-01-01: `DASHBOARD_CSS` 확장 — sticky 헤더(`.sticky-hdr`)·KPI 카드(`.kpi-row`, `.kpi-card`)·필터 칩(`.chip`)의 CSS 클래스. Python 함수 구현과 unittest는 CSS 없이도 독립 동작하므로 병렬 진행 가능.
-- `scripts/monitor-server.py` 기존 구조: `_esc`, `_refresh_seconds`, `_signal_set`, `WorkItem`, `PhaseEntry`, `SignalEntry`, `_group_preserving_order` 등 v1 함수들이 이미 존재함 (현재 확인됨).
+- TSK-01-01: `monitor-server.py`에 `_esc`, `_signal_set`, `_refresh_seconds`, `WorkItem`, `PhaseEntry` 정의 (현재 이미 존재: 735줄, 753줄, 742줄)
+- Python 3.8+ `datetime.fromisoformat`: 타임존 오프셋(`+09:00`) 파싱 지원 (프로젝트 요구사항 충족)
 
 ## 리스크
 
-- **MEDIUM**: 동일 `task_id`에 running + failed 시그널이 동시 존재하는 경우 — `failed` 우선 처리로 running 카운트 제외됨(의도된 동작). 테스트에서 명시 검증 필요.
-- **MEDIUM**: `_spark_buckets`에서 `at` 필드의 `"Z"` 타임존 접미사 — Python 3.8에서 `datetime.fromisoformat()`이 `Z`를 미지원하므로 `Z`→`+00:00` 치환 전처리 필수.
-- **LOW**: `_kpi_spark_svg`에서 bucket 수 0~1인 경우 단일 점 SVG 생성 — `span_min` 기본값 10이므로 실용상 문제 없으나 경계값 처리 명시.
+- **MEDIUM**: `_spark_buckets`의 ISO 파싱 시 타임존 naive/aware 혼용 위험. `now`가 UTC-aware일 때 `phase_history_tail[].at`이 naive이면 비교 오류 발생 → `_parse_iso` 내에서 `tzinfo` 없으면 UTC로 강제 변환.
+- **MEDIUM**: `DASHBOARD_CSS` 추가분이 v1 스타일과 충돌 가능. `.sticky-hdr`의 `position:sticky`가 부모 `overflow:hidden`과 충돌할 경우 sticky 동작 안 됨 → `body`에 `overflow-y: auto` 확인 필요.
+- **LOW**: `<polyline>`에서 포인트 수 1개이면 선 렌더 안 됨 → 버킷 길이 <2 또는 max_val=0인 경우 평탄선 출력으로 안전 처리.
+- **LOW**: KPI 카드에서 숫자가 크면(예: 9999) `.kpi-num` 폰트 크기가 카드를 벗어날 수 있음 → `font-size: clamp(1.2rem, 2vw, 1.8rem)` 고려 또는 999+ truncation.
 
 ## QA 체크리스트
 
-dev-test 단계에서 검증할 항목:
-
-**`_kpi_counts` 단위 테스트**
-- [ ] 태스크 0건: `tasks=[], features=[], signals=[]` 시 모든 값 0, 합 == 0
-- [ ] 전체 합 == `len(tasks) + len(features)` (정상 혼합 입력)
-- [ ] bypass > failed 우선순위: 동일 task_id가 bypassed=True이고 failed 시그널도 있을 때 bypass 카운트에만 산정
-- [ ] failed > running 우선순위: 동일 task_id에 running+failed 시그널 동시 존재 시 failed에만 산정
-- [ ] done 중복 제외: status=[xx]이고 running 시그널도 있을 때 running으로만 카운트 (running_ids 우선)
-- [ ] pending 음수 방어: 시그널 중복 가산이 생겨도 pending이 0 미만이 되지 않음
-
-**`_spark_buckets` 단위 테스트**
-- [ ] span_min=10 범위 외(11분 전) 이벤트 제외
-- [ ] kind="failed" 매칭: `ts.fail`, `im.fail`, `dd.fail` 이벤트 모두 카운트
-- [ ] kind="done" 매칭: `xx.ok` 이벤트만 카운트, `xx.fail`은 미카운트
-- [ ] `at` 필드 없는 PhaseEntry 예외 없이 스킵
-- [ ] `"Z"` 타임존 파싱: `"2026-04-21T11:00:00Z"` 정상 파싱
-
-**`_kpi_spark_svg` 단위 테스트**
-- [ ] 모든 버킷 0: 유효한 SVG 반환 (`<polyline>` + `<title>` 존재)
-- [ ] 정상 버킷: `<polyline points="...">` 포함, `<title>` 태그 존재
-- [ ] `span_min=1` 단일 버킷 예외 없이 처리
-
-**`_section_sticky_header` 단위 테스트**
-- [ ] 반환값에 `data-section="hdr"` 속성 존재
-- [ ] `project_root` 특수문자(`<>&"`) HTML escape 처리됨
-- [ ] refresh 주기 숫자가 렌더 결과에 포함됨
-- [ ] auto-refresh 토글 버튼에 `aria-pressed` 속성 존재
-
-**`_section_kpi` 단위 테스트**
-- [ ] 렌더 결과에 `data-kpi="running"`, `"failed"`, `"bypass"`, `"done"`, `"pending"` 5개 속성 모두 존재
-- [ ] 각 카드에 `<svg>` 스파크라인 포함, SVG에 `<title>` 존재
-- [ ] 필터 칩 `data-filter="all"`, `"running"`, `"failed"`, `"bypass"` 4개 존재
-- [ ] 태스크 0건 입력 시 렌더 에러 없이 정상 반환
-
-**fullstack/frontend Task 필수 항목 (E2E 테스트에서 검증 — dev-test reachability gate):**
-- [ ] (클릭 경로) 메뉴/사이드바/버튼을 클릭하여 목표 페이지에 도달한다 — `http://localhost:7321/` 로드 후 sticky 헤더(`.sticky-hdr`)와 KPI 섹션(`data-section="kpi"`)이 DOM에 존재함을 확인 (URL 직접 입력 이외 경로 없음 — 루트 페이지 자체가 진입점)
-- [ ] (화면 렌더링) 핵심 UI 요소가 브라우저에서 실제 표시되고 기본 상호작용이 동작한다 — 5개 KPI 카드가 1줄 그리드로 표시되고, 필터 칩 클릭 시 `aria-pressed` 상태 변경됨 (JS 연결은 WP-02에서 담당하므로 이 Task에서는 DOM 존재 확인까지)
+- [ ] `_kpi_counts([], [], [])` 반환값 5개 합 == 0 (태스크 0건 경계값)
+- [ ] 모든 태스크가 bypass인 경우: `bypass` 카운트 == 전체, 나머지 4개 합 == 0
+- [ ] bypass + failed 동시 존재 태스크: bypass가 우선 적용되어 failed 카운트에 미포함
+- [ ] running + done 동시 (running_ids에 done 태스크 포함): running으로 분류, done에서 제외
+- [ ] `_kpi_counts` 반환 5개 값 합 == `len(tasks) + len(features)` (항등식)
+- [ ] 중복 시그널(같은 task_id가 running과 failed 시그널 동시 존재): 우선순위 규칙(bypass > failed > running) 적용
+- [ ] `_spark_buckets(items, "done", now, span_min=10)` span_min 범위 밖 이벤트 무시 (이전 이벤트 제외 확인)
+- [ ] `_spark_buckets` 반환 리스트 길이 == span_min (기본 10)
+- [ ] `_kpi_spark_svg([], color)` → max_val=0일 때 평탄선 SVG 반환, 오류 없음
+- [ ] `_kpi_spark_svg(buckets, color)` SVG에 `<title>` 태그 존재 확인
+- [ ] `_section_kpi(model)` 반환 HTML에 `data-kpi="running"`, `data-kpi="failed"`, `data-kpi="bypass"`, `data-kpi="done"`, `data-kpi="pending"` 5개 속성 존재
+- [ ] `_section_kpi(model)` 반환 HTML에 `data-filter="all"`, `data-filter="running"`, `data-filter="failed"`, `data-filter="bypass"` 4개 필터 칩 존재
+- [ ] `_section_sticky_header(model)` 반환 HTML에 `class="sticky-hdr"` 및 `class="refresh-toggle"` 버튼 존재
+- [ ] `_section_sticky_header(model)` project_root에 `<script>` 문자열 포함 시 HTML escape 처리됨 (XSS 방지)
+- [ ] `_section_sticky_header(model)` refresh 주기 라벨 `⟳ {N}s` 형태 포함
+- [ ] model에 `project_root` 키 없어도 KeyError 없이 렌더
+- [ ] (클릭 경로) 브라우저에서 `http://localhost:{PORT}/` 접속 시 sticky header가 스크롤 후에도 상단 고정 표시됨
+- [ ] (화면 렌더링) KPI 카드 5장이 1줄 5등분 레이아웃으로 표시되고, 각 카드에 스파크라인 SVG가 렌더됨
