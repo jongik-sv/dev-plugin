@@ -1627,28 +1627,17 @@ class MonitorHandler(BaseHTTPRequestHandler):
     def _route_root(self) -> None:
         """GET / — build model dict and render dashboard HTML."""
         server = getattr(self, "server", None)
-        project_root = str(getattr(server, "project_root", ""))
-        docs_dir_val = str(getattr(server, "docs_dir", ""))
         refresh_seconds = int(getattr(server, "refresh_seconds", _DEFAULT_REFRESH_SECONDS))
 
-        docs_path = Path(docs_dir_val) if docs_dir_val else Path("docs")
-        tasks = scan_tasks(docs_path)
-        features = scan_features(docs_path)
-        all_signals = scan_signals()
-        shared_sigs, pool_sigs = _classify_signal_scopes(all_signals)
-        panes = list_tmux_panes()
-
-        model = {
-            "generated_at": _now_iso_z(),
-            "project_root": project_root,
-            "docs_dir": docs_dir_val,
-            "refresh_seconds": refresh_seconds,
-            "wbs_tasks": tasks,
-            "features": features,
-            "shared_signals": shared_sigs,
-            "agent_pool_signals": pool_sigs,
-            "tmux_panes": panes,
-        }
+        snapshot = _build_state_snapshot(
+            project_root=_server_attr(self, "project_root"),
+            docs_dir=_server_attr(self, "docs_dir"),
+            scan_tasks=scan_tasks,
+            scan_features=scan_features,
+            scan_signals=scan_signals,
+            list_tmux_panes=list_tmux_panes,
+        )
+        model = {**snapshot, "refresh_seconds": refresh_seconds}
         html_body = render_dashboard(model)
         _send_html_response(self, 200, html_body)
 
