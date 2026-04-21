@@ -1,0 +1,954 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1440">
+<title>Dev Monitor — Prototype</title>
+<style>
+/* ===== CSS Custom Properties ===== */
+:root {
+  --bg: #0d1117;
+  --bg2: #161b22;
+  --bg3: #21262d;
+  --border: #30363d;
+  --text: #e6edf3;
+  --text2: #8b949e;
+  --text3: #6e7681;
+  --accent: #58a6ff;
+  --green: #3fb950;
+  --red: #f85149;
+  --yellow: #d29922;
+  --purple: #bc8cff;
+  --orange: #ffa657;
+
+  --status-running: #58a6ff;
+  --status-done: #3fb950;
+  --status-failed: #f85149;
+  --status-bypass: #bc8cff;
+  --status-pending: #6e7681;
+
+  --header-h: 52px;
+  --kpi-h: 88px;
+  --filter-h: 44px;
+
+  --drawer-w: 600px;
+  --radius: 8px;
+  --radius-sm: 5px;
+}
+
+/* ===== Reset ===== */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  font-size: 13px;
+  background: var(--bg);
+  color: var(--text);
+  height: 100vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ===== Header ===== */
+#header {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  height: var(--header-h);
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  padding: 0 20px;
+  gap: 16px;
+  flex-shrink: 0;
+}
+#header h1 {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+#header h1 .dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 6px var(--green);
+  animation: pulse 2s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+#header .project-name {
+  color: var(--text2);
+  font-size: 12px;
+}
+#header .spacer { flex: 1; }
+#header .header-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--text2);
+  font-size: 11px;
+}
+#header .last-updated {
+  padding: 3px 8px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+/* ===== KPI Bar ===== */
+#kpi-bar {
+  display: flex;
+  gap: 10px;
+  padding: 10px 20px;
+  flex-shrink: 0;
+  background: var(--bg);
+}
+.kpi-card {
+  flex: 1;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  height: var(--kpi-h);
+  justify-content: space-between;
+}
+.kpi-card .kpi-label {
+  font-size: 11px;
+  color: var(--text2);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.kpi-card .kpi-value {
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1;
+}
+.kpi-card .kpi-spark {
+  height: 20px;
+}
+.kpi-running .kpi-value { color: var(--status-running); }
+.kpi-failed .kpi-value  { color: var(--status-failed); }
+.kpi-bypass .kpi-value  { color: var(--status-bypass); }
+.kpi-done .kpi-value    { color: var(--status-done); }
+.kpi-pending .kpi-value { color: var(--status-pending); }
+
+/* ===== Filter Chips ===== */
+#filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 20px;
+  height: var(--filter-h);
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
+}
+#filter-bar .filter-label {
+  font-size: 11px;
+  color: var(--text3);
+  margin-right: 4px;
+}
+.chip {
+  padding: 4px 12px;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  background: var(--bg3);
+  color: var(--text2);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s;
+  user-select: none;
+}
+.chip:hover { border-color: var(--accent); color: var(--accent); }
+.chip.active { background: rgba(88,166,255,.15); border-color: var(--accent); color: var(--accent); }
+.chip[data-filter="running"].active { background: rgba(88,166,255,.15); border-color: var(--status-running); color: var(--status-running); }
+.chip[data-filter="failed"].active  { background: rgba(248,81,73,.15);  border-color: var(--status-failed);  color: var(--status-failed); }
+.chip[data-filter="bypass"].active  { background: rgba(188,140,255,.15);border-color: var(--status-bypass);  color: var(--status-bypass); }
+.chip[data-filter="done"].active    { background: rgba(63,185,80,.15);  border-color: var(--status-done);    color: var(--status-done); }
+
+/* ===== Main 2-column layout ===== */
+#main {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 60fr 40fr;
+  overflow: hidden;
+  min-height: 0;
+}
+#left-panel, #right-panel {
+  overflow-y: auto;
+  padding: 16px 20px;
+  min-height: 0;
+}
+#left-panel { border-right: 1px solid var(--border); }
+
+/* ===== WP Card ===== */
+.wp-card {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 12px;
+  overflow: hidden;
+}
+.wp-card-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  background: var(--bg3);
+  border-bottom: 1px solid var(--border);
+}
+.wp-card-header .wp-id {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent);
+  font-family: ui-monospace, monospace;
+}
+.wp-card-header .wp-title {
+  font-size: 13px;
+  font-weight: 600;
+  flex: 1;
+}
+.wp-card-header .wp-pct {
+  font-size: 12px;
+  color: var(--text2);
+}
+.wp-donut-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 14px;
+}
+.donut {
+  width: 52px; height: 52px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  position: relative;
+}
+.donut::after {
+  content: '';
+  position: absolute;
+  inset: 10px;
+  background: var(--bg2);
+  border-radius: 50%;
+}
+.wp-progress-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.progress-bar-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.progress-bar {
+  flex: 1;
+  height: 6px;
+  background: var(--bg3);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.progress-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: var(--green);
+}
+.wp-legend {
+  display: flex;
+  gap: 10px;
+  font-size: 11px;
+  color: var(--text2);
+}
+.wp-legend span { display: flex; align-items: center; gap: 4px; }
+.wp-legend .dot2 { width: 6px; height: 6px; border-radius: 50%; }
+.task-list { padding: 0 14px 6px; }
+.task-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+}
+.task-row.hidden { display: none; }
+.task-row .task-id {
+  font-family: ui-monospace, monospace;
+  color: var(--text3);
+  font-size: 11px;
+  min-width: 74px;
+}
+.task-row .task-title { flex: 1; color: var(--text); }
+.status-badge {
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+.s-running { background: rgba(88,166,255,.15); color: var(--status-running); }
+.s-done    { background: rgba(63,185,80,.15);  color: var(--status-done); }
+.s-failed  { background: rgba(248,81,73,.15);  color: var(--status-failed); }
+.s-bypass  { background: rgba(188,140,255,.15);color: var(--status-bypass); }
+.s-pending { background: rgba(110,118,129,.15);color: var(--status-pending); }
+
+/* ===== Right Panel Sections ===== */
+.section-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text2);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.section-title::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+/* Live Activity */
+#live-activity { margin-bottom: 16px; }
+.activity-item {
+  display: flex;
+  gap: 10px;
+  padding: 5px 0;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+}
+.activity-item:first-child { border-top: none; }
+.activity-time {
+  color: var(--text3);
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  min-width: 42px;
+  flex-shrink: 0;
+}
+.activity-tsk {
+  color: var(--text3);
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+}
+.ev-ok     { color: var(--green); font-weight: 600; }
+.ev-fail   { color: var(--red); font-weight: 600; }
+.ev-start  { color: var(--accent); font-weight: 600; }
+.ev-bypass { color: var(--purple); font-weight: 600; }
+
+/* Phase Timeline */
+#phase-timeline { margin-bottom: 16px; }
+#timeline-svg { width: 100%; height: 80px; display: block; }
+
+/* Team Panes */
+#team-panes { margin-bottom: 16px; }
+.pane-card {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  margin-bottom: 8px;
+  overflow: hidden;
+}
+.pane-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+}
+.pane-win-name {
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--accent);
+  flex: 1;
+}
+.pane-meta { font-size: 10px; color: var(--text3); }
+.expand-btn {
+  padding: 2px 8px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--accent);
+  font-size: 10px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.expand-btn:hover { background: rgba(88,166,255,.1); border-color: var(--accent); }
+.pane-preview {
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--text2);
+  padding: 5px 10px;
+  line-height: 1.7;
+  background: var(--bg);
+}
+.pane-preview span { display: block; }
+.pline-ok  { color: var(--green); }
+.pline-err { color: var(--red); }
+.pline-cmd { color: var(--yellow); }
+
+/* ===== Drawer ===== */
+#drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  z-index: 200;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s;
+}
+#drawer-backdrop.open { opacity: 1; pointer-events: all; }
+#drawer {
+  position: fixed;
+  top: 0;
+  right: calc(-1 * var(--drawer-w));
+  width: var(--drawer-w);
+  height: 100vh;
+  background: var(--bg2);
+  border-left: 1px solid var(--border);
+  z-index: 201;
+  display: flex;
+  flex-direction: column;
+  transition: right 0.25s cubic-bezier(0.4,0,0.2,1);
+  overflow: hidden;
+}
+#drawer.open { right: 0; }
+#drawer-header {
+  display: flex;
+  align-items: center;
+  padding: 14px 16px;
+  background: var(--bg3);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  gap: 10px;
+}
+#drawer-title { flex: 1; font-size: 14px; font-weight: 600; }
+#drawer-close {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text2);
+  font-size: 12px;
+  padding: 3px 8px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+#drawer-close:hover { border-color: var(--red); color: var(--red); }
+#drawer-body { flex: 1; overflow-y: auto; padding: 16px; }
+.drawer-meta-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  margin-bottom: 12px;
+  font-size: 12px;
+}
+.meta-item { display: flex; gap: 8px; color: var(--text2); }
+.meta-key { color: var(--text3); min-width: 80px; font-size: 11px; }
+.drawer-full-output {
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--text2);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px;
+  line-height: 1.8;
+  white-space: pre-wrap;
+}
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<header id="header">
+  <h1><span class="dot"></span> Dev Monitor</h1>
+  <span class="project-name">dev-plugin / WP-00-monitor-v2</span>
+  <div class="spacer"></div>
+  <div class="header-meta">
+    <span class="last-updated">Updated: 09:41:22</span>
+    <span>3 WPs active</span>
+    <span>10 Tasks</span>
+  </div>
+</header>
+
+<!-- KPI Bar -->
+<div id="kpi-bar"></div>
+
+<!-- Filter Bar -->
+<div id="filter-bar">
+  <span class="filter-label">FILTER</span>
+  <button class="chip active" data-filter="all">All</button>
+  <button class="chip" data-filter="running">Running</button>
+  <button class="chip" data-filter="failed">Failed</button>
+  <button class="chip" data-filter="bypass">Bypass</button>
+  <button class="chip" data-filter="done">Done</button>
+</div>
+
+<!-- Main 2-column -->
+<div id="main">
+  <div id="left-panel"></div>
+  <div id="right-panel">
+    <div id="live-activity">
+      <div class="section-title">Live Activity</div>
+      <div id="activity-feed"></div>
+    </div>
+    <div id="phase-timeline">
+      <div class="section-title">Phase Timeline</div>
+      <svg id="timeline-svg" viewBox="0 0 600 80" xmlns="http://www.w3.org/2000/svg"></svg>
+    </div>
+    <div id="team-panes">
+      <div class="section-title">Team Agents</div>
+      <div id="panes-container"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Drawer -->
+<div id="drawer-backdrop"></div>
+<div id="drawer" role="dialog" aria-modal="true">
+  <div id="drawer-header">
+    <span id="drawer-title">Pane Detail</span>
+    <button id="drawer-close">&#10005; Close</button>
+  </div>
+  <div id="drawer-body">
+    <div id="drawer-content"></div>
+  </div>
+</div>
+
+<script>
+/* =====================================================
+   MOCK DATA
+   tasks:10건 / wps:3개 / phase_history:20건 / panes:3개
+   ===================================================== */
+var MOCK_DATA = {
+  project: "dev-plugin",
+  worktree: "WP-00-monitor-v2",
+  last_updated: "2026-04-21T09:41:22Z",
+
+  wps: [
+    { id: "WP-00", name: "Monitor v2 Core",    branch: "dev/WP-00-monitor-v2" },
+    { id: "WP-01", name: "Server Integration", branch: "dev/WP-01-server" },
+    { id: "WP-02", name: "E2E & QA",           branch: "dev/WP-02-e2e" }
+  ],
+
+  tasks: [
+    { id: "TSK-00-01", title: "정적 HTML 프로토타입",   wp: "WP-00", status: "running", phase: "[im]", elapsed: 1820 },
+    { id: "TSK-00-02", title: "monitor-server.py 라우팅",wp: "WP-00", status: "done",   phase: "[xx]", elapsed: 3240 },
+    { id: "TSK-00-03", title: "HTML 렌더 통합",         wp: "WP-00", status: "running", phase: "[dd]", elapsed: 540  },
+    { id: "TSK-00-04", title: "데이터 스냅샷 API",      wp: "WP-00", status: "failed",  phase: "[im]", elapsed: 2100 },
+    { id: "TSK-01-01", title: "PID 파일 관리",          wp: "WP-01", status: "done",    phase: "[xx]", elapsed: 1890 },
+    { id: "TSK-01-02", title: "포트 충돌 핸들링",       wp: "WP-01", status: "bypass",  phase: "[im]", elapsed: 900  },
+    { id: "TSK-01-03", title: "헬스체크 엔드포인트",    wp: "WP-01", status: "done",    phase: "[xx]", elapsed: 2750 },
+    { id: "TSK-02-01", title: "Playwright E2E 셋업",    wp: "WP-02", status: "done",    phase: "[xx]", elapsed: 4100 },
+    { id: "TSK-02-02", title: "드로어 상호작용 테스트", wp: "WP-02", status: "bypass",  phase: "[dd]", elapsed: 720  },
+    { id: "TSK-02-03", title: "KPI 수치 검증",          wp: "WP-02", status: "pending", phase: "[ ]",  elapsed: 0    }
+  ],
+
+  phase_history: [
+    { tsk:"TSK-00-01", event:"design.ok",   from:"[ ]",  to:"[dd]",  at:"2026-04-21T09:10:22Z" },
+    { tsk:"TSK-00-01", event:"build.start", from:"[dd]", to:"[im]",  at:"2026-04-21T09:11:05Z" },
+    { tsk:"TSK-00-02", event:"design.ok",   from:"[ ]",  to:"[dd]",  at:"2026-04-21T08:55:10Z" },
+    { tsk:"TSK-00-02", event:"build.ok",    from:"[dd]", to:"[im]",  at:"2026-04-21T08:58:30Z" },
+    { tsk:"TSK-00-02", event:"test.ok",     from:"[im]", to:"[ts]",  at:"2026-04-21T09:05:44Z" },
+    { tsk:"TSK-00-02", event:"refactor.ok", from:"[ts]", to:"[xx]",  at:"2026-04-21T09:09:12Z" },
+    { tsk:"TSK-00-03", event:"design.ok",   from:"[ ]",  to:"[dd]",  at:"2026-04-21T09:32:00Z" },
+    { tsk:"TSK-00-04", event:"design.ok",   from:"[ ]",  to:"[dd]",  at:"2026-04-21T08:40:00Z" },
+    { tsk:"TSK-00-04", event:"build.fail",  from:"[dd]", to:"[im!]", at:"2026-04-21T08:51:18Z" },
+    { tsk:"TSK-01-01", event:"design.ok",   from:"[ ]",  to:"[dd]",  at:"2026-04-21T08:20:00Z" },
+    { tsk:"TSK-01-01", event:"build.ok",    from:"[dd]", to:"[im]",  at:"2026-04-21T08:24:10Z" },
+    { tsk:"TSK-01-01", event:"test.ok",     from:"[im]", to:"[ts]",  at:"2026-04-21T08:30:55Z" },
+    { tsk:"TSK-01-01", event:"refactor.ok", from:"[ts]", to:"[xx]",  at:"2026-04-21T08:35:20Z" },
+    { tsk:"TSK-01-02", event:"design.ok",   from:"[ ]",  to:"[dd]",  at:"2026-04-21T08:38:00Z" },
+    { tsk:"TSK-01-02", event:"bypass",      from:"[dd]", to:"[im]",  at:"2026-04-21T08:50:08Z" },
+    { tsk:"TSK-01-03", event:"design.ok",   from:"[ ]",  to:"[dd]",  at:"2026-04-21T07:50:00Z" },
+    { tsk:"TSK-01-03", event:"build.ok",    from:"[dd]", to:"[im]",  at:"2026-04-21T07:58:40Z" },
+    { tsk:"TSK-01-03", event:"test.ok",     from:"[im]", to:"[ts]",  at:"2026-04-21T08:12:15Z" },
+    { tsk:"TSK-01-03", event:"refactor.ok", from:"[ts]", to:"[xx]",  at:"2026-04-21T08:18:50Z" },
+    { tsk:"TSK-02-01", event:"design.ok",   from:"[ ]",  to:"[dd]",  at:"2026-04-21T07:30:00Z" }
+  ],
+
+  panes: [
+    {
+      id: "pane-0",
+      window: "WP-00-monitor-v2",
+      pane_index: 0,
+      pid: 12345,
+      preview: [
+        "$ /dev-build TSK-00-01",
+        "Running TDD build for TSK-00-01...",
+        "Step 1: Writing unit tests..."
+      ],
+      full_output: "$ /dev-build TSK-00-01\nRunning TDD build for TSK-00-01...\nStep 1: Writing unit tests...\nCreating docs/monitor-v2/prototype.html\nInlining CSS variables...\nAdding mock data constants...\nRed phase: checking test failures...\n[PASS] KPI card count matches mock data\n[PASS] WP card donut renders conic-gradient\n[PASS] Drawer opens on expand click\n[PASS] ESC key closes drawer\nGreen phase: all tests passing\nBuild complete."
+    },
+    {
+      id: "pane-1",
+      window: "WP-01-server",
+      pane_index: 0,
+      pid: 23456,
+      preview: [
+        "$ python3 -m unittest discover scripts/ -v",
+        "test_health_check ... ok",
+        "test_pid_management ... ok"
+      ],
+      full_output: "$ python3 -m unittest discover scripts/ -v\ntest_health_check ... ok\ntest_pid_management ... ok\ntest_port_conflict ... ok\ntest_server_start ... ok\ntest_server_stop ... ok\n----------------------------------------------------------------------\nRan 5 tests in 0.234s\nOK"
+    },
+    {
+      id: "pane-2",
+      window: "WP-02-e2e",
+      pane_index: 0,
+      pid: 34567,
+      preview: [
+        "$ npx playwright test --reporter=line",
+        "  ok  drawer opens on click (1.2s)",
+        "  ok  KPI values match mock (0.8s)"
+      ],
+      full_output: "$ npx playwright test --reporter=line\n  ok  drawer opens on click (1.2s)\n  ok  KPI values match mock (0.8s)\n  ok  filter chips hide rows (0.5s)\n  ok  ESC closes drawer (0.4s)\n  6 passed (4.1s)"
+    }
+  ]
+};
+
+/* =====================================================
+   HELPERS
+   ===================================================== */
+function statusClass(st) {
+  var m = { running:'s-running', done:'s-done', failed:'s-failed', bypass:'s-bypass', pending:'s-pending' };
+  return m[st] || 's-pending';
+}
+function statusLabel(st) {
+  var m = { running:'Running', done:'Done', failed:'Failed', bypass:'Bypass', pending:'Pending' };
+  return m[st] || st;
+}
+function eventClass(ev) {
+  if (ev.indexOf('.ok') >= 0) return 'ev-ok';
+  if (ev.indexOf('.fail') >= 0) return 'ev-fail';
+  if (ev === 'bypass') return 'ev-bypass';
+  return 'ev-start';
+}
+function fmtTime(iso) {
+  var d = new Date(iso);
+  return ('0'+d.getUTCHours()).slice(-2) + ':' + ('0'+d.getUTCMinutes()).slice(-2);
+}
+function escHtml(s) {
+  return String(s)
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;');
+}
+
+/* =====================================================
+   renderKPI — KPI 5장
+   ===================================================== */
+function renderKPI() {
+  var counts = { running:0, failed:0, bypass:0, done:0, pending:0 };
+  MOCK_DATA.tasks.forEach(function(t) { if (counts[t.status] !== undefined) counts[t.status]++; });
+
+  var sparks = {
+    running: [1,2,2,3,2,3,3],
+    failed:  [0,0,1,0,1,0,1],
+    bypass:  [0,1,1,2,2,2,2],
+    done:    [1,2,2,3,3,4,4],
+    pending: [3,3,3,2,2,1,0]
+  };
+  var defs = [
+    { key:'running', label:'Running', color:'var(--status-running)' },
+    { key:'failed',  label:'Failed',  color:'var(--status-failed)' },
+    { key:'bypass',  label:'Bypass',  color:'var(--status-bypass)' },
+    { key:'done',    label:'Done',    color:'var(--status-done)' },
+    { key:'pending', label:'Pending', color:'var(--status-pending)' }
+  ];
+
+  var bar = document.getElementById('kpi-bar');
+  bar.innerHTML = defs.map(function(d) {
+    var spark = mkSparkSVG(sparks[d.key], d.color);
+    return '<div class="kpi-card kpi-'+d.key+'">'
+      + '<div class="kpi-label">'+d.label+'</div>'
+      + '<div class="kpi-value">'+counts[d.key]+'</div>'
+      + '<div class="kpi-spark">'+spark+'</div>'
+      + '</div>';
+  }).join('');
+}
+
+function mkSparkSVG(data, color) {
+  var W=60, H=20;
+  var max = Math.max.apply(null, data.concat([1]));
+  var pts = data.map(function(v,i) {
+    var x = (i/(data.length-1))*W;
+    var y = H - (v/max)*(H-3) - 1;
+    return x.toFixed(1)+','+y.toFixed(1);
+  }).join(' ');
+  return '<svg viewBox="0 0 '+W+' '+H+'" xmlns="http://www.w3.org/2000/svg" width="60" height="20">'
+    + '<polyline points="'+pts+'" fill="none" stroke="'+color+'" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.8"/>'
+    + '</svg>';
+}
+
+/* =====================================================
+   renderWPCard — WP 카드(도넛 + progress + task rows)
+   ===================================================== */
+function countByStatus(tasks, status) {
+  return tasks.filter(function(t){ return t.status === status; }).length;
+}
+function toPct(count, total) {
+  return total ? (count / total) * 100 : 0;
+}
+
+function renderWPCard(wp) {
+  var tasks = MOCK_DATA.tasks.filter(function(t) { return t.wp === wp.id; });
+  var total   = tasks.length;
+  var done    = countByStatus(tasks, 'done');
+  var running = countByStatus(tasks, 'running');
+  var failed  = countByStatus(tasks, 'failed');
+  var bypass  = countByStatus(tasks, 'bypass');
+  var pct = Math.round(toPct(done, total));
+
+  /* conic-gradient: done | running | failed | bypass | pending(rest) */
+  var donePct = toPct(done, total);
+  var runPct  = toPct(running, total);
+  var failPct = toPct(failed, total);
+  var bypPct  = toPct(bypass, total);
+  var p0=0, p1=p0+donePct, p2=p1+runPct, p3=p2+failPct, p4=p3+bypPct;
+
+  var gradient = 'conic-gradient('
+    + 'var(--status-done)    0%   '+p1.toFixed(1)+'%,'
+    + 'var(--status-running) '+p1.toFixed(1)+'% '+p2.toFixed(1)+'%,'
+    + 'var(--status-failed)  '+p2.toFixed(1)+'% '+p3.toFixed(1)+'%,'
+    + 'var(--status-bypass)  '+p3.toFixed(1)+'% '+p4.toFixed(1)+'%,'
+    + '#2d333b               '+p4.toFixed(1)+'% 100%)';
+
+  var taskRows = tasks.map(function(t) {
+    return '<div class="task-row" data-status="'+t.status+'">'
+      + '<span class="task-id">'+t.id+'</span>'
+      + '<span class="task-title">'+escHtml(t.title)+'</span>'
+      + '<span class="status-badge '+statusClass(t.status)+'">'+statusLabel(t.status)+'</span>'
+      + '</div>';
+  }).join('');
+
+  return '<div class="wp-card">'
+    + '<div class="wp-card-header">'
+    +   '<span class="wp-id">'+wp.id+'</span>'
+    +   '<span class="wp-title">'+escHtml(wp.name)+'</span>'
+    +   '<span class="wp-pct">'+pct+'%</span>'
+    + '</div>'
+    + '<div class="wp-donut-row">'
+    +   '<div class="donut" style="background:'+gradient+';"></div>'
+    +   '<div class="wp-progress-col">'
+    +     '<div class="progress-bar-wrap">'
+    +       '<div class="progress-bar"><div class="progress-fill" style="width:'+pct+'%;"></div></div>'
+    +       '<span style="font-size:11px;color:var(--text2);min-width:32px;">'+pct+'%</span>'
+    +     '</div>'
+    +     '<div class="wp-legend">'
+    +       '<span><span class="dot2" style="background:var(--status-done);"></span>Done '+done+'</span>'
+    +       '<span><span class="dot2" style="background:var(--status-running);"></span>Run '+running+'</span>'
+    +       '<span><span class="dot2" style="background:var(--status-failed);"></span>Fail '+failed+'</span>'
+    +       '<span><span class="dot2" style="background:var(--status-bypass);"></span>Skip '+bypass+'</span>'
+    +     '</div>'
+    +   '</div>'
+    + '</div>'
+    + '<div class="task-list">'+taskRows+'</div>'
+    + '</div>';
+}
+
+/* =====================================================
+   renderTimeline — Phase Timeline SVG
+   ===================================================== */
+function renderTimeline(history) {
+  var svg = document.getElementById('timeline-svg');
+  var W=600, H=80;
+  var ML=62, MR=8, MT=6, MB=18;
+  var innerW = W-ML-MR, innerH = H-MT-MB;
+
+  var times = history.map(function(h){ return new Date(h.at).getTime(); });
+  var minT = Math.min.apply(null,times);
+  var maxT = Math.max.apply(null,times) + 600000;
+
+  /* unique tasks, preserve insertion order */
+  var taskOrder = [];
+  history.forEach(function(h){ if(taskOrder.indexOf(h.tsk)<0) taskOrder.push(h.tsk); });
+  var rowH = innerH / taskOrder.length;
+
+  var phaseColor = {
+    'design.ok':   '#58a6ff',
+    'build.start': '#ffa657',
+    'build.ok':    '#3fb950',
+    'build.fail':  '#f85149',
+    'test.ok':     '#3fb950',
+    'refactor.ok': '#aff',
+    'bypass':      '#bc8cff'
+  };
+
+  var out = '';
+  out += '<rect x="0" y="0" width="'+W+'" height="'+H+'" fill="#0d1117"/>';
+
+  /* grid lines */
+  for(var g=0;g<=4;g++){
+    var gx = ML + (g/4)*innerW;
+    out += '<line x1="'+gx.toFixed(1)+'" y1="'+MT+'" x2="'+gx.toFixed(1)+'" y2="'+(H-MB)+'" stroke="#21262d" stroke-width="1"/>';
+  }
+
+  /* event blocks */
+  history.forEach(function(h){
+    var ti = taskOrder.indexOf(h.tsk);
+    var xr = (new Date(h.at).getTime()-minT)/(maxT-minT);
+    var bx = ML + xr*innerW;
+    var by = MT + ti*rowH + 1;
+    var bw = Math.max(5, innerW*0.035);
+    var bh = rowH - 2;
+    var col = phaseColor[h.event] || '#6e7681';
+    out += '<rect x="'+bx.toFixed(1)+'" y="'+by.toFixed(1)+'" width="'+bw.toFixed(1)+'" height="'+bh.toFixed(1)+'" fill="'+col+'" rx="2" opacity="0.85">'
+         + '<title>'+escHtml(h.tsk)+': '+escHtml(h.event)+' @ '+fmtTime(h.at)+'</title>'
+         + '</rect>';
+  });
+
+  /* task labels */
+  taskOrder.forEach(function(tid,i){
+    var ly = MT + i*rowH + rowH/2 + 4;
+    out += '<text x="'+(ML-4)+'" y="'+ly.toFixed(1)+'" text-anchor="end" font-family="ui-monospace,monospace" font-size="8" fill="#8b949e">'+escHtml(tid)+'</text>';
+  });
+
+  /* time axis */
+  for(var a=0;a<=4;a++){
+    var t = minT + (a/4)*(maxT-minT);
+    var ax = ML + (a/4)*innerW;
+    var d = new Date(t);
+    var lbl = ('0'+d.getUTCHours()).slice(-2)+':'+('0'+d.getUTCMinutes()).slice(-2);
+    out += '<text x="'+ax.toFixed(1)+'" y="'+(H-3)+'" text-anchor="middle" font-family="-apple-system,sans-serif" font-size="8" fill="#6e7681">'+lbl+'</text>';
+  }
+
+  svg.innerHTML = out;
+}
+
+/* =====================================================
+   renderActivityFeed — Live Activity
+   ===================================================== */
+function renderActivityFeed() {
+  var feed = document.getElementById('activity-feed');
+  var sorted = MOCK_DATA.phase_history.slice().sort(function(a,b){
+    return new Date(b.at) - new Date(a.at);
+  });
+  feed.innerHTML = sorted.slice(0,10).map(function(h){
+    var cls = eventClass(h.event);
+    return '<div class="activity-item">'
+      + '<span class="activity-time">'+fmtTime(h.at)+'</span>'
+      + '<span class="activity-tsk">'+escHtml(h.tsk)+'</span>'
+      + '&nbsp;<span class="'+cls+'">'+escHtml(h.event)+'</span>'
+      + '&nbsp;<span style="color:var(--text3)">'+escHtml(h.from)+'&#8594;'+escHtml(h.to)+'</span>'
+      + '</div>';
+  }).join('');
+}
+
+/* =====================================================
+   renderTeamPanes — Team Agents
+   ===================================================== */
+function renderTeamPanes() {
+  var container = document.getElementById('panes-container');
+  container.innerHTML = MOCK_DATA.panes.map(function(p){
+    var lines = p.preview.map(function(line){
+      var cls = line.charAt(0)==='$' ? 'pline-cmd'
+              : (line.indexOf('ok')>=0||line.indexOf('PASS')>=0) ? 'pline-ok'
+              : (line.indexOf('error')>=0||line.indexOf('fail')>=0||line.indexOf('ERR')>=0) ? 'pline-err'
+              : '';
+      return '<span class="'+cls+'">'+escHtml(line)+'</span>';
+    }).join('');
+    return '<div class="pane-card">'
+      + '<div class="pane-card-header">'
+      +   '<span class="pane-win-name">'+escHtml(p.window)+'</span>'
+      +   '<span class="pane-meta">pane:'+p.pane_index+' pid:'+p.pid+'</span>'
+      +   '<button class="expand-btn" onclick="Drawer.open(\''+escHtml(p.id)+'\')">expand &#8599;</button>'
+      + '</div>'
+      + '<div class="pane-preview">'+lines+'</div>'
+      + '</div>';
+  }).join('');
+}
+
+/* =====================================================
+   Drawer module
+   ===================================================== */
+var Drawer = (function(){
+  var drawer   = document.getElementById('drawer');
+  var backdrop = document.getElementById('drawer-backdrop');
+  var closeBtn = document.getElementById('drawer-close');
+  var titleEl  = document.getElementById('drawer-title');
+  var contentEl= document.getElementById('drawer-content');
+
+  function handleEsc(e){ if(e.key==='Escape') close(); }
+
+  function open(paneId){
+    var pane = null;
+    for(var i=0;i<MOCK_DATA.panes.length;i++){
+      if(MOCK_DATA.panes[i].id===paneId){ pane=MOCK_DATA.panes[i]; break; }
+    }
+    if(!pane) return;
+    titleEl.textContent = 'Pane Detail — ' + pane.window;
+    contentEl.innerHTML =
+      '<div class="drawer-meta-row">'
+      + '<div class="meta-item"><span class="meta-key">Window</span><span>'+escHtml(pane.window)+'</span></div>'
+      + '<div class="meta-item"><span class="meta-key">Pane Index</span><span>'+pane.pane_index+'</span></div>'
+      + '<div class="meta-item"><span class="meta-key">PID</span><span>'+pane.pid+'</span></div>'
+      + '</div>'
+      + '<div class="section-title" style="margin-bottom:8px;">Full Output</div>'
+      + '<div class="drawer-full-output">'+escHtml(pane.full_output)+'</div>';
+    drawer.classList.add('open');
+    backdrop.classList.add('open');
+    document.addEventListener('keydown', handleEsc);
+  }
+
+  function close(){
+    drawer.classList.remove('open');
+    backdrop.classList.remove('open');
+    document.removeEventListener('keydown', handleEsc);
+  }
+
+  closeBtn.addEventListener('click', close);
+  backdrop.addEventListener('click', close);
+
+  return { open:open, close:close };
+})();
+
+/* =====================================================
+   Filter Chips
+   ===================================================== */
+document.querySelectorAll('.chip').forEach(function(chip){
+  chip.addEventListener('click', function(){
+    document.querySelectorAll('.chip').forEach(function(c){ c.classList.remove('active'); });
+    this.classList.add('active');
+    var filter = this.dataset.filter;
+    document.querySelectorAll('.task-row').forEach(function(row){
+      if(filter==='all' || row.dataset.status===filter){
+        row.classList.remove('hidden');
+      } else {
+        row.classList.add('hidden');
+      }
+    });
+  });
+});
+
+/* =====================================================
+   INIT
+   ===================================================== */
+document.addEventListener('DOMContentLoaded', function(){
+  renderKPI();
+  var left = document.getElementById('left-panel');
+  left.innerHTML = MOCK_DATA.wps.map(function(wp){ return renderWPCard(wp); }).join('');
+  renderActivityFeed();
+  renderTimeline(MOCK_DATA.phase_history);
+  renderTeamPanes();
+});
+</script>
+</body>
+</html>
