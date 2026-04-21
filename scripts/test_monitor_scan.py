@@ -70,7 +70,7 @@ class ScanTasksNormalTests(unittest.TestCase):
         self.assertEqual(item.kind, "wbs")
         self.assertEqual(item.status, "[dd]")
         self.assertEqual(item.started_at, "2026-04-20T00:00:00Z")
-        self.assertIsNone(item.raw_error)
+        self.assertIsNone(item.error)
         self.assertEqual(len(item.phase_history_tail), 10)
         self.assertEqual(item.last_event, "design.ok")
         self.assertEqual(item.last_event_at, "2026-04-20T00:00:11Z")
@@ -102,6 +102,84 @@ class ScanFeaturesNormalTests(unittest.TestCase):
         self.assertEqual(item.depends, [])
 
 
+class ScanFeaturesEdgeCaseTests(unittest.TestCase):
+    """TSK-01-07 신규 단위 테스트 — design.md QA 체크리스트 신규 항목 커버.
+
+    - spec.md 없는 feature → title=None, error=None
+    - 복수 feature(alpha, beta) 동시 스캔 → 모두 반환
+    - sample fixture feature → len==1, kind=='feat', id=='sample'
+    """
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp(prefix="monitor-feat-edge-"))
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+
+    def test_feature_without_spec_md_has_title_none_and_no_error(self) -> None:
+        """spec.md 없는 feature → title=None, error=None.
+
+        spec.md 부재는 state.json 파싱과 무관하므로 error가 None이어야 한다.
+        """
+        docs = self.tmp
+        feat_dir = docs / "features" / "no-spec-feat"
+        _write_state(feat_dir / "state.json", {
+            "status": "[dd]",
+            "last": {"event": "design.ok", "at": "2026-04-21T00:00:00Z"},
+            "phase_history": [],
+        })
+
+        items = scan_features(docs)
+
+        self.assertEqual(len(items), 1)
+        item = items[0]
+        self.assertEqual(item.id, "no-spec-feat")
+        self.assertEqual(item.kind, "feat")
+        self.assertIsNone(item.title)
+        self.assertIsNone(item.error)
+
+    def test_multiple_features_all_returned(self) -> None:
+        """복수 feature(alpha, beta) 존재 시 두 항목 모두 반환."""
+        docs = self.tmp
+        for feat_name in ("alpha", "beta"):
+            feat_dir = docs / "features" / feat_name
+            _write(feat_dir / "spec.md", "# " + feat_name + " feature\n")
+            _write_state(feat_dir / "state.json", {
+                "status": "[im]",
+                "last": {"event": "build.ok", "at": "2026-04-21T01:00:00Z"},
+                "phase_history": [],
+            })
+
+        items = scan_features(docs)
+
+        self.assertEqual(len(items), 2)
+        ids = {item.id for item in items}
+        self.assertIn("alpha", ids)
+        self.assertIn("beta", ids)
+        self.assertTrue(all(item.kind == "feat" for item in items))
+        self.assertTrue(all(item.error is None for item in items))
+
+    def test_sample_fixture_returns_correct_workitem(self) -> None:
+        """sample fixture: len==1, kind=='feat', id=='sample'.
+
+        수락 기준 1: docs/features/sample/state.json 존재 시 Feature 섹션에 행 렌더.
+        """
+        docs = self.tmp
+        feat_dir = docs / "features" / "sample"
+        _write(feat_dir / "spec.md", "# sample feature\n")
+        _write_state(feat_dir / "state.json", {
+            "status": "[ts]",
+            "last": {"event": "test.ok", "at": "2026-04-21T02:00:00Z"},
+            "phase_history": [],
+        })
+
+        items = scan_features(docs)
+
+        self.assertEqual(len(items), 1)
+        item = items[0]
+        self.assertEqual(item.id, "sample")
+        self.assertEqual(item.kind, "feat")
+        self.assertIsNotNone(item.title)
+
+
 class ScanMixedValidCorruptTests(unittest.TestCase):
     """Acceptance 1: 정상 state.json 1개 + 손상 state.json 1개 혼재."""
 
@@ -123,9 +201,9 @@ class ScanMixedValidCorruptTests(unittest.TestCase):
 
         self.assertEqual(len(items), 2)
         self.assertEqual(items_by_id["TSK-A"].status, "[ts]")
-        self.assertIsNone(items_by_id["TSK-A"].raw_error)
+        self.assertIsNone(items_by_id["TSK-A"].error)
         bad = items_by_id["TSK-B"]
-        self.assertIsNotNone(bad.raw_error)
+        self.assertIsNotNone(bad.error)
         self.assertIsNone(bad.status)
         self.assertEqual(bad.phase_history_tail, [])
 
@@ -164,12 +242,12 @@ class ScanOversizeTests(unittest.TestCase):
 
         items = scan_tasks(self.tmp)
         self.assertEqual(len(items), 1)
-        self.assertIsNotNone(items[0].raw_error)
-        self.assertIn("file too large", items[0].raw_error)
+        self.assertIsNotNone(items[0].error)
+        self.assertIn("file too large", items[0].error)
         self.assertIsNone(items[0].status)
 
     def test_file_exactly_1mb_is_allowed_by_size_guard(self) -> None:
-        # 1MB 정확히는 허용(경계 >). JSON으로는 공백이 valid 아니라 raw_error가 생기지만,
+        # 1MB 정확히는 허용(경계 >). JSON으로는 공백이 valid 아니라 error가 생기지만,
         # 에러 메시지는 "file too large"여서는 안 된다.
         state = self.tmp / "tasks" / "TSK-BOUND" / "state.json"
         state.parent.mkdir(parents=True)
@@ -177,8 +255,8 @@ class ScanOversizeTests(unittest.TestCase):
             fp.write(" " * (1 * 1024 * 1024))
         items = scan_tasks(self.tmp)
         self.assertEqual(len(items), 1)
-        if items[0].raw_error is not None:
-            self.assertNotIn("file too large", items[0].raw_error)
+        if items[0].error is not None:
+            self.assertNotIn("file too large", items[0].error)
 
 
 class ScanReadOnlyTests(unittest.TestCase):
@@ -211,7 +289,7 @@ class ScanReadOnlyTests(unittest.TestCase):
 
         self.assertEqual(len(items), 1)
         self.assertEqual(items[0].status, "[xx]")
-        self.assertIsNone(items[0].raw_error)
+        self.assertIsNone(items[0].error)
 
 
 class WbsTitleMapTests(unittest.TestCase):
@@ -261,7 +339,7 @@ class WbsTitleMapTests(unittest.TestCase):
         self.assertIsNone(items[0].title)
         self.assertIsNone(items[0].wp_id)
         self.assertEqual(items[0].depends, [])
-        self.assertIsNone(items[0].raw_error)
+        self.assertIsNone(items[0].error)
 
 
 class PhaseHistorySliceTests(unittest.TestCase):
@@ -344,15 +422,15 @@ class RawErrorCapTests(unittest.TestCase):
         self.tmp = Path(tempfile.mkdtemp(prefix="monitor-raw-"))
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
 
-    def test_raw_error_max_length_500(self) -> None:
+    def test_error_max_length_500(self) -> None:
         state = self.tmp / "tasks" / "TSK-RAW" / "state.json"
         state.parent.mkdir(parents=True)
         _write(state, "{" + ("X" * 2000))  # invalid JSON, 2001 bytes
 
         items = scan_tasks(self.tmp)
         self.assertEqual(len(items), 1)
-        self.assertIsNotNone(items[0].raw_error)
-        self.assertLessEqual(len(items[0].raw_error), 500)
+        self.assertIsNotNone(items[0].error)
+        self.assertLessEqual(len(items[0].error), 500)
 
 
 class OpenModeReadOnlyTests(unittest.TestCase):

@@ -41,7 +41,7 @@ def _make_task(
     last_event="build.ok",
     last_event_at="2026-04-20T00:01:00Z",
     phase_history_tail=None,
-    raw_error=None,
+    error=None,
 ):
     return WorkItem(
         id=tsk_id,
@@ -59,7 +59,7 @@ def _make_task(
         phase_history_tail=phase_history_tail or [],
         wp_id=wp_id,
         depends=depends or [],
-        raw_error=raw_error,
+        error=error,
     )
 
 
@@ -68,7 +68,7 @@ def _make_feat(
     title="로그인 기능",
     status="[dd]",
     started_at="2026-04-20T02:00:00Z",
-    raw_error=None,
+    error=None,
 ):
     return WorkItem(
         id=feat_id,
@@ -86,7 +86,7 @@ def _make_feat(
         phase_history_tail=[],
         wp_id=None,
         depends=[],
-        raw_error=raw_error,
+        error=error,
     )
 
 
@@ -237,27 +237,85 @@ class TmuxNoneTests(unittest.TestCase):
         self.assertNotIn("tmux not available", html.lower())
 
 
-class RawErrorTests(unittest.TestCase):
-    """(에러) raw_error 필드가 있는 Task 만 ⚠️ + raw 링크."""
+class ErrorBadgeTests(unittest.TestCase):
+    """TSK-01-08: error 필드가 있는 Task 에 ⚠ 배지 + badge-warn CSS."""
 
-    def test_raw_error_task_shows_warn_and_raw_link(self) -> None:
+    def test_error_task_shows_warn_badge(self) -> None:
+        """수락 기준 1 — 손상 Task 행에 ⚠ 문자 포함."""
         model = _normal_model()
         bad = _make_task(tsk_id="TSK-BAD", title=None, status=None,
                          last_event=None, last_event_at=None,
                          started_at=None,
-                         raw_error="{[broken json")
-        bad.title = None
-        bad.status = None
+                         error="{[broken json")
         model["wbs_tasks"].append(bad)
         html = render_dashboard(model)
-        # 손상 Task 는 ⚠ + raw 링크 포함
         self.assertIn("TSK-BAD", html)
         self.assertIn("⚠", html)
-        self.assertIn('class="warn"', html)
-        # 정상 Task 에는 warn 배지가 딸려가지 않음을 확인:
-        # warn 개수가 손상 Task 수(=1) 이어야 한다.
-        warn_count = html.count('class="warn"')
-        self.assertEqual(warn_count, 1)
+
+    def test_error_task_has_badge_warn_class(self) -> None:
+        """수락 기준 2 — 경고 Task 행에 badge-warn CSS 클래스 적용."""
+        model = _normal_model()
+        bad = _make_task(tsk_id="TSK-WARN", title=None, status=None,
+                         last_event=None, last_event_at=None,
+                         started_at=None,
+                         error="json parse error")
+        model["wbs_tasks"] = [bad]
+        html = render_dashboard(model)
+        self.assertIn("badge-warn", html)
+
+    def test_normal_task_has_no_warn_badge(self) -> None:
+        """수락 기준 2 — 정상 Task 행에는 badge-warn 스팬 없음.
+
+        CSS 정의에 badge-warn이 있으므로 전체 HTML 검색 대신
+        <span class="badge badge-warn" 패턴으로 렌더링 출현 여부 확인.
+        """
+        model = _normal_model()
+        model["wbs_tasks"] = [_make_task(tsk_id="TSK-OK", status="[dd]")]
+        html = render_dashboard(model)
+        self.assertNotIn('<span class="badge badge-warn"', html)
+        self.assertNotIn("⚠", html)
+
+    def test_error_title_attribute_contains_error_preview(self) -> None:
+        """수락 기준 1 — 경고 스팬에 title 속성으로 에러 미리보기 포함."""
+        model = _normal_model()
+        bad = _make_task(tsk_id="TSK-ERR", title=None, status=None,
+                         last_event=None, last_event_at=None,
+                         started_at=None,
+                         error="unexpected token at line 3")
+        model["wbs_tasks"] = [bad]
+        html = render_dashboard(model)
+        self.assertIn("title=", html)
+        self.assertIn("unexpected token", html)
+
+    def test_badge_warn_css_defined_in_dashboard_css(self) -> None:
+        """수락 기준 2 — DASHBOARD_CSS 에 badge-warn 클래스 정의 존재."""
+        self.assertIn("badge-warn", monitor_server.DASHBOARD_CSS)
+
+    def test_error_string_xss_escaped_in_title_attribute(self) -> None:
+        """엣지 — error 필드에 HTML 특수문자가 있을 때 이스케이프됨."""
+        model = _normal_model()
+        bad = _make_task(tsk_id="TSK-XSS2", title=None, status=None,
+                         last_event=None, last_event_at=None,
+                         started_at=None,
+                         error='<script>alert("xss")</script>')
+        model["wbs_tasks"] = [bad]
+        html = render_dashboard(model)
+        self.assertNotIn("<script>alert", html)
+        self.assertIn("&lt;script&gt;", html)
+
+    def test_mixed_valid_and_error_tasks_both_rendered(self) -> None:
+        """엣지 — 정상 Task 와 손상 Task 가 혼재할 때 모두 렌더링."""
+        model = _normal_model()
+        model["wbs_tasks"] = [
+            _make_task(tsk_id="TSK-GOOD", status="[dd]"),
+            _make_task(tsk_id="TSK-BAD2", status=None, error="broken"),
+        ]
+        html = render_dashboard(model)
+        self.assertIn("TSK-GOOD", html)
+        self.assertIn("TSK-BAD2", html)
+        self.assertIn('<span class="badge badge-warn"', html)
+        # 정상 Task 에는 badge-warn 스팬 없음 → 렌더링 count = 1
+        self.assertEqual(html.count('<span class="badge badge-warn"'), 1)
 
 
 class XSSEscapeTests(unittest.TestCase):

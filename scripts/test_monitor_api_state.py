@@ -2,7 +2,7 @@
 
 QA 체크리스트 항목을 매핑한다:
 
-- _build_state_snapshot: 키 집합·리스트 길이·generated_at 형식·scope 분류·tmux None 유지·빈 입력·raw_error 포함·phase_history_tail 10건 캡·JSON 직렬화(asdict + default=str + ensure_ascii=False)·미지의 scope 보수적 편입·성능(100 Task mock 0.5초 이내)
+- _build_state_snapshot: 키 집합·리스트 길이·generated_at 형식·scope 분류·tmux None 유지·빈 입력·error 포함·phase_history_tail 10건 캡·JSON 직렬화(asdict + default=str + ensure_ascii=False)·미지의 scope 보수적 편입·성능(100 Task mock 0.5초 이내)
 - _asdict_or_none: dataclass/list/None/일반 dict 분기
 - _json_response / _json_error: Content-Type / Content-Length / Cache-Control / HTTP status / body bytes·500 에러 포맷
 - 라우팅 매칭: urlsplit("/api/state") == "/api/state", "/api/state?pretty=1" 매칭, "/api/state/" 비매칭
@@ -53,7 +53,7 @@ def _make_task(
     wp_id: str = "WP-01-monitor",
     depends: Optional[List[str]] = None,
     phase_history_tail: Optional[List[PhaseEntry]] = None,
-    raw_error: Optional[str] = None,
+    error: Optional[str] = None,
 ) -> WorkItem:
     return WorkItem(
         id=tsk_id,
@@ -71,7 +71,7 @@ def _make_task(
         phase_history_tail=phase_history_tail or [],
         wp_id=wp_id,
         depends=depends or [],
-        raw_error=raw_error,
+        error=error,
     )
 
 
@@ -92,7 +92,7 @@ def _make_feat(feat_id: str = "login", title: str = "로그인") -> WorkItem:
         phase_history_tail=[],
         wp_id=None,
         depends=[],
-        raw_error=None,
+        error=None,
     )
 
 
@@ -248,15 +248,36 @@ class BuildStateSnapshotTests(unittest.TestCase):
         self.assertEqual(out["shared_signals"], [])
         self.assertEqual(out["agent_pool_signals"], [])
 
-    def test_workitem_with_raw_error_survives_asdict(self):
-        tasks = [_make_task("TSK-BAD", raw_error="json parse failed")]
+    def test_workitem_with_error_survives_asdict(self):
+        """TSK-01-08 수락 기준 3 — wbs_tasks 엔트리에 'error' 필드로 노출."""
+        tasks = [_make_task("TSK-BAD", error="json parse failed")]
         out = monitor_server._build_state_snapshot(
             project_root="/abs", docs_dir="docs",
             scan_tasks=lambda _d: tasks, scan_features=lambda _d: [],
             scan_signals=lambda: [], list_tmux_panes=lambda: [],
         )
         json.dumps(out, default=str, ensure_ascii=False)
-        self.assertEqual(out["wbs_tasks"][0]["raw_error"], "json parse failed")
+        self.assertEqual(out["wbs_tasks"][0]["error"], "json parse failed")
+
+    def test_error_field_null_for_valid_workitem(self):
+        """TSK-01-08 수락 기준 3 — 정상 Task 의 'error' 값은 null(None)."""
+        tasks = [_make_task("TSK-OK")]
+        out = monitor_server._build_state_snapshot(
+            project_root="/abs", docs_dir="docs",
+            scan_tasks=lambda _d: tasks, scan_features=lambda _d: [],
+            scan_signals=lambda: [], list_tmux_panes=lambda: [],
+        )
+        self.assertIsNone(out["wbs_tasks"][0]["error"])
+
+    def test_error_field_present_in_wbs_tasks_entry(self):
+        """TSK-01-08 수락 기준 3 — wbs_tasks 원소에 'error' 키 존재."""
+        tasks = [_make_task("TSK-CHECK")]
+        out = monitor_server._build_state_snapshot(
+            project_root="/abs", docs_dir="docs",
+            scan_tasks=lambda _d: tasks, scan_features=lambda _d: [],
+            scan_signals=lambda: [], list_tmux_panes=lambda: [],
+        )
+        self.assertIn("error", out["wbs_tasks"][0])
 
     def test_scan_functions_receive_docs_dir(self):
         """`_build_state_snapshot` 는 scan_tasks/scan_features 에 docs_dir 을 전달해야 한다."""

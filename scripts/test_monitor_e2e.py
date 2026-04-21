@@ -25,10 +25,12 @@ Execution contract (from ``references/test-commands.md``):
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import unittest
 import urllib.error
+import urllib.parse
 import urllib.request
 
 _E2E_URL = os.environ.get("MONITOR_E2E_URL", "http://localhost:7321")
@@ -151,14 +153,13 @@ class PaneCaptureEndpointTests(unittest.TestCase):
 
     def test_invalid_pane_id_returns_400_json(self) -> None:
         """GET /api/pane/abc → 400 JSON {"error":"invalid pane id","code":400}."""
-        import json as _json
         try:
             with urllib.request.urlopen(_E2E_URL + "/api/pane/abc", timeout=3):
                 pass
             self.fail("expected HTTPError 400")
         except urllib.error.HTTPError as exc:
             self.assertEqual(exc.code, 400)
-            body = _json.loads(exc.read().decode("utf-8"))
+            body = json.loads(exc.read().decode("utf-8"))
             self.assertEqual(body.get("error"), "invalid pane id")
             self.assertEqual(body.get("code"), 400)
 
@@ -195,8 +196,6 @@ class PaneCaptureEndpointTests(unittest.TestCase):
 
         Skipped when no tmux panes are listed in the dashboard.
         """
-        import json as _json
-        import urllib.parse
         html_body = self._dashboard_html()
         pane_ids = re.findall(r'href="/pane/(%\d+)"', html_body)
         if not pane_ids:
@@ -208,13 +207,94 @@ class PaneCaptureEndpointTests(unittest.TestCase):
             self.assertEqual(resp.status, 200)
             ctype = resp.headers.get("Content-Type", "").lower()
             self.assertIn("application/json", ctype)
-            body = _json.loads(resp.read().decode("utf-8"))
+            body = json.loads(resp.read().decode("utf-8"))
 
         self.assertIn("line_count", body)
         self.assertIn("lines", body)
         self.assertIn("pane_id", body)
         self.assertIn("captured_at", body)
         self.assertIn("truncated_from", body)
+
+
+@unittest.skipUnless(_SERVER_UP, f"monitor-server not reachable at {_E2E_URL}")
+class FeatureSectionE2ETests(unittest.TestCase):
+    """TSK-01-07 DEFECT-1 후속 — Feature 섹션 렌더링 E2E 검증.
+
+    수락 기준:
+    1. docs/features/sample/state.json 존재 시 대시보드 Feature 섹션에 행 렌더.
+    2. Feature 없으면 "no features" 안내 렌더.
+    3. /api/state 응답 features 필드에 동일 데이터 포함.
+
+    주의: 이 테스트는 live 서버가 기동된 상태에서만 실행된다 (skipUnless 조건).
+    서버가 기동 중인 --docs 경로의 실제 feature 유무에 따라 두 분기를 검증한다.
+    """
+
+    def _dashboard_html(self) -> str:
+        """GET / 응답 HTML을 반환한다."""
+        with urllib.request.urlopen(_E2E_URL + "/", timeout=3) as resp:
+            return resp.read().decode("utf-8")
+
+    def _api_state(self) -> dict:
+        """GET /api/state 응답 JSON을 반환한다."""
+        with urllib.request.urlopen(_E2E_URL + "/api/state", timeout=3) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+
+    def test_features_section_id_present_in_dashboard(self) -> None:
+        """GET / 응답 HTML에 id="features" 섹션이 존재한다.
+
+        Reachability: 상단 네비의 Features 앵커(href="#features") → id="features" 섹션.
+        네비 앵커와 섹션 id 모두 존재해야 클릭 경로가 성립한다.
+        """
+        html_body = self._dashboard_html()
+        self.assertIn('id="features"', html_body,
+                      "#features 섹션 id가 대시보드 HTML에 없음")
+        self.assertIn('href="#features"', html_body,
+                      "#features 네비 앵커가 대시보드 HTML에 없음")
+
+    def test_api_state_has_features_array(self) -> None:
+        """GET /api/state 응답 JSON에 features 키가 존재하고 배열 타입이다.
+
+        수락 기준 3: /api/state 응답 features 필드에 동일 데이터 포함.
+        """
+        data = self._api_state()
+        self.assertIn("features", data, "/api/state 응답에 features 키 없음")
+        self.assertIsInstance(data["features"], list,
+                              "features 필드가 리스트 타입이 아님")
+
+    def test_features_section_content_matches_server_state(self) -> None:
+        """Feature 있으면 feature ID가 HTML에, 없으면 'no features' 문구가 있어야 한다.
+
+        수락 기준 1+2: /api/state의 features 배열과 GET / 응답 HTML의 #features 섹션이 일치.
+        """
+        data = self._api_state()
+        html_body = self._dashboard_html()
+
+        # #features 섹션 블록 추출
+        section_match = re.search(
+            r'<section id="features">(.*?)</section>',
+            html_body,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(section_match,
+                             'id="features" 섹션 블록을 HTML에서 추출할 수 없음')
+        section_html = section_match.group(1)
+
+        features = data.get("features", [])
+        if features:
+            # Feature 있을 때: 각 feature id가 섹션 HTML에 포함되어야 함
+            for feat in features:
+                feat_id = feat.get("id", "")
+                if feat_id:
+                    self.assertIn(
+                        feat_id, section_html,
+                        f"feature id '{feat_id}'가 #features 섹션 HTML에 없음",
+                    )
+        else:
+            # Feature 없을 때: "no features" 안내 문구가 있어야 함
+            self.assertIn(
+                "no features", section_html.lower(),
+                "#features 섹션에 'no features' 안내 문구 없음",
+            )
 
 
 if __name__ == "__main__":

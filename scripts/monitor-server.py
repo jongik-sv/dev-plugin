@@ -311,7 +311,7 @@ def capture_pane(pane_id: str) -> str:
 
 _MAX_STATE_BYTES = 1 * 1024 * 1024  # 1 MiB
 _PHASE_TAIL_LIMIT = 10
-_RAW_ERROR_CAP = 500
+_ERROR_CAP = 500
 
 
 @dataclass(frozen=True)
@@ -350,20 +350,20 @@ class WorkItem:
     phase_history_tail: List[PhaseEntry] = field(default_factory=list)
     wp_id: Optional[str] = None
     depends: List[str] = field(default_factory=list)
-    raw_error: Optional[str] = None
+    error: Optional[str] = None
 
 
-def _cap_raw_error(text: str) -> str:
-    """raw_error 문자열을 ``_RAW_ERROR_CAP`` 바이트 이내로 제한한다."""
+def _cap_error(text: Optional[str]) -> str:
+    """error 문자열을 ``_ERROR_CAP`` 바이트 이내로 제한한다."""
     if text is None:
         return ""
-    if len(text) <= _RAW_ERROR_CAP:
+    if len(text) <= _ERROR_CAP:
         return text
-    return text[:_RAW_ERROR_CAP]
+    return text[:_ERROR_CAP]
 
 
 def _read_state_json(path: Path) -> Tuple[Optional[dict], Optional[str]]:
-    """state.json 을 1MB 가드와 함께 읽어 ``(dict|None, raw_error|None)`` 을 반환한다.
+    """state.json 을 1MB 가드와 함께 읽어 ``(dict|None, error|None)`` 을 반환한다.
 
     실패 경로:
 
@@ -375,25 +375,25 @@ def _read_state_json(path: Path) -> Tuple[Optional[dict], Optional[str]]:
     try:
         size = path.stat().st_size
     except OSError as exc:
-        return None, _cap_raw_error(f"stat error: {exc}")
+        return None, _cap_error(f"stat error: {exc}")
 
     if size > _MAX_STATE_BYTES:
-        return None, _cap_raw_error(f"file too large: {size} bytes")
+        return None, _cap_error(f"file too large: {size} bytes")
 
     try:
         with open(path, "r", encoding="utf-8") as fp:
             raw = fp.read()
     except OSError as exc:
-        return None, _cap_raw_error(f"read error: {exc}")
+        return None, _cap_error(f"read error: {exc}")
 
     try:
         data = json.loads(raw)
     except ValueError:
         # JSON 파싱 실패 — 원문 앞 500B를 그대로 담아 디버깅을 돕는다.
-        return None, _cap_raw_error(raw if raw else "json error")
+        return None, _cap_error(raw if raw else "json error")
 
     if not isinstance(data, dict):
-        return None, _cap_raw_error(f"unexpected type: {type(data).__name__}")
+        return None, _cap_error(f"unexpected type: {type(data).__name__}")
 
     return data, None
 
@@ -515,7 +515,7 @@ def _load_feature_title(feat_dir: Path) -> Optional[str]:
 
 
 def _make_workitem_from_error(
-    item_id: str, kind: str, abs_path: str, raw_error: str,
+    item_id: str, kind: str, abs_path: str, error: str,
     wp_id: Optional[str], depends: List[str],
 ) -> WorkItem:
     return WorkItem(
@@ -525,7 +525,7 @@ def _make_workitem_from_error(
         last_event=None, last_event_at=None,
         phase_history_tail=[],
         wp_id=wp_id, depends=list(depends),
-        raw_error=raw_error,
+        error=error,
     )
 
 
@@ -552,7 +552,7 @@ def _make_workitem_from_state(
         phase_history_tail=_build_phase_history_tail(data.get("phase_history")),
         wp_id=wp_id,
         depends=list(depends),
-        raw_error=None,
+        error=None,
     )
 
 
@@ -606,7 +606,7 @@ def scan_tasks(docs_dir: Path) -> List[WorkItem]:
     """``{docs_dir}/tasks/*/state.json`` 을 순회하며 ``WorkItem`` 리스트를 반환.
 
     - tasks 디렉터리가 없으면 ``[]`` 반환 (예외 없음).
-    - 파싱 실패한 state.json 은 ``raw_error`` 가 채워진 ``WorkItem`` 으로 반환.
+    - 파싱 실패한 state.json 은 ``error`` 가 채워진 ``WorkItem`` 으로 반환.
     - wbs.md 가 있으면 title/wp_id/depends 를 함께 채운다 (1회 파싱).
     """
     docs_dir = Path(docs_dir)
@@ -642,7 +642,7 @@ def scan_features(docs_dir: Path) -> List[WorkItem]:
 
 _DEFAULT_REFRESH_SECONDS = 3
 _PHASES_SECTION_LIMIT = 10
-_RAW_ERROR_TITLE_CAP = 200
+_ERROR_TITLE_CAP = 200
 _SECTION_ANCHORS = ("wbs", "features", "team", "subagents", "phases")
 
 # Mapping from agent-pool signal ``kind`` to badge CSS class. Module-level so
@@ -718,6 +718,7 @@ details summary { cursor: pointer; color: var(--accent); font-weight: 600; paddi
 .badge-fail { background: rgba(248,81,73,0.15); color: var(--red); border: 1px solid var(--red); }
 .badge-bypass { background: rgba(227,179,65,0.15); color: var(--yellow); border: 1px solid var(--yellow); }
 .badge-pending { background: rgba(110,118,129,0.15); color: var(--light-gray); border: 1px solid var(--light-gray); }
+.badge-warn { background: rgba(210,153,34,0.2); color: var(--orange); border: 1px solid var(--warn); }
 @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.55; } }
 .warn { color: var(--warn); font-weight: 600; }
 .empty { color: var(--muted); font-style: italic; }
@@ -865,7 +866,7 @@ def _render_task_row(item, running_ids: set, failed_ids: set) -> str:
     """Render a single <div class="task-row"> for a WorkItem.
 
     The row always has 6 cells (id, status|warn, title, elapsed, retry, flag).
-    When ``raw_error`` is present the status cell becomes a ⚠️ warn link; all
+    When ``error`` is present the status cell becomes a ⚠ badge-warn span; all
     other cells stay identical between the two branches.
     """
     item_id = getattr(item, "id", None)
@@ -873,7 +874,7 @@ def _render_task_row(item, running_ids: set, failed_ids: set) -> str:
     is_failed = item_id in failed_ids if item_id else False
     bypassed = bool(getattr(item, "bypassed", False))
     status = getattr(item, "status", None)
-    raw_error = getattr(item, "raw_error", None)
+    error = getattr(item, "error", None)
     title = getattr(item, "title", None)
 
     id_html = f'<span class="id">{_esc(item_id)}</span>'
@@ -882,11 +883,10 @@ def _render_task_row(item, running_ids: set, failed_ids: set) -> str:
     retry_html = f'<span class="retry">×{_retry_count(item)}</span>'
     flag_html = '<span title="bypassed">🟡</span>' if bypassed else '<span></span>'
 
-    if raw_error:
-        raw_preview = _esc(str(raw_error)[:_RAW_ERROR_TITLE_CAP])
+    if error:
+        error_preview = _esc(str(error)[:_ERROR_TITLE_CAP])
         status_cell = (
-            f'<span class="warn" title="{raw_preview}">⚠️ '
-            f'<a href="#" class="raw-link" title="{raw_preview}">raw</a></span>'
+            f'<span class="badge badge-warn" title="{error_preview}">⚠ state error</span>'
         )
     else:
         status_cell = _status_badge(status, bypassed, is_running, is_failed)
