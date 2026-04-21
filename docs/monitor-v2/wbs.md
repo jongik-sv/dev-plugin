@@ -351,7 +351,7 @@ python3
 - category: development
 - domain: frontend
 - model: opus
-- status: [ ]
+- status: [xx]
 - priority: critical
 - assignee: -
 - schedule: 2026-04-26 ~ 2026-04-26
@@ -394,7 +394,7 @@ python3
 - category: development
 - domain: frontend
 - model: sonnet
-- status: [ ]
+- status: [xx]
 - priority: high
 - assignee: -
 - schedule: 2026-04-26 ~ 2026-04-26
@@ -430,7 +430,7 @@ python3
 - category: development
 - domain: frontend
 - model: sonnet
-- status: [ ]
+- status: [xx]
 - priority: critical
 - assignee: -
 - schedule: 2026-04-27 ~ 2026-04-27

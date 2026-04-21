@@ -928,6 +928,12 @@ ol.phase-list li { margin-bottom: 0.25rem; font-size: 0.88rem; font-family: var(
   display: flex;
   transform: translateX(0);
 }
+.drawer-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.75rem; }
+.drawer-title { font-weight: 700; font-size: 1rem; font-family: "SFMono-Regular", Consolas, monospace; }
+.drawer-meta { color: var(--muted); font-size: 0.8rem; font-family: "SFMono-Regular", Consolas, monospace; margin-right: 0.5rem; }
+.drawer-close { background: none; border: none; color: var(--muted); font-size: 1.2rem; cursor: pointer; padding: 0.2rem 0.5rem; border-radius: 4px; }
+.drawer-close:hover { color: var(--fg); background: rgba(255,255,255,0.08); }
+.drawer-body pre { background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 0.75rem; margin: 0; white-space: pre-wrap; word-break: break-all; font-family: "SFMono-Regular", Consolas, monospace; font-size: 0.82rem; min-height: 4rem; }
 @media (max-width: 1279px) {
   .page { grid-template-columns: 1fr; }
 }
@@ -2083,6 +2089,178 @@ def _section_phase_timeline(tasks, features):
 _DATA_SECTION_TAG_RE = re.compile(r'(<(?:section|header)(\s[^>]*)?>)', re.DOTALL)
 
 
+# ---------------------------------------------------------------------------
+# WP-02: Client-side dashboard JS (filter chips, auto-refresh, drawer polling)
+# ---------------------------------------------------------------------------
+_DASHBOARD_JS = """\
+(function(){
+  'use strict';
+  /* shared state — dashboard poll + drawer poll are fully independent */
+  var state={
+    autoRefresh:true,activeFilter:'all',mainPollId:null,mainAbort:null,
+    drawerPaneId:null,drawerPollId:null
+  };
+  /* ---- filter chips (TSK-02-02) — event delegation survives DOM replacement ---- */
+  document.addEventListener('click',function(e){
+    var chip=e.target.closest?e.target.closest('.chip'):null;
+    if(!chip)return;
+    state.activeFilter=chip.dataset.filter||'all';
+    document.querySelectorAll('.chip').forEach(function(c){
+      c.setAttribute('aria-pressed',c===chip?'true':'false');
+    });
+    applyFilter();
+  });
+  function applyFilter(){
+    var f=state.activeFilter;
+    document.querySelectorAll('.task-row').forEach(function(row){
+      var hide=f!=='all'&&!row.classList.contains(f);
+      row.style.display=hide?'none':'';
+    });
+  }
+  /* ---- auto-refresh toggle (TSK-02-02) ---- */
+  document.addEventListener('click',function(e){
+    var tog=e.target.closest?e.target.closest('.refresh-toggle'):null;
+    if(!tog)return;
+    state.autoRefresh=!state.autoRefresh;
+    tog.setAttribute('aria-pressed',String(state.autoRefresh));
+    tog.textContent=state.autoRefresh?'◐ auto':'○ paused';
+    if(!state.autoRefresh){stopMainPoll();}else{startMainPoll();}
+  });
+  /* ---- dashboard polling (TSK-02-01) ---- */
+  function stopMainPoll(){
+    if(state.mainPollId!==null){clearInterval(state.mainPollId);state.mainPollId=null;}
+    if(state.mainAbort){try{state.mainAbort.abort();}catch(e){} state.mainAbort=null;}
+  }
+  function startMainPoll(){
+    stopMainPoll();
+    tick();
+    state.mainPollId=setInterval(tick,5000);
+  }
+  function tick(){
+    if(!state.autoRefresh)return;
+    if(state.mainAbort){try{state.mainAbort.abort();}catch(e){}}
+    state.mainAbort=new AbortController();
+    fetchAndPatch(state.mainAbort.signal);
+  }
+  function fetchAndPatch(signal){
+    fetch('/',{cache:'no-store',signal:signal})
+      .then(function(r){return r.ok?r.text():null;})
+      .then(function(text){
+        if(!text)return;
+        var parser=new DOMParser();
+        var newDoc=parser.parseFromString(text,'text/html');
+        var newSections=newDoc.querySelectorAll('[data-section]');
+        newSections.forEach(function(newEl){
+          var name=newEl.getAttribute('data-section');
+          patchSection(name,newEl.innerHTML);
+        });
+        /* TSK-02-02: DOM 교체 후 필터 재적용 */
+        applyFilter();
+      })
+      .catch(function(){/* silent: retry on next tick */});
+  }
+  function patchSection(name,newHtml){
+    var current=document.querySelector('[data-section="'+name+'"]');
+    if(!current)return;
+    if(name==='hdr'){
+      /* Preserve chip aria-pressed states and refresh-toggle visual state
+         across DOM replacement so client-side filter/toggle survive server push. */
+      var chipStates={};
+      current.querySelectorAll('.chip[data-filter]').forEach(function(c){
+        chipStates[c.dataset.filter]=c.getAttribute('aria-pressed');
+      });
+      var togEl=current.querySelector('.refresh-toggle');
+      var togPressed=togEl?togEl.getAttribute('aria-pressed'):null;
+      var togText=togEl?togEl.textContent:null;
+      if(current.innerHTML!==newHtml){current.innerHTML=newHtml;}
+      /* Restore chip states */
+      current.querySelectorAll('.chip[data-filter]').forEach(function(c){
+        var saved=chipStates[c.dataset.filter];
+        if(saved!==null&&saved!==undefined){c.setAttribute('aria-pressed',saved);}
+      });
+      /* Restore refresh-toggle state */
+      var tog2=current.querySelector('.refresh-toggle');
+      if(tog2&&togPressed!==null){
+        tog2.setAttribute('aria-pressed',togPressed);
+        if(togText){tog2.textContent=togText;}
+      }
+      return;
+    }
+    if(current.innerHTML!==newHtml){current.innerHTML=newHtml;}
+  }
+  /* ---- drawer control (TSK-02-03) ---- */
+  function _setDrawerOpen(open){
+    var els=[document.querySelector('[data-drawer-backdrop]'),document.querySelector('[data-drawer]')];
+    els.forEach(function(el){
+      if(!el)return;
+      if(open){el.classList.add('open');el.removeAttribute('aria-hidden');}
+      else{el.classList.remove('open');el.setAttribute('aria-hidden','true');}
+    });
+  }
+  function openDrawer(paneId){
+    state.drawerPaneId=paneId;
+    var titleEl=document.querySelector('[data-drawer-title]');
+    if(titleEl){titleEl.textContent='Pane: '+paneId;}
+    _setDrawerOpen(true);
+    startDrawerPoll();
+  }
+  function closeDrawer(){
+    state.drawerPaneId=null;
+    stopDrawerPoll();
+    _setDrawerOpen(false);
+  }
+  function stopDrawerPoll(){
+    if(state.drawerPollId!==null){clearInterval(state.drawerPollId);state.drawerPollId=null;}
+  }
+  function startDrawerPoll(){
+    stopDrawerPoll();
+    tickDrawer();
+    state.drawerPollId=setInterval(tickDrawer,2000);
+  }
+  function tickDrawer(){
+    var id=state.drawerPaneId;
+    if(!id)return;
+    fetch('/api/pane/'+encodeURIComponent(id),{cache:'no-store'})
+      .then(function(r){return r.ok?r.json():null;})
+      .then(function(j){if(j)updateDrawerBody(j);})
+      .catch(function(){/* silent: retry on next tick */});
+  }
+  function updateDrawerBody(j){
+    var pre=document.querySelector('[data-drawer-pre]');
+    if(!pre)return;
+    pre.textContent=(j.lines||[]).join('\\n');
+    var meta=document.querySelector('[data-drawer-meta]');
+    if(meta){meta.textContent=j.captured_at||'';}
+  }
+  /* ---- event delegation (click + keydown) ---- */
+  function _hasAttr(el,attr){return el&&el.hasAttribute&&el.hasAttribute(attr);}
+  document.addEventListener('click',function(e){
+    var t=e.target;
+    var exp=t.closest?t.closest('[data-pane-expand]'):(_hasAttr(t,'data-pane-expand')?t:null);
+    if(exp){openDrawer(exp.getAttribute('data-pane-expand'));return;}
+    if(_hasAttr(t,'data-drawer-close')||_hasAttr(t,'data-drawer-backdrop')){closeDrawer();}
+  });
+  document.addEventListener('keydown',function(e){
+    if(e.key==='Escape'&&state.drawerPaneId){closeDrawer();}
+  });
+  /* ---- init ---- */
+  function init(){
+    /* TSK-02-02: refresh-toggle 버튼 초기 상태 동기화 */
+    var tog=document.querySelector('.refresh-toggle');
+    if(tog){
+      state.autoRefresh=(tog.getAttribute('aria-pressed')!=='false');
+      tog.textContent=state.autoRefresh?'◐ auto':'○ paused';
+    }
+    startMainPoll();
+  }
+  if(document.readyState==='loading'){
+    document.addEventListener('DOMContentLoaded',init);
+  }else{
+    init();
+  }
+})();"""
+
+
 def _drawer_skeleton() -> str:
     """Return the empty drawer scaffold HTML string (TSK-01-06).
 
@@ -2093,8 +2271,16 @@ def _drawer_skeleton() -> str:
         '<div class="drawer-backdrop" aria-hidden="true" data-drawer-backdrop></div>\n'
         '<aside class="drawer" role="dialog" aria-modal="true" aria-hidden="true"'
         ' aria-labelledby="drawer-title" data-drawer>\n'
-        '  <div class="drawer-header" id="drawer-title" data-drawer-header></div>\n'
-        '  <div class="drawer-body" data-drawer-body></div>\n'
+        '  <div class="drawer-header" data-drawer-header>\n'
+        '    <span class="drawer-title" id="drawer-title" data-drawer-title>Pane output</span>\n'
+        '    <div>\n'
+        '      <span class="drawer-meta" data-drawer-meta></span>\n'
+        '      <button class="drawer-close" data-drawer-close aria-label="Close drawer">&#x2715;</button>\n'
+        '    </div>\n'
+        '  </div>\n'
+        '  <div class="drawer-body" data-drawer-body>\n'
+        '    <pre data-drawer-pre></pre>\n'
+        '  </div>\n'
         '</aside>'
     )
 
@@ -2226,7 +2412,7 @@ def render_dashboard(model: dict) -> str:
         '<body>\n',
         body, "\n",
         _drawer_skeleton(), "\n",
-        '<script id="dashboard-js"></script>\n',
+        f'<script id="dashboard-js">{_DASHBOARD_JS}</script>\n',
         '</body>\n',
         '</html>\n',
     ])
