@@ -737,7 +737,7 @@ class TimelineSvgTests(unittest.TestCase):
 
 
 @unittest.skipUnless(
-    _HAS_SECTION_TEAM_V2 and hasattr(monitor_server, "_section_kpi"),
+    _HAS_SECTION_TEAM_V2,
     "_section_team v2 미구현 (TSK-04-03 이후 — data-pane-expand 추가 전)"
 )
 class SectionTeamV2Tests(unittest.TestCase):

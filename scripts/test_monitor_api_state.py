@@ -129,6 +129,25 @@ def _make_phase_entry(event: str = "design.ok", at: str = "2026-04-20T00:01:00Z"
     )
 
 
+def _snapshot(
+    tasks=None,
+    features=None,
+    signals=None,
+    panes=None,
+    project_root="/abs",
+    docs_dir="docs",
+):
+    """모듈 레벨 `_build_state_snapshot` 호출 헬퍼 — 각 인자의 기본값은 빈 리스트."""
+    return monitor_server._build_state_snapshot(
+        project_root=project_root,
+        docs_dir=docs_dir,
+        scan_tasks=lambda _d: tasks if tasks is not None else [],
+        scan_features=lambda _d: features if features is not None else [],
+        scan_signals=lambda: signals if signals is not None else [],
+        list_tmux_panes=lambda: panes if panes is not None else [],
+    )
+
+
 # ---------------------------------------------------------------------------
 # Build snapshot — structure / keys / lengths
 # ---------------------------------------------------------------------------
@@ -137,23 +156,25 @@ def _make_phase_entry(event: str = "design.ok", at: str = "2026-04-20T00:01:00Z"
 class BuildStateSnapshotTests(unittest.TestCase):
     """`_build_state_snapshot` 의 일반·엣지 케이스."""
 
+    # 모듈 레벨 _snapshot 헬퍼를 클래스 메서드로 바인딩
+    _snapshot = staticmethod(_snapshot)
+
     def test_normal_returns_expected_keys_and_lengths(self):
-        scan_tasks = lambda _d: [_make_task("TSK-01-02"), _make_task("TSK-01-03"), _make_task("TSK-01-04")]
-        scan_features = lambda _d: [_make_feat("login")]
-        scan_signals = lambda: [
+        tasks = [_make_task("TSK-01-02"), _make_task("TSK-01-03"), _make_task("TSK-01-04")]
+        features = [_make_feat("login")]
+        signals = [
             _make_signal(scope="shared", task_id="A"),
             _make_signal(scope="shared", task_id="B"),
             _make_signal(scope="agent-pool:20260501-1", task_id="C"),
         ]
-        list_tmux_panes = lambda: [_make_pane("%1"), _make_pane("%2", pane_index=1)]
+        panes = [_make_pane("%1"), _make_pane("%2", pane_index=1)]
 
-        out = monitor_server._build_state_snapshot(
-            project_root="/abs",
+        out = self._snapshot(
+            tasks=tasks,
+            features=features,
+            signals=signals,
+            panes=panes,
             docs_dir="docs/monitor",
-            scan_tasks=scan_tasks,
-            scan_features=scan_features,
-            scan_signals=scan_signals,
-            list_tmux_panes=list_tmux_panes,
         )
         self.assertEqual(
             set(out.keys()),
@@ -173,14 +194,7 @@ class BuildStateSnapshotTests(unittest.TestCase):
         self.assertEqual(len(out["tmux_panes"]), 2)
 
     def test_generated_at_is_utc_iso_z_format(self):
-        out = monitor_server._build_state_snapshot(
-            project_root="/abs",
-            docs_dir="docs",
-            scan_tasks=lambda _d: [],
-            scan_features=lambda _d: [],
-            scan_signals=lambda: [],
-            list_tmux_panes=lambda: [],
-        )
+        out = self._snapshot()
         generated = out["generated_at"]
         self.assertIsInstance(generated, str)
         self.assertRegex(generated, r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
@@ -192,11 +206,7 @@ class BuildStateSnapshotTests(unittest.TestCase):
             _make_signal(scope="agent-pool:20260501-xxx", task_id="C"),
             _make_signal(scope="agent-pool:20260501-yyy", task_id="D"),
         ]
-        out = monitor_server._build_state_snapshot(
-            project_root="/abs", docs_dir="docs",
-            scan_tasks=lambda _d: [], scan_features=lambda _d: [],
-            scan_signals=lambda: sigs, list_tmux_panes=lambda: [],
-        )
+        out = self._snapshot(signals=sigs)
         self.assertEqual(len(out["shared_signals"]), 2)
         self.assertEqual(len(out["agent_pool_signals"]), 2)
         shared_scopes = {entry["scope"] for entry in out["shared_signals"]}
@@ -211,11 +221,7 @@ class BuildStateSnapshotTests(unittest.TestCase):
             _make_signal(scope="other:xyz", task_id="B"),
             _make_signal(scope="agent-pool:ts1", task_id="C"),
         ]
-        out = monitor_server._build_state_snapshot(
-            project_root="/abs", docs_dir="docs",
-            scan_tasks=lambda _d: [], scan_features=lambda _d: [],
-            scan_signals=lambda: sigs, list_tmux_panes=lambda: [],
-        )
+        out = self._snapshot(signals=sigs)
         self.assertEqual(len(out["shared_signals"]), 2)  # shared + unknown
         self.assertEqual(len(out["agent_pool_signals"]), 1)
         task_ids = {s["task_id"] for s in out["shared_signals"]}
@@ -230,19 +236,11 @@ class BuildStateSnapshotTests(unittest.TestCase):
         self.assertIsNone(out["tmux_panes"])
 
     def test_tmux_panes_empty_list_is_preserved(self):
-        out = monitor_server._build_state_snapshot(
-            project_root="/abs", docs_dir="docs",
-            scan_tasks=lambda _d: [], scan_features=lambda _d: [],
-            scan_signals=lambda: [], list_tmux_panes=lambda: [],
-        )
+        out = self._snapshot()
         self.assertEqual(out["tmux_panes"], [])  # None 과 구분
 
     def test_all_empty_scanners_return_empty_lists(self):
-        out = monitor_server._build_state_snapshot(
-            project_root="/abs", docs_dir="docs",
-            scan_tasks=lambda _d: [], scan_features=lambda _d: [],
-            scan_signals=lambda: [], list_tmux_panes=lambda: [],
-        )
+        out = self._snapshot()
         self.assertEqual(out["wbs_tasks"], [])
         self.assertEqual(out["features"], [])
         self.assertEqual(out["shared_signals"], [])
@@ -251,32 +249,20 @@ class BuildStateSnapshotTests(unittest.TestCase):
     def test_workitem_with_error_survives_asdict(self):
         """TSK-01-08 수락 기준 3 — wbs_tasks 엔트리에 'error' 필드로 노출."""
         tasks = [_make_task("TSK-BAD", error="json parse failed")]
-        out = monitor_server._build_state_snapshot(
-            project_root="/abs", docs_dir="docs",
-            scan_tasks=lambda _d: tasks, scan_features=lambda _d: [],
-            scan_signals=lambda: [], list_tmux_panes=lambda: [],
-        )
+        out = self._snapshot(tasks=tasks)
         json.dumps(out, default=str, ensure_ascii=False)
         self.assertEqual(out["wbs_tasks"][0]["error"], "json parse failed")
 
     def test_error_field_null_for_valid_workitem(self):
         """TSK-01-08 수락 기준 3 — 정상 Task 의 'error' 값은 null(None)."""
         tasks = [_make_task("TSK-OK")]
-        out = monitor_server._build_state_snapshot(
-            project_root="/abs", docs_dir="docs",
-            scan_tasks=lambda _d: tasks, scan_features=lambda _d: [],
-            scan_signals=lambda: [], list_tmux_panes=lambda: [],
-        )
+        out = self._snapshot(tasks=tasks)
         self.assertIsNone(out["wbs_tasks"][0]["error"])
 
     def test_error_field_present_in_wbs_tasks_entry(self):
         """TSK-01-08 수락 기준 3 — wbs_tasks 원소에 'error' 키 존재."""
         tasks = [_make_task("TSK-CHECK")]
-        out = monitor_server._build_state_snapshot(
-            project_root="/abs", docs_dir="docs",
-            scan_tasks=lambda _d: tasks, scan_features=lambda _d: [],
-            scan_signals=lambda: [], list_tmux_panes=lambda: [],
-        )
+        out = self._snapshot(tasks=tasks)
         self.assertIn("error", out["wbs_tasks"][0])
 
     def test_scan_functions_receive_docs_dir(self):
@@ -311,12 +297,7 @@ class PhaseHistoryTailPreservationTests(unittest.TestCase):
     def test_phase_history_tail_preserved_through_asdict(self):
         tail = [_make_phase_entry(event=f"evt-{i}") for i in range(15)]
         t = _make_task(phase_history_tail=tail)
-
-        out = monitor_server._build_state_snapshot(
-            project_root="/abs", docs_dir="docs",
-            scan_tasks=lambda _d: [t], scan_features=lambda _d: [],
-            scan_signals=lambda: [], list_tmux_panes=lambda: [],
-        )
+        out = _snapshot(tasks=[t])
         self.assertEqual(len(out["wbs_tasks"][0]["phase_history_tail"]), 15)
 
     def test_phase_tail_limit_constant_is_10(self):
@@ -448,11 +429,7 @@ class SnapshotJsonSerializationTests(unittest.TestCase):
 
     def test_korean_title_not_escaped_to_unicode(self):
         tasks = [_make_task(title="한글 제목")]
-        out = monitor_server._build_state_snapshot(
-            project_root="/abs", docs_dir="docs",
-            scan_tasks=lambda _d: tasks, scan_features=lambda _d: [],
-            scan_signals=lambda: [], list_tmux_panes=lambda: [],
-        )
+        out = _snapshot(tasks=tasks)
         text = json.dumps(out, default=str, ensure_ascii=False)
         self.assertIn("한글 제목", text)
         # 한글을 유니코드 이스케이프 형태로 부풀리지 않는다
@@ -472,11 +449,7 @@ class SnapshotJsonSerializationTests(unittest.TestCase):
         sigs = [_make_signal(), _make_signal(scope="agent-pool:ts1", task_id="X")]
         panes = [_make_pane("%1")]
 
-        out = monitor_server._build_state_snapshot(
-            project_root="/abs", docs_dir="docs",
-            scan_tasks=lambda _d: tasks, scan_features=lambda _d: feats,
-            scan_signals=lambda: sigs, list_tmux_panes=lambda: panes,
-        )
+        out = _snapshot(tasks=tasks, features=feats, signals=sigs, panes=panes)
         text = json.dumps(out, default=str, ensure_ascii=False)
         parsed = json.loads(text)
         self.assertEqual(parsed["wbs_tasks"][0]["id"], "TSK-01-06")
@@ -610,11 +583,7 @@ class PerformanceTests(unittest.TestCase):
         sigs = shared + agent
 
         start = time.perf_counter()
-        out = monitor_server._build_state_snapshot(
-            project_root="/abs", docs_dir="docs",
-            scan_tasks=lambda _d: tasks, scan_features=lambda _d: [],
-            scan_signals=lambda: sigs, list_tmux_panes=lambda: panes,
-        )
+        out = _snapshot(tasks=tasks, signals=sigs, panes=panes)
         text = json.dumps(out, default=str, ensure_ascii=False)
         elapsed = time.perf_counter() - start
 
@@ -665,13 +634,12 @@ class ApiStateSchemaRegressionTests(unittest.TestCase):
 
     def test_api_state_keys_match_v1_snapshot(self):
         """`_build_state_snapshot` 반환 dict의 최상위 키 집합이 v1 스냅샷 8개 키와 정확히 일치."""
-        out = monitor_server._build_state_snapshot(
-            project_root="/abs",
+        out = _snapshot(
+            tasks=[_make_task()],
+            features=[_make_feat()],
+            signals=[_make_signal()],
+            panes=[_make_pane()],
             docs_dir="docs/monitor",
-            scan_tasks=lambda _d: [_make_task()],
-            scan_features=lambda _d: [_make_feat()],
-            scan_signals=lambda: [_make_signal()],
-            list_tmux_panes=lambda: [_make_pane()],
         )
         actual_keys = frozenset(out.keys())
         self.assertEqual(
