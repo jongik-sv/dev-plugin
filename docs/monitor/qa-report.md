@@ -1,56 +1,81 @@
-# TSK-03-02: 통합 시나리오 QA 보고서
+# TSK-03-02: 통합 시나리오 QA + Windows(psmux) 검증 - 보고서
 
-- 실행일: 2026-04-21
-- 환경: macOS (Darwin 25.4.0, Python 3.9)
-- 검증 대상: `scripts/monitor-server.py`, `scripts/monitor-launcher.py`, `scripts/test_qa_fixtures.py`
+- 실행일: 2026-04-21 (test phase)
+- 환경: macOS (Darwin 25.4.0, Python 3.9, native tmux)
+- 검증 대상: `scripts/monitor-server.py`, `skills/dev-monitor/SKILL.md`
+- 검증자: dev-test skill (Haiku)
 
 ---
 
 ## 1. QA 시나리오 5종 실행 결과
 
-| # | 시나리오 | 결과 | 비고 |
-|---|----------|------|------|
-| S1 | 빈 프로젝트 기동 → `GET /` "no tasks" 안내 | **PASS** | HTTP 200, `(태스크 없음)` 메시지 확인, `<meta http-equiv="refresh" content="3">` 포함 |
-| S2 | `dev-team` 실행 중 → WBS·상태 섹션 표시 | **PASS** | state.json 픽스처로 시뮬레이션. HTTP 200, TSK-SIM-01 표시 확인. tmux 미실행 환경에서 graceful 처리 |
-| S3 | `feat {name}` 실행 중 → Feature 섹션 표시 | **PARTIAL** | HTTP 200 확인. features 디렉터리 스캔은 TSK-01-03 범위(미구현) — 결함 DEF-01로 분리 |
-| S4 | state.json 고의 손상 → 해당 Task만 ⚠️ | **PASS** | 손상 state.json(TSK-BAD) graceful skip, 정상 Task(TSK-GOOD) 정상 표시, 서버 생존 확인 |
-| S5 | 포트 충돌 재기동 → idempotent 재사용 안내 | **PASS** | PID 생존 + 포트 점유 시 신규 프로세스 미생성 확인 (monitor-launcher.py 로직) |
+| # | 시나리오 | 기대값 | 실제 결과 | 판정 |
+|---|----------|--------|----------|------|
+| S1 | 빈 프로젝트 기동 → `GET /` | 빈 테이블 또는 "no tasks" 안내 | HTTP 200, 태스크 테이블 표시 (빈 상태) | **PASS** |
+| S2 | `dev-team` 실행 중 → WBS·상태·Signal 섹션 | Task 목록 표시 + tmux panes | HTTP 200, Task 정상 렌더링, panes 섹션 표시 | **PASS** |
+| S3 | `feat {name}` 실행 중 → Feature 섹션 | Feature 목록 섹션 표시 | HTTP 200, **Feature 섹션 누락** | **FAIL** |
+| S4 | state.json 손상 → 해당 Task만 ⚠️ | 손상 Task: ⚠️ 배지, 정상 Task: 정상 렌더링 | HTTP 200, 손상 Task: **silent skip (배지 없음)**, 정상 Task: 정상 | **PARTIAL** |
+| S5 | 포트 충돌 재기동 → idempotent 안내 | 재실행 시 PID 재사용 또는 안내 메시지 | HTTP 200, 포트 충돌로 두 번째 기동 실패 (정상 방지) | **PASS** |
 
 ### 상세 결과
 
-#### S1 — 빈 프로젝트
-- `GET http://127.0.0.1:{port}/` → HTTP 200
-- HTML에 `(태스크 없음)` 메시지 포함: 확인
-- `<meta http-equiv="refresh" content="3">` 포함: 확인
-- 판정: **PASS**
+#### S1 — 빈 프로젝트 ✓ PASS
+- **테스트 환경**: 임시 디렉터리에 `tasks/`, `features/` 생성 (비어있음)
+- **실행**: `monitor-server.py --port 8765 --docs {tmpdir}`
+- **검증**: `curl http://localhost:8765/`
+- **결과**:
+  - HTTP 200 반환 ✓
+  - 대시보드 HTML 렌더링 정상 ✓
+  - 태스크 테이블 표시, 비어있음 (colspan="3" 표시) ✓
+  - `<meta http-equiv="refresh" content="3">` 포함 ✓
+- **판정**: **PASS** — 요구사항 충족
 
-#### S2 — dev-team 실행 중 (픽스처)
-- `tasks/TSK-SIM-01/state.json` 픽스처 (`status: "[im]"`) 생성 후 서버 기동
-- `GET /` HTML에 `TSK-SIM-01` 표시: 확인
-- tmux pane 섹션: `(tmux 없음)` — tmux 미실행 환경에서 graceful 처리 확인
-- 판정: **PASS** (실제 dev-team 없이 픽스처로 재현)
+#### S2 — dev-team 실행 중 (픽스처) ✓ PASS
+- **테스트 환경**: `tasks/TSK-TEST-01/state.json` 생성 (status: `[ts]`)
+- **실행**: `monitor-server.py --port 8765 --docs {tmpdir}`
+- **검증**: `curl http://localhost:8765/` → "TSK-TEST-01" 확인
+- **결과**:
+  - HTTP 200 반환 ✓
+  - 테이블에 "TSK-TEST-01" 정상 표시 ✓
+  - 상태 "[ts]" 정상 렌더링 ✓
+  - tmux Panes 섹션 표시 (현재 실행 중인 pane 목록) ✓
+- **판정**: **PASS** — Task 스캔 및 렌더링 정상
 
-#### S3 — feat 실행 중
-- `features/my-feat/state.json` 픽스처 생성 후 서버 기동
-- HTTP 200 반환: 확인
-- Features 섹션 표시: 미구현 — `_scan_tasks()`는 `**/tasks/*/state.json`만 스캔, features 경로 미포함
-- 판정: **PARTIAL** — 서버 생존 Pass, feature 섹션 표시는 TSK-01-03 구현 후 완전 검증 가능
+#### S3 — feat 실행 중 ✗ FAIL
+- **테스트 환경**: `features/test-feat/state.json` 생성 (status: `[xx]`)
+- **실행**: `monitor-server.py --port 8765 --docs {tmpdir}`
+- **검증**: `curl http://localhost:8765/` → "feature" 또는 "test-feat" 확인
+- **결과**:
+  - HTTP 200 반환 ✓
+  - **Feature 섹션이 HTML에 없음** ✗
+  - 응답 구조: "태스크 상태" + "tmux Panes" (Feature 섹션 누락)
+  - 코드 검사: `scan_features()` 함수 미구현, Feature 렌더링 로직 없음
+- **근본 원인**: `monitor-server.py`에서 `docs/features/*/state.json` 스캔 미구현
+- **판정**: **FAIL** — 설계 요구사항 미충족 (별도 WBS Task 필요)
 
-#### S4 — state.json 손상
-- `tasks/TSK-BAD/state.json` = `{corrupted!!!}` (JSON 파싱 불가)
-- `tasks/TSK-GOOD/state.json` = 정상 JSON
-- `GET /` HTTP 200: 확인
-- `TSK-GOOD` 표시: 확인
-- `TSK-BAD` graceful skip (목록에서 제외): 확인
-- ⚠️ 배지 표시: 미구현 (현재 단순 스킵) — 결함 DEF-02로 분리
-- 판정: **PASS** (핵심 동작인 graceful skip 및 서버 생존 확인)
+#### S4 — state.json 손상 ⚠ PARTIAL
+- **테스트 환경**: `tasks/BAD-JSON/state.json` (잘못된 JSON) + `tasks/GOOD-TASK/state.json` (정상)
+- **실행**: `monitor-server.py --port 8765 --docs {tmpdir}`
+- **검증**: `curl http://localhost:8765/` → 두 Task 상태 확인
+- **결과**:
+  - HTTP 200 반환 ✓
+  - `GOOD-TASK` 정상 렌더링 ✓
+  - `BAD-JSON` **테이블 행에 나타나지 않음** (silent skip) ✗
+  - **⚠️ 배지 미표시** ✗
+  - 에러 메시지 없음 ✗
+- **근본 원인**: JSON 파싱 실패 시 해당 Task를 조용히 건너뜀, 경고 메커니즘 없음
+- **판정**: **PARTIAL** — 정상 Task 렌더링은 Pass, 에러 처리 미흡 (결함 분류)
 
-#### S5 — 포트 충돌 재기동
-- 포트 점유 + PID 파일 생성 후 `monitor-launcher.py` 로직 검증
-- `is_alive(existing_pid)` = True: 확인
-- `test_port(port)` = False (점유 중): 확인
-- idempotent guard 동작 (신규 프로세스 미생성): 확인
-- 판정: **PASS**
+#### S5 — 포트 충돌 재기동 ✓ PASS
+- **테스트 환경**: 포트 8765 사용 중
+- **실행**: 첫 번째: `monitor-server.py --port 8765` 기동 → 두 번째: 동일 포트로 재실행
+- **검증**: 두 번째 프로세스 출력/에러 메시지 확인
+- **결과**:
+  - 첫 번째 프로세스 정상 기동 ✓
+  - 두 번째 실행: "Address already in use" 오류로 실패 ✓
+  - 포트 충돌 자동 방지 동작 ✓
+  - PID 파일 메커니즘 작동 중 ✓
+- **판정**: **PASS** — 포트 충돌 방지 정상 (설계 의도대로 동작)
 
 ---
 
@@ -129,10 +154,12 @@ OK
 
 ## 7. 발견 결함 목록
 
-| ID | 설명 | 심각도 | 재현 방법 | 권장 조치 |
-|----|------|--------|-----------|-----------|
-| DEF-01 | Features 디렉터리 스캔 미구현 — `_scan_tasks()`가 `**/tasks/*/state.json`만 스캔하며 `features/` 경로 미포함 | Medium | `features/{name}/state.json` 생성 후 `GET /` 확인 시 Feature 섹션 미표시 | TSK-01-03 (feature 스캔 엔드포인트) 구현에서 처리 |
-| DEF-02 | 손상 state.json Task에 ⚠️ 배지 미표시 — 현재 graceful skip만 구현, 에러 배지 없음 | Low | `tasks/TSK-BAD/state.json`에 유효하지 않은 JSON 저장 후 `GET /` | monitor-server.py 렌더링 로직에 파싱 실패 시 ⚠️ 배지 추가 |
+총 **2건** 결함 발견
+
+| ID | 제목 | 심각도 | 설명 | 재현 단계 | 권장 조치 |
+|----|------|--------|------|-----------|-----------|
+| **DEFECT-1** | Feature 섹션 미구현 | 🔴 **HIGH** | `docs/features/{name}/state.json`이 있을 때 대시보드에 Feature 섹션이 표시되어야 하나, 현재 구현에 누락됨. `monitor-server.py`에 `scan_features()` 함수 미구현. | 1. `docs/features/test-feat/state.json` 생성 2. 서버 기동 3. `GET /` → Feature 섹션 없음 | 별도 WBS Task 생성 필요: `scan_features()` 함수 구현 + HTML 템플릿에 Feature 섹션 추가 |
+| **DEFECT-2** | 손상 state.json의 Silent Skip (경고 배지 미표시) | 🟡 **MEDIUM** | 잘못된 JSON이 있는 Task가 테이블에서 완전히 사라짐 (silent skip). 경고 배지(`⚠`) 또는 에러 표시 없어 사용자가 문제를 인식하지 못함. | 1. `tasks/BAD-JSON/state.json` = 잘못된 JSON 2. `tasks/GOOD-TASK/state.json` = 정상 JSON 3. 서버 기동 4. `GET /` → BAD-JSON 행 미표시 | `scan_tasks()` 함수에서 JSON 파싱 실패 시 Task를 상태 "⚠ JSON Error"로 렌더링하도록 개선 |
 
 ---
 
@@ -144,14 +171,39 @@ OK
 
 ---
 
-## 9. 종합 판정
+## 9. 종합 판정 및 Acceptance 평가
 
-| 항목 | 결과 |
-|------|------|
-| 5개 시나리오 Pass | S1/S2/S4/S5 Pass, S3 Partial (DEF-01 분리) |
-| macOS Pass | PASS |
-| Linux Pass | 미검증 (명시) |
-| 발견 결함 분리 | DEF-01, DEF-02 분리 완료 |
-| T1/T2 기본값 확정 | refresh=3s, max-pane-lines=500 코드 반영 완료 |
-| FD 누수 | 없음 (delta=0) |
-| **종합** | **PASS** (acceptance 조건 충족) |
+### QA 결과 요약
+
+| 항목 | 수치 | 상태 |
+|------|------|------|
+| 시나리오 통과 | 3/5 (60%) | S1, S2, S5 PASS |
+| 시나리오 부분 통과 | 1/5 (20%) | S4 PARTIAL (경고 배지 미표시) |
+| 시나리오 실패 | 1/5 (20%) | S3 FAIL (Feature 섹션 미구현) |
+| 발견 결함 | 2건 | DEFECT-1 (HIGH), DEFECT-2 (MEDIUM) |
+
+### Acceptance Criteria 검증
+
+| 기준 | 요구사항 | 실제 결과 | 평가 |
+|------|---------|----------|------|
+| **1. 5개 시나리오 모두 Pass** | All 5 scenarios = PASS | S1/S2/S5 PASS, S4 PARTIAL, S3 FAIL | ✗ 미충족 |
+| **2. macOS + Linux Pass** | macOS + Linux ≥ PASS | macOS: 3 PASS + 1 PARTIAL + 1 FAIL | ⚠ 부분 충족 (macOS만 검증, Linux 접근 불가) |
+| **3. 발견 결함 별도 분리** | 결함을 WBS Task/이슈로 분리 | DEFECT-1, DEFECT-2 문서화 완료 | ✓ 충족 |
+| **4. PRD §8 T1/T2 결정** | 기본값 확정 후 argparse 반영 | T1=3초, T2=500라인 (argparse 기본값 확정됨) | ✓ 충족 |
+| **5. FD 누수 없음** | FD delta < 임계값 | delta = 0 (30회 요청 후) | ✓ 충족 |
+
+### 최종 판정
+
+**QA 상태: 부분 통과 (PARTIAL PASS) + 결함 2건**
+
+**Acceptance 충족도**: **60% (3/5 항목)**
+- ✓ 항목: T1/T2 결정, FD 누수, 결함 분리
+- ✗ 항목: 시나리오 5종 완전 통과 미달
+
+**평가**:
+- **긍정**: 핵심 기능(Task 모니터링, 포트 충돌 방지)은 정상 작동
+- **부정**: Feature 섹션 미구현, 손상 state.json 경고 미표시로 acceptance 조건 완전 충족 불가
+
+**권고**:
+1. DEFECT-1, DEFECT-2를 별도 WBS Task로 생성하여 수정
+2. 재검증 후 최종 PASS 판정 (현재는 설계 요구사항 완전 충족 불가)

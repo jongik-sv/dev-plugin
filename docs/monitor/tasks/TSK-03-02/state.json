@@ -2,8 +2,8 @@
   "status": "[im]",
   "started_at": "2026-04-20T23:53:34Z",
   "last": {
-    "event": "build.ok",
-    "at": "2026-04-21T01:10:07Z"
+    "event": "test.fail",
+    "at": "2026-04-21T01:15:34Z"
   },
   "phase_history": [
     {
@@ -19,7 +19,14 @@
       "to": "[im]",
       "at": "2026-04-21T01:10:07Z",
       "elapsed_seconds": 4593
+    },
+    {
+      "event": "test.fail",
+      "from": "[im]",
+      "to": "[im]",
+      "at": "2026-04-21T01:15:34Z",
+      "elapsed_seconds": 327
     }
   ],
-  "updated": "2026-04-21T01:10:07Z"
+  "updated": "2026-04-21T01:15:34Z"
 }
