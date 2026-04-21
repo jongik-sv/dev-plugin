@@ -152,7 +152,7 @@ class SectionPresenceTests(unittest.TestCase):
         html = render_dashboard(_normal_model())
         for anchor in (
             '<section id="header">',
-            '<section id="wbs">',
+            '<section id="wp-cards">',
             '<section id="features">',
             '<section id="team">',
             '<section id="subagents">',
@@ -449,7 +449,7 @@ class NavigationAndEntryLinksTests(unittest.TestCase):
 
     def test_top_nav_has_all_section_anchors(self) -> None:
         html = render_dashboard(_normal_model())
-        for href in ('href="#wbs"', 'href="#features"', 'href="#team"',
+        for href in ('href="#wp-cards"', 'href="#features"', 'href="#team"',
                      'href="#subagents"', 'href="#phases"'):
             self.assertIn(href, html, f"missing nav link {href}")
 

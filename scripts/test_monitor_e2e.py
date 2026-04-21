@@ -75,7 +75,7 @@ class DashboardReachabilityTests(unittest.TestCase):
         """상단 네비 앵커 클릭으로 섹션 도달 가능 (QA 클릭 경로)."""
         with urllib.request.urlopen(_E2E_URL + "/", timeout=3) as resp:
             html_body = resp.read().decode("utf-8")
-        for anchor in ("#wbs", "#features", "#team", "#subagents", "#phases"):
+        for anchor in ("#wp-cards", "#features", "#team", "#subagents", "#phases"):
             self.assertIn(f'href="{anchor}"', html_body,
                           f"missing top-nav link {anchor}")
             self.assertIn(f'id="{anchor[1:]}"', html_body,
@@ -295,6 +295,237 @@ class FeatureSectionE2ETests(unittest.TestCase):
                 "no features", section_html.lower(),
                 "#features 섹션에 'no features' 안내 문구 없음",
             )
+
+
+@unittest.skipUnless(_SERVER_UP, f"monitor-server not reachable at {_E2E_URL}")
+class WpCardsSectionE2ETests(unittest.TestCase):
+    """TSK-01-03 — WP 카드 섹션 E2E 검증.
+
+    수락 기준:
+    1. GET / 응답 HTML에 id="wp-cards" 섹션이 존재한다.
+    2. 상단 네비의 href="#wp-cards" 링크를 통해 섹션 도달 가능 (reachability).
+    3. WBS task 존재 시 class="wp-card" 요소가 하나 이상 렌더된다.
+    4. id="wbs" 섹션은 대시보드에 미존재 (wp-cards로 교체 확인).
+    """
+
+    def _dashboard_html(self) -> str:
+        with urllib.request.urlopen(_E2E_URL + "/", timeout=3) as resp:
+            return resp.read().decode("utf-8")
+
+    def _api_state(self) -> dict:
+        with urllib.request.urlopen(_E2E_URL + "/api/state", timeout=3) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+
+    def test_wp_cards_section_id_present(self) -> None:
+        """QA: 브라우저에서 / 접속 → id="wp-cards" 섹션이 페이지에 렌더됨."""
+        html_body = self._dashboard_html()
+        self.assertIn('id="wp-cards"', html_body,
+                      "#wp-cards 섹션 id가 대시보드 HTML에 없음")
+
+    def test_wp_cards_nav_anchor_present(self) -> None:
+        """QA: 상단 네비에 href="#wp-cards" 링크 존재 (reachability gate)."""
+        html_body = self._dashboard_html()
+        self.assertIn('href="#wp-cards"', html_body,
+                      "#wp-cards 네비 앵커가 대시보드 HTML에 없음")
+
+    def test_wbs_section_id_absent(self) -> None:
+        """QA: id="wbs" 섹션 미존재 (wp-cards로 교체 확인)."""
+        html_body = self._dashboard_html()
+        self.assertNotIn('id="wbs"', html_body,
+                         "id='wbs' 섹션이 대시보드에 남아있음 — wp-cards 교체 미완")
+
+    def test_wp_card_div_present_when_tasks_exist(self) -> None:
+        """QA: WBS task 존재 시 class="wp-card" 요소가 하나 이상 렌더됨.
+
+        Reachability: 상단 네비 #wp-cards 링크 → id="wp-cards" 섹션 도달 후
+        내부의 wp-card 카드 요소 존재 확인.
+        task가 없으면 empty-state만 확인한다.
+        """
+        data = self._api_state()
+        html_body = self._dashboard_html()
+
+        wbs_tasks = data.get("wbs_tasks") or []
+        if wbs_tasks:
+            self.assertIn('class="wp-card"', html_body,
+                          "wbs_tasks 존재하지만 class='wp-card' 요소 없음")
+        else:
+            self.assertIn("no tasks", html_body.lower(),
+                          "wbs_tasks 없지만 empty-state 문구 없음")
+
+    def test_wp_card_details_and_task_rows_present(self) -> None:
+        """QA: <details> 클릭 시 task-row 리스트가 렌더됨.
+
+        task가 있으면 wp-card 내부에 <details> 태그와 task-row 요소 존재 확인.
+        """
+        data = self._api_state()
+        html_body = self._dashboard_html()
+
+        wbs_tasks = data.get("wbs_tasks") or []
+        if not wbs_tasks:
+            self.skipTest("no wbs_tasks — task-row 렌더 검증 불가")
+
+        section_match = re.search(
+            r'<section id="wp-cards">(.*?)</section>',
+            html_body,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(section_match,
+                             "#wp-cards 섹션 블록을 HTML에서 추출 불가")
+        section_html = section_match.group(1)
+        self.assertIn("<details", section_html,
+                      "wp-card 섹션 내부에 <details> 태그 없음")
+        self.assertIn("task-row", section_html,
+                      "wp-card 섹션 내부에 task-row 클래스 없음")
+
+
+@unittest.skipUnless(_SERVER_UP, f"monitor-server not reachable at {_E2E_URL}")
+class StickyHeaderKpiSectionE2ETests(unittest.TestCase):
+    """TSK-01-02 — sticky header + KPI section E2E 검증.
+
+    수락 기준 (QA 체크리스트 · 클릭 경로):
+    1. GET / 응답 HTML에 class="sticky-hdr" 헤더가 존재한다.
+    2. GET / 응답 HTML에 class="kpi-section" 섹션이 존재한다.
+    3. KPI 카드 5장(data-kpi 속성)이 렌더된다.
+    4. 필터 칩 4개(data-filter 속성)가 렌더된다.
+    5. 각 KPI 카드에 스파크라인 SVG(kpi-sparkline)가 포함된다.
+
+    Note: TSK-01-04에서 render_dashboard가 조립된 후에 유효한 테스트다.
+    현재(TSK-01-02) sticky header와 KPI 섹션이 render_dashboard에 아직
+    연결되지 않은 경우 해당 테스트가 실패할 수 있으나, E2E 검증 자체는
+    dev-test 단계에서 TSK-01-04 완료 후 수행된다.
+    """
+
+    def _dashboard_html(self) -> str:
+        with urllib.request.urlopen(_E2E_URL + "/", timeout=3) as resp:
+            return resp.read().decode("utf-8")
+
+    def test_sticky_header_present(self) -> None:
+        """GET / 응답 HTML에 class="sticky-hdr" 헤더가 존재한다."""
+        html_body = self._dashboard_html()
+        self.assertIn('class="sticky-hdr"', html_body,
+                      "sticky-hdr 헤더가 대시보드 HTML에 없음")
+
+    def test_kpi_section_present(self) -> None:
+        """GET / 응답 HTML에 kpi-section 클래스가 존재한다."""
+        html_body = self._dashboard_html()
+        self.assertIn("kpi-section", html_body,
+                      "kpi-section 클래스가 대시보드 HTML에 없음")
+
+    def test_five_kpi_cards_present(self) -> None:
+        """KPI 카드 5장(data-kpi 속성)이 렌더된다."""
+        html_body = self._dashboard_html()
+        for kind in ("running", "failed", "bypass", "done", "pending"):
+            self.assertIn(f'data-kpi="{kind}"', html_body,
+                          f'data-kpi="{kind}" 속성이 대시보드 HTML에 없음')
+
+    def test_four_filter_chips_present(self) -> None:
+        """필터 칩 4개(data-filter 속성)가 렌더된다."""
+        html_body = self._dashboard_html()
+        for f in ("all", "running", "failed", "bypass"):
+            self.assertIn(f'data-filter="{f}"', html_body,
+                          f'data-filter="{f}" 칩이 대시보드 HTML에 없음')
+
+    def test_sparkline_svgs_in_kpi_cards(self) -> None:
+        """각 KPI 카드에 스파크라인 SVG(kpi-sparkline)가 포함된다."""
+        html_body = self._dashboard_html()
+        count = html_body.count('class="kpi-sparkline"')
+        self.assertGreaterEqual(count, 5,
+                                f"kpi-sparkline SVG가 5개 미만 ({count}개)")
+
+    def test_refresh_toggle_button_present(self) -> None:
+        """sticky header에 refresh-toggle 버튼이 존재한다."""
+        html_body = self._dashboard_html()
+        self.assertIn('class="refresh-toggle"', html_body,
+                      "refresh-toggle 버튼이 대시보드 HTML에 없음")
+
+
+@unittest.skipUnless(_SERVER_UP, f"monitor-server not reachable at {_E2E_URL}")
+class LiveActivityTimelineE2ETests(unittest.TestCase):
+    """TSK-01-04 — Live Activity + Phase Timeline 섹션 E2E 검증.
+
+    수락 기준 (design.md QA 체크리스트 fullstack/frontend 필수 항목):
+    1. GET / 접속 → sticky 헤더 nav의 #activity 링크 클릭 → Live Activity 섹션으로 스크롤
+    2. GET / 접속 → sticky 헤더 nav의 #timeline 링크 클릭 → Phase Timeline 섹션으로 스크롤
+    3. id="activity" 섹션이 페이지에 렌더됨
+    4. id="timeline" 섹션이 페이지에 렌더됨
+    5. Phase Timeline 섹션에 <svg> 인라인 포함 (외부 자원 없음)
+
+    주의: 이 테스트는 live 서버가 기동된 상태에서만 실행된다 (skipUnless 조건).
+    TSK-01-07(render_dashboard 조립)이 완료되면 activity/timeline 섹션이 실제로 렌더된다.
+    dev-test 단계에서 TSK-01-04+TSK-01-07 완료 후 수행된다.
+    """
+
+    def _dashboard_html(self) -> str:
+        with urllib.request.urlopen(_E2E_URL + "/", timeout=3) as resp:
+            return resp.read().decode("utf-8")
+
+    def test_activity_nav_anchor_present(self) -> None:
+        """상단 네비에 href="#activity" 링크가 존재한다 (reachability gate).
+
+        Reachability: 메뉴/링크 클릭 경로 — URL 직접 진입 금지.
+        sticky 헤더 nav의 #activity 앵커를 클릭하여 섹션으로 도달한다.
+        """
+        html_body = self._dashboard_html()
+        self.assertIn('href="#activity"', html_body,
+                      "#activity 네비 앵커가 대시보드 HTML에 없음")
+
+    def test_activity_section_id_present(self) -> None:
+        """GET / 응답 HTML에 id="activity" 섹션이 존재한다.
+
+        nav 앵커(#activity)와 대응하는 섹션 id가 존재해야 클릭 경로가 성립한다.
+        """
+        html_body = self._dashboard_html()
+        self.assertIn('id="activity"', html_body,
+                      "#activity 섹션 id가 대시보드 HTML에 없음")
+
+    def test_timeline_nav_anchor_present(self) -> None:
+        """상단 네비에 href="#timeline" 링크가 존재한다 (reachability gate).
+
+        Reachability: sticky 헤더 nav의 #timeline 앵커를 클릭하여 섹션으로 도달한다.
+        """
+        html_body = self._dashboard_html()
+        self.assertIn('href="#timeline"', html_body,
+                      "#timeline 네비 앵커가 대시보드 HTML에 없음")
+
+    def test_timeline_section_id_present(self) -> None:
+        """GET / 응답 HTML에 id="timeline" 섹션이 존재한다."""
+        html_body = self._dashboard_html()
+        self.assertIn('id="timeline"', html_body,
+                      "#timeline 섹션 id가 대시보드 HTML에 없음")
+
+    def test_timeline_section_contains_inline_svg(self) -> None:
+        """Phase Timeline 섹션에 인라인 <svg> 가 있고 외부 자원 참조가 없다.
+
+        design.md 제약: SVG는 인라인, 외부 자원 참조 금지.
+        """
+        html_body = self._dashboard_html()
+        # id="timeline" 섹션 블록 추출
+        section_match = re.search(
+            r'<section id="timeline">(.*?)</section>',
+            html_body,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(section_match,
+                             'id="timeline" 섹션 블록을 HTML에서 추출할 수 없음')
+        section_html = section_match.group(1)
+        self.assertIn('<svg', section_html,
+                      "#timeline 섹션에 <svg> 없음")
+        # 외부 자원 참조 없어야 함
+        ext = re.findall(
+            r'<(?:image|script|use)[^>]*\s(?:href|src|xlink:href)=["\']?https?://',
+            section_html,
+        )
+        self.assertEqual(ext, [], f"외부 자원 참조 발견: {ext!r}")
+
+    def test_no_external_resources_in_full_dashboard(self) -> None:
+        """라이브 응답 전체에 외부 http(s) 자원 참조 없음 (activity/timeline 포함).
+
+        design.md 공통 제약: 외부 CDN/폰트/스크립트 참조 금지.
+        """
+        html_body = self._dashboard_html()
+        external = re.findall(r"https?://(?!localhost|127\.0\.0\.1)", html_body)
+        self.assertEqual(external, [],
+                         f"external http(s) links found: {external!r}")
 
 
 if __name__ == "__main__":
