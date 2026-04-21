@@ -135,7 +135,7 @@ python3
 - category: development
 - domain: fullstack
 - model: sonnet
-- status: [ ]
+- status: [dd]
 - priority: critical
 - assignee: -
 - schedule: 2026-04-23 ~ 2026-04-23
@@ -180,7 +180,7 @@ python3
 - category: development
 - domain: fullstack
 - model: sonnet
-- status: [ ]
+- status: [dd]
 - priority: critical
 - assignee: -
 - schedule: 2026-04-23 ~ 2026-04-23
