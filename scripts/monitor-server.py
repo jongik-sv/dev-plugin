@@ -1908,8 +1908,7 @@ def _timeline_svg(rows, span_minutes, now, max_rows=_TIMELINE_MAX_ROWS, W=600):
     """
     if not rows:
         return (
-            '<svg class="timeline-svg" viewBox="0 0 ' + str(W) + ' 40" '
-            'xmlns="http://www.w3.org/2000/svg">\n'
+            '<svg class="timeline-svg" viewBox="0 0 ' + str(W) + ' 40">\n'
             '  <text x="' + str(W // 2) + '" y="24" text-anchor="middle" '
             'fill="var(--muted)">no phase history</text>\n'
             '</svg>'
@@ -1921,8 +1920,7 @@ def _timeline_svg(rows, span_minutes, now, max_rows=_TIMELINE_MAX_ROWS, W=600):
 
     parts = []
     parts.append(
-        '<svg class="timeline-svg" viewBox="0 0 ' + str(W) + ' ' + str(H) + '" '
-        'xmlns="http://www.w3.org/2000/svg">'
+        '<svg class="timeline-svg" viewBox="0 0 ' + str(W) + ' ' + str(H) + '">'
     )
 
     # <defs> — 해칭 패턴
@@ -2043,6 +2041,8 @@ def render_dashboard(model: dict) -> str:
         _section_team(model.get("tmux_panes")),
         _section_subagents(model.get("agent_pool_signals") or []),
         _section_phase_history(tasks, features),
+        _section_live_activity(model),
+        _section_phase_timeline(tasks, features),
     ]
     body = "\n".join(sections)
 
