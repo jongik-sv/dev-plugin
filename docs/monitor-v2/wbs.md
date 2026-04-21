@@ -45,7 +45,7 @@ python3
 - category: development
 - domain: frontend
 - model: sonnet
-- status: [ ]
+- status: [dd]
 - priority: medium
 - assignee: -
 - schedule: 2026-04-21 ~ 2026-04-21
@@ -91,7 +91,7 @@ python3
 - category: development
 - domain: frontend
 - model: sonnet
-- status: [ ]
+- status: [dd]
 - priority: critical
 - assignee: -
 - schedule: 2026-04-22 ~ 2026-04-22
