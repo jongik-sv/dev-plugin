@@ -411,6 +411,34 @@ monitor-server.py, python3
 2. 정상 Task와 시각적으로 구분
 3. `/api/state`에서 `error` 필드로 노출
 
+### TSK-01-09: HTML 렌더 경로 dataclass 보존 (DEFECT-3 후속)
+- category: development
+- domain: backend
+- model: sonnet
+- status: [xx]
+- priority: high
+- assignee: -
+- schedule: 2026-04-21 ~ 2026-04-21
+- tags: server, renderer, regression
+- depends: TSK-01-04, TSK-01-06
+- blocked-by: -
+- entry-point: scripts/monitor-server.py
+- note: TSK-03-02 QA 재검증에서 발견된 DEFECT-3. `_build_state_snapshot`의 `_asdict_or_none` 결과를 `render_dashboard`가 그대로 받아 `_render_task_row`의 `getattr(item, ...)`이 전부 None → task-row id/title/status span 공란. `_build_render_state` 헬퍼를 분리하고 `_route_root`만 raw dataclass 경로로 전환.
+
+#### 구현 스펙
+- `_build_render_state(project_root, docs_dir, scan_*...)` 신규: raw dataclass 리스트 유지 (8-key dict 반환, `_build_state_snapshot`과 동일 키)
+- `_build_state_snapshot`은 `_build_render_state` 결과를 `_asdict_or_none`으로 감싸는 얇은 래퍼로 리팩토링 (외부 계약 불변)
+- `_route_root` (`GET /`) 만 `_build_render_state` 직접 호출로 전환, `_handle_api_state` (`GET /api/state`) 는 `_build_state_snapshot` 그대로 사용
+
+#### 수락 기준
+1. `GET /` 응답의 task-row id/title/status span에 실제 값이 렌더된다 (공란 아님).
+2. `/api/state` JSON 계약 불변 (8개 최상위 키, `wbs_tasks` 원소는 dict로 16개 필드 보존).
+3. 기존 monitor 자동화 테스트 240건 전부 통과.
+
+#### 테스트
+- unit: `test_monitor_render.py` / `test_monitor_api_state.py` 등 monitor 계열 240건 회귀 없이 통과
+- E2E: 실제 서버 기동 후 curl로 HTML task-row 및 `/api/state` JSON 검증 (본 Task 수행 세션에서 수동 검증됨)
+
 ---
 
 ## WP-02: /dev-monitor 스킬
@@ -544,7 +572,7 @@ monitor-server.py, python3
 - category: infrastructure
 - domain: infra
 - model: sonnet
-- status: [im]
+- status: [xx]
 - priority: high
 - assignee: -
 - schedule: 2026-05-05 ~ 2026-05-06

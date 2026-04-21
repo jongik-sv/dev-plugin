@@ -1451,6 +1451,46 @@ def _classify_signal_scopes(
     return shared, agent_pool
 
 
+def _build_render_state(
+    project_root: str,
+    docs_dir: str,
+    scan_tasks: Callable[[Any], List[WorkItem]],
+    scan_features: Callable[[Any], List[WorkItem]],
+    scan_signals: Callable[[], List[SignalEntry]],
+    list_tmux_panes: Callable[[], Optional[List[PaneInfo]]],
+) -> dict:
+    """Collect state with raw dataclass instances intact (for HTML rendering).
+
+    The HTML renderer (``render_dashboard`` and ``_section_*`` / ``_render_*``
+    helpers) accesses fields via ``getattr(item, "id")``, so list items must
+    remain dataclass instances — routing through :func:`_asdict_or_none` would
+    convert them to ``dict`` and break every ``getattr`` call (regression
+    found by TSK-03-02 QA retest: task-row id/title/status spans rendered as
+    empty strings because ``getattr(dict, "id")`` returns ``None``).
+
+    Returns a dict with the same 8 keys as :func:`_build_state_snapshot` but
+    list entries remain as ``WorkItem`` / ``SignalEntry`` / ``PaneInfo``
+    dataclass instances.
+    """
+    tasks = list(scan_tasks(docs_dir) or [])
+    features = list(scan_features(docs_dir) or [])
+    shared_signals, agent_pool_signals = _classify_signal_scopes(
+        scan_signals() or []
+    )
+    panes = list_tmux_panes()
+
+    return {
+        "generated_at": _now_iso_z(),
+        "project_root": project_root or "",
+        "docs_dir": docs_dir or "",
+        "wbs_tasks": tasks,
+        "features": features,
+        "shared_signals": shared_signals,
+        "agent_pool_signals": agent_pool_signals,
+        "tmux_panes": panes,
+    }
+
+
 def _build_state_snapshot(
     project_root: str,
     docs_dir: str,
@@ -1472,22 +1512,23 @@ def _build_state_snapshot(
     installed" so clients can distinguish it from the empty-list "no panes
     running" case (TSK-01-06 acceptance 2).
     """
-    tasks = list(scan_tasks(docs_dir) or [])
-    features = list(scan_features(docs_dir) or [])
-    shared_signals, agent_pool_signals = _classify_signal_scopes(
-        scan_signals() or []
+    raw = _build_render_state(
+        project_root,
+        docs_dir,
+        scan_tasks,
+        scan_features,
+        scan_signals,
+        list_tmux_panes,
     )
-    panes = list_tmux_panes()
-
     return {
-        "generated_at": _now_iso_z(),
-        "project_root": project_root or "",
-        "docs_dir": docs_dir or "",
-        "wbs_tasks": _asdict_or_none(tasks),
-        "features": _asdict_or_none(features),
-        "shared_signals": _asdict_or_none(shared_signals),
-        "agent_pool_signals": _asdict_or_none(agent_pool_signals),
-        "tmux_panes": _asdict_or_none(panes),
+        "generated_at": raw["generated_at"],
+        "project_root": raw["project_root"],
+        "docs_dir": raw["docs_dir"],
+        "wbs_tasks": _asdict_or_none(raw["wbs_tasks"]),
+        "features": _asdict_or_none(raw["features"]),
+        "shared_signals": _asdict_or_none(raw["shared_signals"]),
+        "agent_pool_signals": _asdict_or_none(raw["agent_pool_signals"]),
+        "tmux_panes": _asdict_or_none(raw["tmux_panes"]),
     }
 
 
@@ -1638,11 +1679,17 @@ class MonitorHandler(BaseHTTPRequestHandler):
     # ------------------------------------------------------------------
 
     def _route_root(self) -> None:
-        """GET / — build model dict and render dashboard HTML."""
+        """GET / — build model dict and render dashboard HTML.
+
+        Uses :func:`_build_render_state` (raw dataclass lists) instead of
+        :func:`_build_state_snapshot` (dict lists) because the renderer
+        accesses fields via ``getattr(item, "id")``; dict items would silently
+        render as empty spans.
+        """
         server = getattr(self, "server", None)
         refresh_seconds = int(getattr(server, "refresh_seconds", _DEFAULT_REFRESH_SECONDS))
 
-        snapshot = _build_state_snapshot(
+        state = _build_render_state(
             project_root=_server_attr(self, "project_root"),
             docs_dir=_server_attr(self, "docs_dir"),
             scan_tasks=scan_tasks,
@@ -1650,7 +1697,7 @@ class MonitorHandler(BaseHTTPRequestHandler):
             scan_signals=scan_signals,
             list_tmux_panes=list_tmux_panes,
         )
-        model = {**snapshot, "refresh_seconds": refresh_seconds}
+        model = {**state, "refresh_seconds": refresh_seconds}
         html_body = render_dashboard(model)
         _send_html_response(self, 200, html_body)
 

@@ -1,9 +1,9 @@
 {
-  "status": "[im]",
+  "status": "[xx]",
   "started_at": "2026-04-20T23:53:34Z",
   "last": {
-    "event": "bypass",
-    "at": "2026-04-21T01:21:38Z"
+    "event": "refactor.ok",
+    "at": "2026-04-21T02:35:06Z"
   },
   "phase_history": [
     {
@@ -33,9 +33,31 @@
       "to": "[im]",
       "at": "2026-04-21T01:21:38Z",
       "elapsed_seconds": 364
+    },
+    {
+      "event": "test.fail",
+      "from": "[im]",
+      "to": "[im]",
+      "at": "2026-04-21T02:09:41Z",
+      "elapsed_seconds": 2883
+    },
+    {
+      "event": "test.ok",
+      "from": "[im]",
+      "to": "[ts]",
+      "at": "2026-04-21T02:33:55Z",
+      "elapsed_seconds": 1454
+    },
+    {
+      "event": "refactor.ok",
+      "from": "[ts]",
+      "to": "[xx]",
+      "at": "2026-04-21T02:35:06Z",
+      "elapsed_seconds": 71
     }
   ],
-  "updated": "2026-04-21T01:21:38Z",
-  "bypassed": true,
-  "bypassed_reason": "escalation retries exhausted"
+  "updated": "2026-04-21T02:35:06Z",
+  "bypassed": false,
+  "completed_at": "2026-04-21T02:35:06Z",
+  "elapsed_seconds": 9692
 }
