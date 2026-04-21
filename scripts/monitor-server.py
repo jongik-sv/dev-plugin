@@ -1115,6 +1115,7 @@ def render_dashboard(model: dict) -> str:
 # ---------------------------------------------------------------------------
 
 _API_STATE_PATH = "/api/state"
+_AGENT_POOL_SCOPE_PREFIX = "agent-pool:"
 
 
 def _is_api_state_path(path: str) -> bool:
@@ -1133,6 +1134,11 @@ def _is_api_state_path(path: str) -> bool:
     return urlsplit(path).path == _API_STATE_PATH
 
 
+def _is_dataclass_instance(value: Any) -> bool:
+    """True iff *value* is a dataclass **instance** (not the class object)."""
+    return is_dataclass(value) and not isinstance(value, type)
+
+
 def _asdict_or_none(value):
     """Coerce dataclass / list[dataclass] / None / scalar for JSON-ready output.
 
@@ -1145,10 +1151,44 @@ def _asdict_or_none(value):
     if value is None:
         return None
     if isinstance(value, list):
-        return [asdict(x) if is_dataclass(x) and not isinstance(x, type) else x for x in value]
-    if is_dataclass(value) and not isinstance(value, type):
+        return [asdict(x) if _is_dataclass_instance(x) else x for x in value]
+    if _is_dataclass_instance(value):
         return asdict(value)
     return value
+
+
+def _now_iso_z() -> str:
+    """Current UTC time as ISO-8601 with ``Z`` suffix (seconds precision).
+
+    Example: ``"2026-04-30T10:30:00Z"``. Matches the ``generated_at`` contract
+    in TRD §4.1.
+    """
+    return (
+        datetime.now(timezone.utc)
+        .isoformat(timespec="seconds")
+        .replace("+00:00", "Z")
+    )
+
+
+def _classify_signal_scopes(
+    signals: Iterable[SignalEntry],
+) -> Tuple[List[SignalEntry], List[SignalEntry]]:
+    """Split signal entries into ``(shared_signals, agent_pool_signals)``.
+
+    - ``scope == "shared"`` → shared
+    - ``scope.startswith("agent-pool:")`` → agent pool
+    - anything else (unknown future scope) → shared (conservative fallback so
+      no entry is silently dropped — TSK-01-06 design §3).
+    """
+    shared: List[SignalEntry] = []
+    agent_pool: List[SignalEntry] = []
+    for sig in signals:
+        scope = getattr(sig, "scope", None) or ""
+        if scope.startswith(_AGENT_POOL_SCOPE_PREFIX):
+            agent_pool.append(sig)
+        else:
+            shared.append(sig)
+    return shared, agent_pool
 
 
 def _build_state_snapshot(
@@ -1165,12 +1205,8 @@ def _build_state_snapshot(
     code passes the module-level ``scan_tasks``/``scan_features``/``scan_signals``/
     ``list_tmux_panes`` functions directly.
 
-    Signal scope classification:
-
-    - ``scope == "shared"`` → ``shared_signals``
-    - ``scope.startswith("agent-pool:")`` → ``agent_pool_signals``
-    - anything else (unknown future scope) → ``shared_signals`` (conservative
-      fallback so no entry is silently dropped)
+    Signal scope classification is delegated to :func:`_classify_signal_scopes`
+    (see that helper for the conservative "unknown → shared" fallback).
 
     ``tmux_panes`` is preserved as ``None`` when the scanner signals "tmux not
     installed" so clients can distinguish it from the empty-list "no panes
@@ -1178,27 +1214,13 @@ def _build_state_snapshot(
     """
     tasks = list(scan_tasks(docs_dir) or [])
     features = list(scan_features(docs_dir) or [])
-    raw_signals = list(scan_signals() or [])
+    shared_signals, agent_pool_signals = _classify_signal_scopes(
+        scan_signals() or []
+    )
     panes = list_tmux_panes()
 
-    shared_signals: List[SignalEntry] = []
-    agent_pool_signals: List[SignalEntry] = []
-    for sig in raw_signals:
-        scope = getattr(sig, "scope", None) or ""
-        if scope.startswith("agent-pool:"):
-            agent_pool_signals.append(sig)
-        else:
-            # "shared" 및 미지의 scope 모두 보수적으로 shared 에 편입 — 드롭 금지.
-            shared_signals.append(sig)
-
-    generated_at = (
-        datetime.now(timezone.utc)
-        .isoformat(timespec="seconds")
-        .replace("+00:00", "Z")
-    )
-
     return {
-        "generated_at": generated_at,
+        "generated_at": _now_iso_z(),
         "project_root": project_root or "",
         "docs_dir": docs_dir or "",
         "wbs_tasks": _asdict_or_none(tasks),
@@ -1237,6 +1259,17 @@ def _json_error(handler, status: int, message: str) -> None:
     _json_response(handler, status, {"error": message, "code": status})
 
 
+def _server_attr(handler, name: str, default: str = "") -> str:
+    """Read ``handler.server.<name>`` defensively, returning a string.
+
+    Missing ``server`` attribute or missing/blank attribute value degrade to
+    *default*. Any non-string value is coerced via :func:`str`.
+    """
+    server = getattr(handler, "server", None)
+    value = getattr(server, name, default) or default
+    return str(value)
+
+
 def _handle_api_state(
     handler,
     *,
@@ -1254,13 +1287,10 @@ def _handle_api_state(
     All scanner exceptions are caught and mapped to a 500 JSON envelope; one
     line is logged to stderr so the server operator can see the failure.
     """
-    project_root = getattr(getattr(handler, "server", None), "project_root", "") or ""
-    docs_dir = getattr(getattr(handler, "server", None), "docs_dir", "") or ""
-
     try:
         payload = _build_state_snapshot(
-            project_root=str(project_root),
-            docs_dir=str(docs_dir),
+            project_root=_server_attr(handler, "project_root"),
+            docs_dir=_server_attr(handler, "docs_dir"),
             scan_tasks=scan_tasks,
             scan_features=scan_features,
             scan_signals=scan_signals,
