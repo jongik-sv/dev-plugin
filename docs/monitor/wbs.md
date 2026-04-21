@@ -368,7 +368,7 @@ monitor-server.py, python3
 - category: infrastructure
 - domain: infra
 - model: sonnet
-- status: [ ]
+- status: [dd]
 - priority: critical
 - assignee: -
 - schedule: 2026-05-01 ~ 2026-05-01
@@ -415,7 +415,7 @@ monitor-server.py, python3
 - category: infrastructure
 - domain: infra
 - model: sonnet
-- status: [ ]
+- status: [dd]
 - priority: medium
 - assignee: -
 - schedule: 2026-05-04 ~ 2026-05-04
