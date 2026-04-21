@@ -46,7 +46,7 @@ python3 ${CLAUDE_PLUGIN_ROOT}/scripts/graceful-shutdown.py \
 코드 리뷰는 WP 리더가 완료 전에 `/codex:review` 슬래시 명령(SlashCommand 도구 호출)으로 수행한다 (`wp-leader-cleanup.md` 참조). Skill 도구가 아니다.
 시그널 파일의 리뷰 항목을 확인한다:
 - **approve** / **needs-attention(수정됨)** → merge 진행
-- **스킵** (일부 Task 실패) → 시그널 내용의 실패 Task를 확인하고 사용자에게 보고 후 merge 여부 판단
+- **스킵** (일부 Task 실패/bypass) → 기본 정책(`on-fail=bypass`)이면 **자동 머지 진행** (bypass된 task도 의존성 충족으로 판정됨 → 머지 대상). 실패 Task 목록은 최종 요약 보고에 포함한다. `on-fail=strict`일 때만 머지 스킵하고 사용자 보고.
 
 ### 3. 머지 실행
 

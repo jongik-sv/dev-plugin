@@ -21,9 +21,9 @@ Skills delegate deterministic work to Python scripts (cross-platform: Mac/Linux/
 
 | Script | Purpose | Used by |
 |--------|---------|---------|
-| `scripts/wbs-parse.py` | WBS task/WP extraction + Feature state.json read (`--feat`) + complexity scoring (`--complexity`) → JSON. Prefers `state.json` over wbs.md status line when present. | dev, feat, dev-design/build/test/refactor, dev-team, wp-setup.py |
+| `scripts/wbs-parse.py` | WBS task/WP extraction + Feature state.json read (`--feat`) + complexity scoring (`--complexity`) + `--tasks-all` (flat list of every Task across all WPs, for graph-stats input) → JSON. Prefers `state.json` over wbs.md status line when present. | dev, feat, dev-design/build/test/refactor, dev-team, wbs, wp-setup.py |
 | `scripts/args-parse.py` | Argument parsing + source detection (wbs/feat) → JSON | dev, feat, dev-design/build/test/refactor, dev-team |
-| `scripts/dep-analysis.py` | Dependency level calculation (topological sort) → JSON | dev-team, agent-pool, team-mode |
+| `scripts/dep-analysis.py` | Dependency level calculation (topological sort) + `--graph-stats` mode for graph health metrics (max chain depth, fan-in, diamond patterns, review candidates) → JSON | dev-team, agent-pool, team-mode, wbs |
 | `scripts/signal-helper.py` | Atomic signal file create/check/wait | dev-team, team-mode, agent-pool, DDTR workers |
 | `scripts/wp-setup.py` | Worktree + prompt + tmux setup | dev-team |
 | `scripts/wbs-transition.py` | Permissive DFA transition engine. Writes sidecar `state.json` (source of truth), syncs wbs.md status line. Undefined events are no-ops that still log to `phase_history`. Handles legacy `[dd!]`/`[im!]` migration, feat `status.json`→`state.json` rename, and `bypass` meta-event (sets `bypassed: true` without changing status). | dev-design, dev-build, dev-test, dev-refactor, dev-team (bypass) |

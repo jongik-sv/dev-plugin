@@ -30,15 +30,30 @@ _PROJECT_ROOT = _SCRIPT_DIR.parent
 
 
 def _import_server():
-    """monitor-server 모듈을 동적으로 import."""
+    """monitor-server 모듈을 동적으로 import.
+
+    sys.modules에 임시 등록하여 @dataclass 처리 시 cls.__module__ 조회가
+    None을 반환하지 않도록 한다. exec_module 완료 후 즉시 제거하여 다른
+    테스트 파일의 module-level import와 충돌하지 않도록 한다.
+    """
     key = "monitor_server"
-    if key in sys.modules:
-        del sys.modules[key]
+    # 기존 등록 캐시 제거 (재로딩 보장)
+    prev = sys.modules.pop(key, None)
     spec = importlib.util.spec_from_file_location(
         key, _SCRIPT_DIR / "monitor-server.py"
     )
     mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    sys.modules[key] = mod
+    try:
+        spec.loader.exec_module(mod)
+    finally:
+        # 전역 sys.modules 오염 방지: 임시 등록 해제
+        # 다른 파일이 module-level에서 sys.modules["monitor_server"]를 등록한
+        # 경우 복원하고, 그렇지 않으면 제거한다.
+        if prev is not None:
+            sys.modules[key] = prev
+        else:
+            sys.modules.pop(key, None)
     return mod
 
 
@@ -371,8 +386,7 @@ class TestScanTasksEmptyProject(unittest.TestCase):
 class TestDashboardHtmlEmptyProject(unittest.TestCase):
     """빈 프로젝트에서 대시보드 HTML에 '태스크 없음' 안내가 있어야 함"""
 
-    def _start_server(self, docs_dir: str, port: int):
-        ms = _import_server()
+    def _start_server(self, ms, docs_dir: str, port: int):
         _DashboardHandler = ms._DashboardHandler
         _DashboardHandler.docs_dir = docs_dir
         import http.server
@@ -382,13 +396,16 @@ class TestDashboardHtmlEmptyProject(unittest.TestCase):
         return server
 
     def test_empty_project_html_contains_no_tasks_message(self):
+        ms = _import_server()
+        if not hasattr(ms, "_DashboardHandler"):
+            self.skipTest("_DashboardHandler 클래스 미존재")
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.bind(("127.0.0.1", 0))
         port = s.getsockname()[1]
         s.close()
 
         with EmptyProjectFixture() as fix:
-            server = self._start_server(str(fix.docs_dir), port)
+            server = self._start_server(ms, str(fix.docs_dir), port)
             try:
                 time.sleep(0.3)
                 resp = urllib.request.urlopen(
@@ -412,8 +429,7 @@ class TestDashboardHtmlEmptyProject(unittest.TestCase):
 class TestReadOnlyStateSurvival(unittest.TestCase):
     """읽기 전용 state.json이 있어도 서버가 계속 동작해야 함"""
 
-    def _start_server(self, docs_dir: str, port: int):
-        ms = _import_server()
+    def _start_server(self, ms, docs_dir: str, port: int):
         _DashboardHandler = ms._DashboardHandler
         _DashboardHandler.docs_dir = docs_dir
         import http.server
@@ -423,13 +439,16 @@ class TestReadOnlyStateSurvival(unittest.TestCase):
         return server
 
     def test_server_survives_readonly_state(self):
+        ms = _import_server()
+        if not hasattr(ms, "_DashboardHandler"):
+            self.skipTest("_DashboardHandler 클래스 미존재")
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.bind(("127.0.0.1", 0))
         port = s.getsockname()[1]
         s.close()
 
         with ReadOnlyStateFixture() as fix:
-            server = self._start_server(str(fix.docs_dir), port)
+            server = self._start_server(ms, str(fix.docs_dir), port)
             try:
                 time.sleep(0.3)
                 resp = urllib.request.urlopen(

@@ -18,6 +18,7 @@ Modes:
   --field <name>         Single field value
   --tasks                WP child Task list (JSON array)
   --tasks-pending        WP child incomplete Tasks only (status != [xx])
+  --tasks-all            All Tasks across every WP (flat array, no target_id)
   --resumable-wps        Executable WP list (WPs with incomplete Tasks)
   --phase-start          Start phase based on Task's current status
   --dev-config           Extract ## Dev Config section as JSON
@@ -34,6 +35,7 @@ Examples:
   wbs-parse.py docs/wbs.md TSK-01-02 --block
   wbs-parse.py docs/wbs.md TSK-01-02 --field domain
   wbs-parse.py docs/wbs.md WP-01 --tasks
+  wbs-parse.py docs/wbs.md --tasks-all
   wbs-parse.py docs/wbs.md - --resumable-wps
   wbs-parse.py docs/wbs.md TSK-01-02 --phase-start
   wbs-parse.py docs/wbs.md - --dev-config
@@ -744,9 +746,17 @@ def main():
         sys.exit(1)
 
     wbs_path = sys.argv[1]
-    target_id = sys.argv[2]
-    mode = sys.argv[3] if len(sys.argv) > 3 else "--json"
-    field_name = sys.argv[4] if mode == "--field" and len(sys.argv) > 4 else None
+    # Accept whole-WBS modes that don't need a target_id (e.g. --tasks-all).
+    # Convention so far: argv[2] is a TSK/WP id, or "-" as placeholder for
+    # modes like --dev-config. We now also allow argv[2] to be a flag itself.
+    if sys.argv[2].startswith("--"):
+        target_id = None
+        mode = sys.argv[2]
+        field_name = sys.argv[3] if mode == "--field" and len(sys.argv) > 3 else None
+    else:
+        target_id = sys.argv[2]
+        mode = sys.argv[3] if len(sys.argv) > 3 else "--json"
+        field_name = sys.argv[4] if mode == "--field" and len(sys.argv) > 4 else None
 
     if mode == "--field" and not field_name:
         print("ERROR: --field requires a field name", file=sys.stderr)
@@ -819,6 +829,21 @@ def main():
         docs_dir = os.path.dirname(wbs_path)
         _enrich_tasks_with_state(tasks, docs_dir)
         print(json.dumps(tasks, ensure_ascii=False, indent=2))
+
+    # -- All tasks in the whole WBS (flat list, all WPs) --
+    elif mode == "--tasks-all":
+        all_tasks = []
+        docs_dir = os.path.dirname(wbs_path)
+        # Split WBS into per-WP blocks and parse each
+        wp_headers = list(re.finditer(r'^##\s+(WP-\d+):', wbs_text, re.MULTILINE))
+        for idx, m in enumerate(wp_headers):
+            start = m.start()
+            end = wp_headers[idx + 1].start() if idx + 1 < len(wp_headers) else len(wbs_text)
+            wp_block = wbs_text[start:end]
+            tasks = parse_tasks_from_wp(wp_block, pending_only=False)
+            all_tasks.extend(tasks)
+        _enrich_tasks_with_state(all_tasks, docs_dir)
+        print(json.dumps(all_tasks, ensure_ascii=False, indent=2))
 
     # -- WP child tasks (pending only) --
     elif mode == "--tasks-pending":

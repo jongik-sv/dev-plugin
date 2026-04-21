@@ -610,6 +610,78 @@ monitor-server.py, python3
 - data-model: -
 - ui-spec: -
 
+### TSK-03-03: test_qa_fixtures 하네스 회귀 수정 (DEFECT-4 후속)
+- category: development
+- domain: backend
+- model: sonnet
+- status: [ts]
+- priority: high
+- assignee: -
+- schedule: 2026-04-21 ~ 2026-04-21
+- tags: test, harness, regression
+- depends: TSK-01-09
+- blocked-by: -
+- entry-point: scripts/test_qa_fixtures.py
+- note: TSK-03-02 QA 재검증에서 발견된 DEFECT-4. 현재 25 tests 중 11 errors. 원인 1) `_import_server()`가 모듈을 `sys.modules`에 등록하지 않아 `@dataclass SignalEntry` 평가 시 `sys.modules.get(cls.__module__)`이 None → `AttributeError: 'NoneType' object has no attribute '__dict__'`. 원인 2) `monitor-server.py`의 `parse_args` 함수가 `build_arg_parser`로 리네임되었으나 하네스가 구명칭을 참조.
+
+#### PRD 요구사항
+- prd-ref: TRD §10.3 (하네스 유지보수)
+- requirements:
+  - `_import_server()` 수정: `importlib.util.module_from_spec` 이후 `sys.modules[name] = module`로 등록한 뒤 `spec.loader.exec_module(mod)` 실행
+  - `parse_args` 호출부를 `build_arg_parser().parse_args([...])`로 전환하거나, `monitor-server.py`에 `parse_args` alias 추가
+  - 25 tests 전부 pass — 회귀 없이 monitor 전체 240+25 통과
+- acceptance:
+  - `python3 scripts/test_qa_fixtures.py` → OK (errors=0, failures=0)
+  - `python3 -m unittest discover -s scripts -p "test_monitor*.py" -v` → 기존 240건 회귀 없음
+- constraints:
+  - monitor-server.py 공개 API 변경 최소화 (alias 수준)
+  - 하네스 의존성(stdlib only) 유지
+
+#### 기술 스펙 (TRD)
+- tech-spec:
+  - `importlib.util` 정석 로딩 패턴 적용
+  - `unittest` 표준 러너, 추가 의존성 없음
+- api-spec: -
+- data-model: -
+- ui-spec: -
+
+### TSK-03-04: 플랫폼 매트릭스 검증 (Linux/WSL2/Windows psmux)
+- category: infrastructure
+- domain: infra
+- model: sonnet
+- status: [ ]
+- priority: medium
+- assignee: -
+- schedule: 2026-05-07 ~ 2026-05-08
+- tags: qa, cross-platform, manual-test
+- depends: TSK-03-02, TSK-03-03
+- blocked-by: -
+- entry-point: -
+- note: TSK-03-02는 macOS만 Pass 완료. 나머지 3개 플랫폼(Linux, WSL2, Windows psmux) 검증을 분리 실행.
+
+#### PRD 요구사항
+- prd-ref: PRD §7 P4, TRD §10.2
+- requirements:
+  - Linux(Ubuntu 22.04+)에서 QA 5시나리오 + `detect_mux()` + `capture-pane` 확인
+  - WSL2에서 QA 5시나리오 + `/tmp` 시그널 경로 정상 동작 확인
+  - Windows native + psmux 조합에서 `detect_mux()` 인식 + `capture-pane` 동작 확인
+  - 결과를 `docs/monitor/qa-report.md`의 "플랫폼 매트릭스" 섹션에 추가 기록
+- acceptance:
+  - 최소 Linux Pass (필수)
+  - WSL2, Windows psmux는 환경 제약 시 "미검증" 명시 허용 (PRD §7 P4 정책 일치)
+  - 발견된 플랫폼별 결함은 별도 WBS Task로 분리
+- constraints:
+  - QA Read-Only 제약 유지 (state.json·wbs.md·시그널 파일 수정 금지)
+
+#### 기술 스펙 (TRD)
+- tech-spec:
+  - Linux/WSL2: native tmux
+  - Windows: psmux (tmux alias)
+  - `curl`, `lsof`(Linux/WSL2), `Get-Process`(Windows PowerShell)
+- api-spec: -
+- data-model: -
+- ui-spec: -
+
 ---
 
 ## 태스크 의존도 그래프

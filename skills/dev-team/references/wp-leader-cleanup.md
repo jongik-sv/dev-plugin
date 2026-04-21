@@ -73,7 +73,18 @@ done
 
    `REVIEW_STATUS`를 리뷰 결과에 맞춰 기록한다: `approve` | `needs-attention(수정됨)` | `needs-attention(수정실패-롤백)`.
 
-3. **팀리더에게 완료 보고** (시그널 파일, **절대 경로 사용**):
+3. **브라우저 visible 검증 (brw-test)**:
+
+   헤드리스 측정만으로 완료 보고 금지. `references/browser-verify.md` 을 Read하여 절차대로 수행한다:
+   - Pre-flight: `pkill -f 'user-data-dir=.*mcp-chrome-'` 로 잔존 Chrome 정리 (profile lock 방지)
+   - `mcp__plugin_playwright_playwright__*` MCP 사용 (ecc extension MCP는 확장 필요로 이 환경 불가)
+   - 구현한 주요 컴포넌트/페이지를 실제 렌더링 후 screenshot + `document.styleSheets` 로드 확인
+   - Screenshot은 `docs/tasks/{TSK-ID}/screenshots/` 에 저장
+   - NG 판정 시 완료 보고 전에 원인 수정 또는 사용자 에스컬레이션
+
+   결과는 `BRW_TEST_RESULT` 변수에 기록한다 (`OK — ...` 또는 `NG — ...`).
+
+4. **팀리더에게 완료 보고** (시그널 파일, **절대 경로 사용**):
    > 시그널 파일 이름은 `{WT_NAME}.done`
 
    **모든 Task 성공 시**:
@@ -84,6 +95,7 @@ done
    - 테스트: {통과 수}/{전체 수}
    - 리뷰: {REVIEW_STATUS — approve | needs-attention(수정됨) | needs-attention(수정실패-롤백) | 스킵 (/codex:review 미설치) | 스킵 (Task 실패)}
    - 커밋: {최신 커밋 해시}
+   - brw-test: {BRW_TEST_RESULT — OK 또는 NG, screenshot 경로 + styleSheets 수 + 콘솔 error 요약}
    - 특이사항: {있으면 기록, 없으면 "없음"}
    EOF
    mv {SHARED_SIGNAL_DIR}/{WT_NAME}.done.tmp {SHARED_SIGNAL_DIR}/{WT_NAME}.done
@@ -104,7 +116,9 @@ done
    > ⚠️ `{SHARED_SIGNAL_DIR}`은 팀리더가 프롬프트에 포함시킨 절대 경로이다. 상대 경로(`../.signals/`) 사용 금지.
    > ⚠️ 실패 Task가 있더라도 반드시 `.done` 시그널을 생성하라. 팀리더가 무한 대기하는 것을 방지한다.
 
-5. **리더 자신 종료**: 위 Worker 종료 완료 확인 후 종료
+5. **브라우저 tab 종료**: `mcp__plugin_playwright_playwright__browser_close` 호출 (Chrome 프로세스는 MCP가 유지, 다음 WP의 Pre-flight pkill에서 처리)
+
+6. **리더 자신 종료**: 위 Worker 종료 완료 확인 후 종료
 
 **⚠️ 금지사항**:
 - 시그널 파일 생성 후 추가 입력을 기다리지 마라
