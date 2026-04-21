@@ -22,16 +22,19 @@ HTTP 레이어와 독립적인 순수 함수만 배치하므로 병렬·후행 T
 from __future__ import annotations
 
 import glob
+import html
 import json
 import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field, is_dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+from urllib.parse import urlsplit
 
 
 # ---------------------------------------------------------------------------
@@ -630,13 +633,653 @@ def scan_features(docs_dir: Path) -> List[WorkItem]:
 
 
 # ---------------------------------------------------------------------------
+# HTML dashboard rendering (TSK-01-04)
+# ---------------------------------------------------------------------------
+
+_DEFAULT_REFRESH_SECONDS = 3
+_PHASES_SECTION_LIMIT = 10
+_RAW_ERROR_TITLE_CAP = 200
+_SECTION_ANCHORS = ("wbs", "features", "team", "subagents", "phases")
+
+# Mapping from agent-pool signal ``kind`` to badge CSS class. Module-level so
+# the ``_section_subagents`` loop does not rebuild the dict per row.
+_SUBAGENT_BADGE_CSS = {
+    "running": "badge-run",
+    "done": "badge-xx",
+    "failed": "badge-fail",
+    "bypassed": "badge-bypass",
+}
+
+# Status → (emoji, label, css_class) for the non-override branch of
+# ``_status_badge``. The bypass/failed/running overrides stay inline in the
+# function because they depend on boolean flags, not ``status``.
+_STATUS_BADGE_MAP = {
+    "[dd]": ("🔵", "DESIGN", "badge-dd"),
+    "[im]": ("🟣", "BUILD", "badge-im"),
+    "[ts]": ("🟢", "TEST", "badge-ts"),
+    "[xx]": ("✅", "DONE", "badge-xx"),
+}
+_STATUS_BADGE_DEFAULT = ("⚪", "PENDING", "badge-pending")
+
+
+DASHBOARD_CSS = """
+:root {
+  --bg: #0d1117;
+  --fg: #e6edf3;
+  --muted: #8b949e;
+  --border: #30363d;
+  --panel: #161b22;
+  --accent: #58a6ff;
+  --warn: #f85149;
+  --blue: #388bfd;
+  --purple: #bc8cff;
+  --green: #3fb950;
+  --gray: #8b949e;
+  --orange: #d29922;
+  --red: #f85149;
+  --yellow: #e3b341;
+  --light-gray: #6e7681;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  padding: 1.25rem 1.5rem;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  background: var(--bg);
+  color: var(--fg);
+  line-height: 1.5;
+}
+h1 { font-size: 1.25rem; margin: 0 0 0.5rem; }
+h2 { font-size: 1.05rem; margin: 0 0 0.75rem; border-bottom: 1px solid var(--border); padding-bottom: 0.25rem; }
+dl.meta { display: grid; grid-template-columns: max-content 1fr; gap: 0.25rem 1rem; margin: 0; }
+dl.meta dt { color: var(--muted); }
+dl.meta dd { margin: 0; }
+.top-nav { margin: 0.5rem 0 1rem; padding: 0.25rem 0; border-bottom: 1px solid var(--border); }
+.top-nav a { color: var(--accent); margin-right: 1rem; text-decoration: none; }
+.top-nav a:hover { text-decoration: underline; }
+section { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 1rem; margin-bottom: 1rem; }
+details { margin-bottom: 0.5rem; }
+details summary { cursor: pointer; color: var(--accent); font-weight: 600; padding: 0.25rem 0; }
+.task-row { display: grid; grid-template-columns: 9rem 8rem 1fr 6rem 4rem 1.5rem; gap: 0.5rem; align-items: center; padding: 0.25rem 0.5rem; border-bottom: 1px dashed var(--border); font-size: 0.92rem; }
+.task-row:last-child { border-bottom: none; }
+.task-row .id { color: var(--muted); font-family: "SFMono-Regular", Consolas, monospace; }
+.task-row .title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task-row .elapsed, .task-row .retry { color: var(--muted); font-size: 0.85rem; font-family: "SFMono-Regular", Consolas, monospace; }
+.badge { display: inline-block; padding: 0.1rem 0.5rem; border-radius: 10px; font-size: 0.78rem; font-weight: 600; letter-spacing: 0.02em; }
+.badge-dd { background: rgba(56,139,253,0.15); color: var(--blue); border: 1px solid var(--blue); }
+.badge-im { background: rgba(188,140,255,0.15); color: var(--purple); border: 1px solid var(--purple); }
+.badge-ts { background: rgba(63,185,80,0.15); color: var(--green); border: 1px solid var(--green); }
+.badge-xx { background: rgba(139,148,158,0.15); color: var(--gray); border: 1px solid var(--gray); }
+.badge-run { background: rgba(210,153,34,0.15); color: var(--orange); border: 1px solid var(--orange); animation: pulse 1.5s ease-in-out infinite; }
+.badge-fail { background: rgba(248,81,73,0.15); color: var(--red); border: 1px solid var(--red); }
+.badge-bypass { background: rgba(227,179,65,0.15); color: var(--yellow); border: 1px solid var(--yellow); }
+.badge-pending { background: rgba(110,118,129,0.15); color: var(--light-gray); border: 1px solid var(--light-gray); }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.55; } }
+.warn { color: var(--warn); font-weight: 600; }
+.empty { color: var(--muted); font-style: italic; }
+.info { color: var(--muted); font-size: 0.9rem; }
+.pane-link { color: var(--accent); text-decoration: none; margin-left: 0.5rem; }
+.pane-link:hover { text-decoration: underline; }
+.pane-row { padding: 0.25rem 0.5rem; border-bottom: 1px dashed var(--border); font-size: 0.9rem; }
+.pane-row:last-child { border-bottom: none; }
+ol.phase-list { margin: 0; padding-left: 1.25rem; }
+ol.phase-list li { margin-bottom: 0.25rem; font-size: 0.88rem; font-family: "SFMono-Regular", Consolas, monospace; }
+"""
+
+
+def _esc(value) -> str:
+    """Safely HTML-escape any value (coerce to str, quote=True)."""
+    if value is None:
+        return ""
+    return html.escape(str(value), quote=True)
+
+
+def _refresh_seconds(model: dict) -> int:
+    raw = model.get("refresh_seconds", _DEFAULT_REFRESH_SECONDS)
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return _DEFAULT_REFRESH_SECONDS
+    if value < 1:
+        return _DEFAULT_REFRESH_SECONDS
+    return value
+
+
+def _signal_set(signals: Optional[Iterable], kind: str) -> set:
+    """Return set of task_ids for signals whose ``kind`` matches."""
+    if not signals:
+        return set()
+    result = set()
+    for sig in signals:
+        sig_kind = getattr(sig, "kind", None)
+        sig_task = getattr(sig, "task_id", None)
+        if sig_kind == kind and sig_task:
+            result.add(sig_task)
+    return result
+
+
+def _format_elapsed(item) -> str:
+    """Return HH:MM:SS if elapsed_seconds is numeric, else ``"-"``."""
+    elapsed = getattr(item, "elapsed_seconds", None)
+    if elapsed is None:
+        return "-"
+    try:
+        total = int(float(elapsed))
+    except (TypeError, ValueError):
+        return "-"
+    if total < 0:
+        return "-"
+    hours, rem = divmod(total, 3600)
+    minutes, seconds = divmod(rem, 60)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+
+def _retry_count(item) -> int:
+    """Count ``*.fail`` events in phase_history_tail."""
+    tail = getattr(item, "phase_history_tail", None) or []
+    count = 0
+    for entry in tail:
+        event = getattr(entry, "event", None)
+        if isinstance(event, str) and event.endswith(".fail"):
+            count += 1
+    return count
+
+
+def _status_badge(status: Optional[str], bypassed: bool, running: bool, failed: bool) -> str:
+    """Render a status badge span with priority: bypass > failed > running > status."""
+    if bypassed:
+        emoji, label, css = "🟡", "BYPASSED", "badge-bypass"
+    elif failed:
+        emoji, label, css = "🔴", "FAILED", "badge-fail"
+    elif running:
+        emoji, label, css = "🟠", "RUNNING", "badge-run"
+    else:
+        emoji, label, css = _STATUS_BADGE_MAP.get(status or "", _STATUS_BADGE_DEFAULT)
+    return f'<span class="badge {css}">{emoji} {_esc(label)}</span>'
+
+
+def _group_preserving_order(
+    items: Iterable,
+    key: Callable[[Any], str],
+) -> Tuple[Dict[str, list], List[str]]:
+    """Group ``items`` by ``key(item)``, preserving first-seen order.
+
+    Returns ``(groups, order)`` — ``groups[k]`` is the list of items with that
+    key, and ``order`` is the keys in first-seen order. Callers that previously
+    duplicated this bookkeeping (``_section_wbs``, ``_section_team``,
+    ``_section_subagents``) share the same implementation here.
+    """
+    groups: Dict[str, list] = {}
+    order: List[str] = []
+    for item in items:
+        k = key(item)
+        if k not in groups:
+            groups[k] = []
+            order.append(k)
+        groups[k].append(item)
+    return groups, order
+
+
+def _section_wrap(anchor: str, heading: str, body: str) -> str:
+    """Return a standard ``<section id="{anchor}">`` block with <h2> and body."""
+    return (
+        f'<section id="{anchor}">\n  <h2>{heading}</h2>\n'
+        f'{body}\n'
+        '</section>'
+    )
+
+
+def _empty_section(anchor: str, heading: str, message: str, css: str = "empty") -> str:
+    """Render a standard empty-state section (``.empty`` or ``.info`` variant)."""
+    return _section_wrap(anchor, heading, f'  <p class="{css}">{message}</p>')
+
+
+def _section_header(model: dict) -> str:
+    """Header section: project meta + top navigation (orphan-endpoint guard)."""
+    generated_at = _esc(model.get("generated_at"))
+    project_root = _esc(model.get("project_root"))
+    docs_dir = _esc(model.get("docs_dir"))
+    nav_links = "\n    ".join(
+        f'<a href="#{anchor}">{anchor.title()}</a>' for anchor in _SECTION_ANCHORS
+    )
+    return (
+        '<section id="header">\n'
+        '  <h1>dev-plugin Monitor</h1>\n'
+        '  <dl class="meta">\n'
+        f'    <dt>generated_at</dt><dd>{generated_at}</dd>\n'
+        f'    <dt>project_root</dt><dd>{project_root}</dd>\n'
+        f'    <dt>docs_dir</dt><dd>{docs_dir}</dd>\n'
+        '  </dl>\n'
+        '  <nav class="top-nav">\n'
+        f'    {nav_links}\n'
+        '  </nav>\n'
+        '</section>'
+    )
+
+
+def _render_task_row(item, running_ids: set, failed_ids: set) -> str:
+    """Render a single <div class="task-row"> for a WorkItem.
+
+    The row always has 6 cells (id, status|warn, title, elapsed, retry, flag).
+    When ``raw_error`` is present the status cell becomes a ⚠️ warn link; all
+    other cells stay identical between the two branches.
+    """
+    item_id = getattr(item, "id", None)
+    is_running = item_id in running_ids if item_id else False
+    is_failed = item_id in failed_ids if item_id else False
+    bypassed = bool(getattr(item, "bypassed", False))
+    status = getattr(item, "status", None)
+    raw_error = getattr(item, "raw_error", None)
+    title = getattr(item, "title", None)
+
+    id_html = f'<span class="id">{_esc(item_id)}</span>'
+    title_html = f'<span class="title">{_esc(title) if title else ""}</span>'
+    elapsed_html = f'<span class="elapsed">{_esc(_format_elapsed(item))}</span>'
+    retry_html = f'<span class="retry">×{_retry_count(item)}</span>'
+    flag_html = '<span title="bypassed">🟡</span>' if bypassed else '<span></span>'
+
+    if raw_error:
+        raw_preview = _esc(str(raw_error)[:_RAW_ERROR_TITLE_CAP])
+        status_cell = (
+            f'<span class="warn" title="{raw_preview}">⚠️ '
+            f'<a href="#" class="raw-link" title="{raw_preview}">raw</a></span>'
+        )
+    else:
+        status_cell = _status_badge(status, bypassed, is_running, is_failed)
+
+    return (
+        '<div class="task-row">\n'
+        f'  {id_html}\n  {status_cell}\n  {title_html}\n'
+        f'  {elapsed_html}\n  {retry_html}\n  {flag_html}\n'
+        '</div>'
+    )
+
+
+def _section_wbs(tasks, running_ids: set, failed_ids: set) -> str:
+    """WBS section: tasks grouped by WP (<details> per WP)."""
+    if not tasks:
+        return _empty_section("wbs", "WBS Tasks", "no tasks found — docs/tasks/ is empty")
+
+    groups, order = _group_preserving_order(
+        tasks, lambda item: getattr(item, "wp_id", None) or "WP-unknown"
+    )
+
+    blocks: List[str] = []
+    for wp in order:
+        rows = "\n".join(
+            _render_task_row(item, running_ids, failed_ids) for item in groups[wp]
+        )
+        blocks.append(
+            '<details open>\n'
+            f'  <summary>{_esc(wp)} ({len(groups[wp])} tasks)</summary>\n'
+            f'{rows}\n'
+            '</details>'
+        )
+
+    return _section_wrap("wbs", "WBS Tasks", "\n".join(blocks))
+
+
+def _section_features(features, running_ids: set, failed_ids: set) -> str:
+    """Feature section: same rendering as tasks, flat list (no WP grouping)."""
+    if not features:
+        return _empty_section(
+            "features", "Features", "no features found — docs/features/ is empty"
+        )
+    rows = "\n".join(
+        _render_task_row(item, running_ids, failed_ids) for item in features
+    )
+    return _section_wrap("features", "Features", rows)
+
+
+def _render_pane_row(pane) -> str:
+    """Render a single ``<div class="pane-row">`` for a tmux pane."""
+    pane_id_esc = _esc(getattr(pane, "pane_id", ""))
+    pane_idx = _esc(getattr(pane, "pane_index", ""))
+    cmd = _esc(getattr(pane, "pane_current_command", ""))
+    pid = _esc(getattr(pane, "pane_pid", ""))
+    return (
+        '<div class="pane-row">\n'
+        f'  <span class="id">{pane_id_esc}</span>'
+        f' <span class="elapsed">#{pane_idx} {cmd} (pid {pid})</span>'
+        f' <a class="pane-link" href="/pane/{pane_id_esc}">[show output]</a>\n'
+        '</div>'
+    )
+
+
+def _section_team(panes) -> str:
+    """Team section: tmux panes + pane-output entry links (orphan-endpoint guard)."""
+    if panes is None:
+        return _empty_section(
+            "team",
+            "Team Agents (tmux)",
+            "tmux not available on this host — Team section shows no data,"
+            " other sections work normally.",
+            css="info",
+        )
+    if not panes:
+        return _empty_section("team", "Team Agents (tmux)", "no tmux panes running")
+
+    groups, order = _group_preserving_order(
+        panes, lambda pane: getattr(pane, "window_name", None) or "(unnamed)"
+    )
+
+    blocks: List[str] = []
+    for window_name in order:
+        rows = "\n".join(_render_pane_row(pane) for pane in groups[window_name])
+        blocks.append(
+            '<details open>\n'
+            f'  <summary>{_esc(window_name)} ({len(groups[window_name])} panes)</summary>\n'
+            f'{rows}\n'
+            '</details>'
+        )
+
+    return _section_wrap("team", "Team Agents (tmux)", "\n".join(blocks))
+
+
+_SUBAGENT_INFO = (
+    '<p class="info">agent-pool subagents run inside the parent Claude session'
+    ' — output capture is unavailable (signals only).</p>'
+)
+
+
+def _render_subagent_row(sig) -> str:
+    """Render a single agent-pool slot row."""
+    kind = getattr(sig, "kind", "")
+    task_id = getattr(sig, "task_id", "")
+    mtime = getattr(sig, "mtime", "")
+    css = _SUBAGENT_BADGE_CSS.get(kind, "badge-pending")
+    return (
+        '<div class="pane-row">\n'
+        f'  <span class="id">{_esc(task_id)}</span>'
+        f' <span class="badge {css}">{_esc(kind if kind else "?")}</span>'
+        f' <span class="elapsed">{_esc(mtime)}</span>\n'
+        '</div>'
+    )
+
+
+def _section_subagents(signals) -> str:
+    """Subagent section: agent-pool signal slots grouped by scope."""
+    if not signals:
+        return _section_wrap(
+            "subagents",
+            "Subagents (agent-pool)",
+            f'  {_SUBAGENT_INFO}\n  <p class="empty">no agent-pool signals</p>',
+        )
+
+    groups, order = _group_preserving_order(
+        signals, lambda sig: getattr(sig, "scope", None) or "agent-pool:unknown"
+    )
+
+    blocks: List[str] = []
+    for scope in order:
+        rows = "\n".join(_render_subagent_row(sig) for sig in groups[scope])
+        blocks.append(
+            '<details open>\n'
+            f'  <summary>{_esc(scope)} ({len(groups[scope])} slots)</summary>\n'
+            f'{rows}\n'
+            '</details>'
+        )
+
+    return _section_wrap(
+        "subagents",
+        "Subagents (agent-pool)",
+        f'  {_SUBAGENT_INFO}\n{chr(10).join(blocks)}',
+    )
+
+
+def _section_phase_history(tasks, features) -> str:
+    """Phase-history section: most recent events across tasks+features (cap 10)."""
+    collected: list = []
+    for item in list(tasks or []) + list(features or []):
+        tail = getattr(item, "phase_history_tail", None) or []
+        for entry in tail:
+            collected.append((getattr(item, "id", "?"), entry))
+
+    collected.sort(key=lambda pair: getattr(pair[1], "at", "") or "", reverse=True)
+    top = collected[:_PHASES_SECTION_LIMIT]
+
+    if not top:
+        return _empty_section("phases", "Recent Phase History", "no phase history yet")
+
+    items = []
+    for item_id, entry in top:
+        at = _esc(getattr(entry, "at", ""))
+        event = _esc(getattr(entry, "event", ""))
+        from_s = _esc(getattr(entry, "from_status", ""))
+        to_s = _esc(getattr(entry, "to_status", ""))
+        elapsed = getattr(entry, "elapsed_seconds", None)
+        elapsed_str = _esc(elapsed if elapsed is not None else "-")
+        items.append(
+            f'  <li>{at} · {_esc(item_id)} · {event} · {from_s} → {to_s}'
+            f' · {elapsed_str}s</li>'
+        )
+
+    return _section_wrap(
+        "phases",
+        "Recent Phase History",
+        '  <ol class="phase-list">\n' + "\n".join(items) + "\n  </ol>",
+    )
+
+
+def render_dashboard(model: dict) -> str:
+    """Render the full monitor dashboard HTML document (TSK-01-04).
+
+    See ``docs/monitor/tasks/TSK-01-04/design.md`` for the full contract. All
+    user-derived strings flow through ``html.escape`` (via ``_esc``) before
+    being concatenated into the output. No external CDN/font/script is
+    referenced — only inline CSS.
+
+    The returned string is a complete ``<!DOCTYPE html>`` document. The
+    ``MonitorHandler`` (future TSK-01-01 integration) is expected to UTF-8
+    encode the bytes and serve them with ``Content-Type: text/html; charset=utf-8``.
+    """
+    if not isinstance(model, dict):
+        model = {}
+
+    refresh = _refresh_seconds(model)
+    shared_signals = model.get("shared_signals") or []
+    running_ids = _signal_set(shared_signals, "running")
+    failed_ids = _signal_set(shared_signals, "failed")
+
+    tasks = model.get("wbs_tasks") or []
+    features = model.get("features") or []
+
+    sections = [
+        _section_header(model),
+        _section_wbs(tasks, running_ids, failed_ids),
+        _section_features(features, running_ids, failed_ids),
+        _section_team(model.get("tmux_panes")),
+        _section_subagents(model.get("agent_pool_signals") or []),
+        _section_phase_history(tasks, features),
+    ]
+    body = "\n".join(sections)
+
+    return (
+        '<!DOCTYPE html>\n'
+        '<html lang="en">\n'
+        '<head>\n'
+        '  <meta charset="utf-8">\n'
+        f'  <meta http-equiv="refresh" content="{refresh}">\n'
+        '  <title>dev-plugin Monitor</title>\n'
+        f'  <style>{DASHBOARD_CSS}</style>\n'
+        '</head>\n'
+        '<body>\n'
+        f'{body}\n'
+        '</body>\n'
+        '</html>\n'
+    )
+
+
+# ---------------------------------------------------------------------------
+# /api/state JSON snapshot endpoint (TSK-01-06)
+# ---------------------------------------------------------------------------
+
+_API_STATE_PATH = "/api/state"
+
+
+def _is_api_state_path(path: str) -> bool:
+    """Return True iff *path* matches ``/api/state`` exactly (query allowed).
+
+    - ``"/api/state"`` → True
+    - ``"/api/state?pretty=1"`` → True
+    - ``"/api/state/"`` → False (trailing slash is not the same route)
+    - ``"/api/statey"`` / ``"/api/pane/%1"`` / ``"/"`` → False
+
+    Matching uses :func:`urllib.parse.urlsplit` so the query string is stripped
+    before the equality comparison.
+    """
+    if not isinstance(path, str):
+        return False
+    return urlsplit(path).path == _API_STATE_PATH
+
+
+def _asdict_or_none(value):
+    """Coerce dataclass / list[dataclass] / None / scalar for JSON-ready output.
+
+    - ``None`` → ``None`` (keeps the ``tmux_panes == null`` acceptance case)
+    - ``list`` → new list where every dataclass element is expanded with
+      :func:`dataclasses.asdict`, non-dataclass elements pass through.
+    - single dataclass → ``asdict(value)``
+    - anything else (str/int/dict/...) → returned unchanged
+    """
+    if value is None:
+        return None
+    if isinstance(value, list):
+        return [asdict(x) if is_dataclass(x) and not isinstance(x, type) else x for x in value]
+    if is_dataclass(value) and not isinstance(value, type):
+        return asdict(value)
+    return value
+
+
+def _build_state_snapshot(
+    project_root: str,
+    docs_dir: str,
+    scan_tasks: Callable[[Any], List[WorkItem]],
+    scan_features: Callable[[Any], List[WorkItem]],
+    scan_signals: Callable[[], List[SignalEntry]],
+    list_tmux_panes: Callable[[], Optional[List[PaneInfo]]],
+) -> dict:
+    """Build the dict that becomes the /api/state response body.
+
+    The scanner callables are injected so unit tests can supply stubs. Production
+    code passes the module-level ``scan_tasks``/``scan_features``/``scan_signals``/
+    ``list_tmux_panes`` functions directly.
+
+    Signal scope classification:
+
+    - ``scope == "shared"`` → ``shared_signals``
+    - ``scope.startswith("agent-pool:")`` → ``agent_pool_signals``
+    - anything else (unknown future scope) → ``shared_signals`` (conservative
+      fallback so no entry is silently dropped)
+
+    ``tmux_panes`` is preserved as ``None`` when the scanner signals "tmux not
+    installed" so clients can distinguish it from the empty-list "no panes
+    running" case (TSK-01-06 acceptance 2).
+    """
+    tasks = list(scan_tasks(docs_dir) or [])
+    features = list(scan_features(docs_dir) or [])
+    raw_signals = list(scan_signals() or [])
+    panes = list_tmux_panes()
+
+    shared_signals: List[SignalEntry] = []
+    agent_pool_signals: List[SignalEntry] = []
+    for sig in raw_signals:
+        scope = getattr(sig, "scope", None) or ""
+        if scope.startswith("agent-pool:"):
+            agent_pool_signals.append(sig)
+        else:
+            # "shared" 및 미지의 scope 모두 보수적으로 shared 에 편입 — 드롭 금지.
+            shared_signals.append(sig)
+
+    generated_at = (
+        datetime.now(timezone.utc)
+        .isoformat(timespec="seconds")
+        .replace("+00:00", "Z")
+    )
+
+    return {
+        "generated_at": generated_at,
+        "project_root": project_root or "",
+        "docs_dir": docs_dir or "",
+        "wbs_tasks": _asdict_or_none(tasks),
+        "features": _asdict_or_none(features),
+        "shared_signals": _asdict_or_none(shared_signals),
+        "agent_pool_signals": _asdict_or_none(agent_pool_signals),
+        "tmux_panes": _asdict_or_none(panes),
+    }
+
+
+def _json_response(handler, status: int, payload) -> None:
+    """Write *payload* as JSON to *handler* with the mandated headers.
+
+    Body encoding: ``json.dumps(payload, default=str, ensure_ascii=False)`` then
+    UTF-8. ``default=str`` covers ``datetime``/``Path``/``Decimal`` drift — the
+    production pipeline already stores ISO strings, this is a defensive net.
+    ``ensure_ascii=False`` keeps Korean/non-ASCII titles legible.
+
+    Headers always set:
+
+    - ``Content-Type: application/json; charset=utf-8``
+    - ``Content-Length: <len(body_bytes)>``
+    - ``Cache-Control: no-store``
+    """
+    body = json.dumps(payload, default=str, ensure_ascii=False).encode("utf-8")
+    handler.send_response(status)
+    handler.send_header("Content-Type", "application/json; charset=utf-8")
+    handler.send_header("Content-Length", str(len(body)))
+    handler.send_header("Cache-Control", "no-store")
+    handler.end_headers()
+    handler.wfile.write(body)
+
+
+def _json_error(handler, status: int, message: str) -> None:
+    """Send a standard JSON error envelope: ``{"error": <msg>, "code": <status>}``."""
+    _json_response(handler, status, {"error": message, "code": status})
+
+
+def _handle_api_state(
+    handler,
+    *,
+    scan_tasks: Callable[[Any], List[WorkItem]] = scan_tasks,  # type: ignore[assignment]
+    scan_features: Callable[[Any], List[WorkItem]] = scan_features,  # type: ignore[assignment]
+    scan_signals: Callable[[], List[SignalEntry]] = scan_signals,  # type: ignore[assignment]
+    list_tmux_panes: Callable[[], Optional[List[PaneInfo]]] = list_tmux_panes,  # type: ignore[assignment]
+) -> None:
+    """Handle ``GET /api/state`` on *handler*.
+
+    ``handler.server`` is expected to expose ``project_root`` / ``docs_dir``
+    (the HTTP bootstrap — TSK-01-02 / TSK-01-01 — will wire these). Missing
+    attributes degrade to empty strings so the endpoint still responds.
+
+    All scanner exceptions are caught and mapped to a 500 JSON envelope; one
+    line is logged to stderr so the server operator can see the failure.
+    """
+    project_root = getattr(getattr(handler, "server", None), "project_root", "") or ""
+    docs_dir = getattr(getattr(handler, "server", None), "docs_dir", "") or ""
+
+    try:
+        payload = _build_state_snapshot(
+            project_root=str(project_root),
+            docs_dir=str(docs_dir),
+            scan_tasks=scan_tasks,
+            scan_features=scan_features,
+            scan_signals=scan_signals,
+            list_tmux_panes=list_tmux_panes,
+        )
+    except Exception as exc:  # 방어 계층 — 일반 경로 미도달
+        sys.stderr.write(f"/api/state build failed: {exc!r}\n")
+        _json_error(handler, 500, f"internal error: {exc!r}")
+        return
+
+    _json_response(handler, 200, payload)
+
+
+# ---------------------------------------------------------------------------
 # Entry point (skeleton — real CLI arrives with TSK-01-01)
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":  # pragma: no cover - skeleton placeholder
     # TSK-01-01 will replace this block with argparse + HTTPServer bootstrap.
-    import sys
-
     sys.stderr.write(
         "monitor-server.py: HTTP bootstrap not yet wired (TSK-01-01 pending).\n"
     )

@@ -222,7 +222,7 @@ monitor-server.py, python3
 - category: development
 - domain: fullstack
 - model: sonnet
-- status: [dd]
+- status: [xx]
 - priority: critical
 - assignee: -
 - schedule: 2026-04-27 ~ 2026-04-28
@@ -322,7 +322,7 @@ monitor-server.py, python3
 - category: development
 - domain: backend
 - model: sonnet
-- status: [ ]
+- status: [im]
 - priority: medium
 - assignee: -
 - schedule: 2026-04-30 ~ 2026-04-30
