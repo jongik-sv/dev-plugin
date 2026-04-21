@@ -90,8 +90,8 @@ claude
 /skills
 ```
 
-11개 스킬이 표시되면 설치 완료:
-`wbs`, `agent-pool`, `team-mode`, `dev-team`, `dev`, `feat`, `dev-design`, `dev-build`, `dev-test`, `dev-refactor`, `dev-help`
+12개 스킬이 표시되면 설치 완료:
+`wbs`, `agent-pool`, `team-mode`, `dev-team`, `dev`, `feat`, `dev-design`, `dev-build`, `dev-test`, `dev-refactor`, `dev-monitor`, `dev-help`
 
 ---
 
@@ -115,6 +115,7 @@ claude
 | **dev-build** | TDD 구현 — 테스트 먼저 작성 후 구현하여 통과 | `/dev-build TSK-00-01` |
 | **dev-test** | 테스트 실행 — 실패 시 수정 반복 (최대 3회) | `/dev-test TSK-00-01` |
 | **dev-refactor** | 리팩토링 — 코드 품질 개선 후 테스트 확인 | `/dev-refactor TSK-00-01` |
+| **dev-monitor** | 개발 활동 모니터링 대시보드 서버 기동 (Task/Feature 진행률·tmux pane 실시간 확인) | `/dev-monitor [--port 7321] [--docs docs]` |
 
 **팀 병렬 개발 (Layer 3)** — Layer 1 + Layer 2 조합:
 
@@ -423,7 +424,7 @@ dev-plugin/
 ├── .claude-plugin/
 │   ├── plugin.json              # 플러그인 메타데이터 (이름, 버전)
 │   └── marketplace.json         # 마켓플레이스 등록 정보
-├── skills/                      # 스킬 (10개, 각 디렉토리의 SKILL.md가 진입점)
+├── skills/                      # 스킬 (12개, 각 디렉토리의 SKILL.md가 진입점)
 │   ├── agent-pool/              # Layer 1: 서브에이전트 슬롯 풀
 │   ├── team-mode/               # Layer 1: tmux 병렬 세션
 │   ├── wbs/                     # Layer 2: WBS 생성
@@ -433,6 +434,7 @@ dev-plugin/
 │   ├── dev-build/               # Layer 2: TDD 구현 단계
 │   ├── dev-test/                # Layer 2: 테스트 단계
 │   ├── dev-refactor/            # Layer 2: 리팩토링 단계
+│   ├── dev-monitor/             # Layer 2: 모니터링 대시보드
 │   ├── dev-team/                # Layer 3: 팀 병렬 개발
 │   └── dev-help/                # 사용법 안내
 ├── CLAUDE.md                    # Claude Code 프로젝트 지침

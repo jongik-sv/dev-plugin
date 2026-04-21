@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-A Claude Code plugin (`dev`) that automates WBS-based and Feature-based TDD development cycles. It provides 11 skills installable via the Claude Code plugin system (`/plugin install dev@dev-tools`). The plugin namespace is `dev:`.
+A Claude Code plugin (`dev`) that automates WBS-based and Feature-based TDD development cycles. It provides 12 skills installable via the Claude Code plugin system (`/plugin install dev@dev-tools`). The plugin namespace is `dev:`.
 
 ## Architecture
 
@@ -33,6 +33,8 @@ Skills delegate deterministic work to Python scripts (cross-platform: Mac/Linux/
 | `scripts/cleanup-orphaned.py` | Orphaned test process cleanup (legacy fallback) | manual use |
 | `scripts/graceful-shutdown.py` | WP 창 정상 종료 (Mac/Linux tmux 전용). absolute `window_id`(`@N`)로 타겟 해석(`=name` exact-match + 결과 검증 → `list-windows` 스캔 폴백) + self-protection(기본 ON: 자기 window 타겟 시 abort). `--no-marker`로 머지 정리 경로(`.shutdown` 마커 생략) 겸용. **Windows(psmux)에서는 no-op** — psmux window 해석 신뢰성 문제로 엉뚱한 창을 kill하는 사고가 반복되어 창 종료를 사용자에게 위임한다(merge는 `.done` 시그널 기반이라 영향 없음) | dev-team, merge-procedure |
 | `scripts/leader-autopsy.py` | WP 리더 비정상 사망 시 포렌식 덤프 (pane scrollback + signals + git + env → `docs/dev-team/autopsy/{WT_NAME}-{UTC_TS}/`). zero-LLM 스크립트 — 팀리더는 `summary.txt`만 Read. 가성비 기본값으로 transcript 생략, `--include-transcript`/`--transcript-tail N` 토글 | dev-team (Leader Death 복구 step 0) |
+| `scripts/monitor-launcher.py` | dev-monitor 서버 기동/정지/상태 관리 헬퍼. PID 파일로 idempotent 기동, `--stop`/`--status` 서브커맨드, macOS·Linux·Windows 플랫폼별 프로세스 detach | dev-monitor |
+| `scripts/monitor-server.py` | HTTP 대시보드 서버 라우팅·스캔 함수. `--port`/`--docs` 인자, on-demand 상태 조회 API 구현 (monitor-launcher.py가 subprocess로 호출) | dev-monitor |
 | `scripts/_platform.py` | Cross-platform utilities (temp dir, JSON escape) | available for scripts |
 
 All scripts use `${CLAUDE_PLUGIN_ROOT}/scripts/` as base path. Python 3 standard library only — no pip dependencies.
@@ -40,7 +42,7 @@ All scripts use `${CLAUDE_PLUGIN_ROOT}/scripts/` as base path. Python 3 standard
 **CLI 작성 원칙 — 모든 새 CLI 기능은 Python으로 작성한다.** Bash/zsh/PowerShell 등 쉘 스크립트로 신규 CLI 도구를 만들지 않는다. 이유:
 - 세 지원 플랫폼(macOS/Linux/WSL/네이티브 Windows+psmux)의 기본 쉘이 서로 달라 (bash/zsh/PowerShell) POSIX bash 구문은 PowerShell pane에서 동작하지 않음
 - Python은 `pathlib` + `tempfile` + `subprocess`로 플랫폼 차이를 내부에서 흡수
-- 이미 기존 스크립트 11개가 모두 Python stdlib로 작성되어 동일 런타임 의존성 유지
+- 이미 기존 스크립트 14개가 모두 Python stdlib로 작성되어 동일 런타임 의존성 유지
 - 쉘 차이를 흡수하는 Python 래퍼 1개가 세 플랫폼에서 동일하게 동작
 
 SKILL.md 예시에 필요한 쉘 명령은 **Python 래퍼 호출로 치환**해야 한다. 기존의 POSIX bash 예시(`rm -rf`, heredoc, `for ... do ... done` 등)는 점진적으로 Python 스크립트로 흡수한다. `scripts/legacy-bash/`는 참고용 동결본이며 새 기능 추가 금지.

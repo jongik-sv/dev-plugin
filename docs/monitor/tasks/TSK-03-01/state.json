@@ -1,9 +1,9 @@
 {
-  "status": "[dd]",
+  "status": "[xx]",
   "started_at": "2026-04-20T23:52:18Z",
   "last": {
-    "event": "design.ok",
-    "at": "2026-04-20T23:52:18Z"
+    "event": "refactor.ok",
+    "at": "2026-04-21T01:10:31Z"
   },
   "phase_history": [
     {
@@ -12,7 +12,44 @@
       "to": "[dd]",
       "at": "2026-04-20T23:52:18Z",
       "elapsed_seconds": 0
+    },
+    {
+      "event": "build.ok",
+      "from": "[dd]",
+      "to": "[im]",
+      "at": "2026-04-21T00:56:54Z",
+      "elapsed_seconds": 3876
+    },
+    {
+      "event": "test.fail",
+      "from": "[im]",
+      "to": "[im]",
+      "at": "2026-04-21T00:58:30Z",
+      "elapsed_seconds": 96
+    },
+    {
+      "event": "test.fail",
+      "from": "[im]",
+      "to": "[im]",
+      "at": "2026-04-21T01:03:10Z",
+      "elapsed_seconds": 280
+    },
+    {
+      "event": "test.ok",
+      "from": "[im]",
+      "to": "[ts]",
+      "at": "2026-04-21T01:07:00Z",
+      "elapsed_seconds": 230
+    },
+    {
+      "event": "refactor.ok",
+      "from": "[ts]",
+      "to": "[xx]",
+      "at": "2026-04-21T01:10:31Z",
+      "elapsed_seconds": 211
     }
   ],
-  "updated": "2026-04-20T23:52:18Z"
+  "updated": "2026-04-21T01:10:31Z",
+  "completed_at": "2026-04-21T01:10:31Z",
+  "elapsed_seconds": 4693
 }

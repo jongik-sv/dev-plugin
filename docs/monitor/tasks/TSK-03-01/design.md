@@ -2,7 +2,7 @@
 
 ## 요구사항 확인
 
-- `README.md` 스킬 테이블에 `/dev-monitor` 항목을 1행 추가하여 전체 스킬 수를 11개로 만든다 (인자: `[--port PORT]`, 기본 포트: 7321, 설명 포함).
+- `README.md` 스킬 테이블에 `/dev-monitor` 항목을 1행 추가하여 전체 스킬 수를 12개로 만든다 (인자: `[--port PORT]`, 기본 포트: 7321, 설명 포함). ※ 실제 기존 스킬 수는 11개(설계 시 10개로 오산)였으므로 신규 추가 후 12개.
 - `CLAUDE.md` Helper Scripts 테이블에 `scripts/monitor-server.py` 항목을 추가한다 (Purpose, Used by).
 - `plugin.json`의 버전이 `1.5.0`인지 확인하고, 스킬 파일 규약 섹션에 `dev-monitor`가 누락되어 있으면 추가한다.
 
@@ -64,8 +64,8 @@ N/A — `domain=infra`이며 UI가 없는 문서 갱신 Task이다.
 ## QA 체크리스트
 
 - [ ] `README.md` 개발 자동화 (Layer 2) 테이블에 `dev-monitor` 행이 존재한다.
-- [ ] `README.md` 전체 스킬 테이블(Layer 1 + Layer 2 + Layer 3) 행 수의 합이 11개이다 (기존 10개 + 신규 1개).
-- [ ] `README.md` 설치 완료 안내 문구가 `11개 스킬이 표시되면 설치 완료:`이고, 백틱 목록에 `dev-monitor`가 포함된다.
+- [ ] `README.md` 전체 스킬 테이블(Layer 1 + Layer 2 + Layer 3) 행 수의 합이 12개이다 (기존 11개 + 신규 1개).
+- [ ] `README.md` 설치 완료 안내 문구가 `12개 스킬이 표시되면 설치 완료:`이고, 백틱 목록에 `dev-monitor`가 포함된다.
 - [ ] `README.md` Architecture 다이어그램의 `skills/` 트리에 `dev-monitor/` 항목이 존재한다.
 - [ ] `CLAUDE.md` Helper Scripts 테이블에 `scripts/monitor-server.py` 행이 존재한다.
 - [ ] `CLAUDE.md` Helper Scripts 테이블의 `monitor-server.py` 행에 Purpose와 Used by가 모두 기입되어 있다.
