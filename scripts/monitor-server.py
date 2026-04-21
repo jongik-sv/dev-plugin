@@ -1383,19 +1383,13 @@ def _wp_donut_style(counts: dict) -> str:
     Calculates degree values for conic-gradient donut chart.
     ``total == 0`` guard prevents ZeroDivisionError and returns 0deg for both.
     """
-    total = (
-        counts.get("done", 0)
-        + counts.get("running", 0)
-        + counts.get("failed", 0)
-        + counts.get("bypass", 0)
-        + counts.get("pending", 0)
-    )
+    done = counts.get("done", 0)
+    running = counts.get("running", 0)
+    total = done + running + counts.get("failed", 0) + counts.get("bypass", 0) + counts.get("pending", 0)
     if total == 0:
         return "--pct-done-end:0deg; --pct-run-end:0deg;"
-    pct_done_end = round(counts.get("done", 0) / total * 360, 1)
-    pct_run_end = round(
-        (counts.get("done", 0) + counts.get("running", 0)) / total * 360, 1
-    )
+    pct_done_end = round(done / total * 360, 1)
+    pct_run_end = round((done + running) / total * 360, 1)
     return f"--pct-done-end:{pct_done_end}deg; --pct-run-end:{pct_run_end}deg;"
 
 
@@ -1404,26 +1398,15 @@ def _wp_card_counts(items, running_ids: set, failed_ids: set) -> dict:
 
     Priority (no double-counting, sum == len(items)):
       bypass > failed > running > done > pending
-    """
-    done = running = failed = bypass = pending = 0
-    for item in items:
-        item_id = getattr(item, "id", None)
-        is_bypassed = bool(getattr(item, "bypassed", False))
-        is_failed = item_id in failed_ids if item_id else False
-        is_running = item_id in running_ids if item_id else False
-        status = getattr(item, "status", None)
 
-        if is_bypassed:
-            bypass += 1
-        elif is_failed:
-            failed += 1
-        elif is_running:
-            running += 1
-        elif status == "[xx]":
-            done += 1
-        else:
-            pending += 1
-    return {"done": done, "running": running, "failed": failed, "bypass": bypass, "pending": pending}
+    Delegates state classification to ``_row_state_class`` to avoid duplicating
+    the priority logic.
+    """
+    counts: dict = {"done": 0, "running": 0, "failed": 0, "bypass": 0, "pending": 0}
+    for item in items:
+        state = _row_state_class(item, running_ids, failed_ids)
+        counts[state] += 1
+    return counts
 
 
 def _row_state_class(item, running_ids: set, failed_ids: set) -> str:
