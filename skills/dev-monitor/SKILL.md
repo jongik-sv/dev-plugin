@@ -1,9 +1,70 @@
 ---
 name: dev-monitor
-description: "개발 활동 모니터링 대시보드 서버를 기동한다. 사용법: /dev-monitor [--port N] [--docs DIR] (placeholder — 본문은 TSK-02-01에서 작성)"
+description: "개발 활동 모니터링 대시보드 서버를 기동한다. 키워드: 모니터링, 대시보드, monitor, dashboard, WBS 진행 현황, 태스크 상태, dev-monitor 시작. 사용법: /dev-monitor [--port N] [--docs DIR] [--stop] [--status]"
 ---
 
-# /dev-monitor — 개발 활동 모니터링 대시보드 (placeholder)
+# /dev-monitor — 개발 활동 모니터링 대시보드
 
-> 이 파일은 TSK-00-01에서 디렉터리·plugin.json 등록만을 위해 생성된 placeholder입니다.
-> 실제 스킬 본문은 TSK-02-01에서 작성됩니다.
+WBS 태스크 진행 현황 · tmux pane 상태 · 시그널 파일을 실시간으로 보여주는 대시보드 서버를 기동한다.
+
+인자: `$ARGUMENTS` (`[--port N] [--docs DIR] [--stop] [--status]`)
+
+| 옵션 | 기본값 | 설명 |
+|------|--------|------|
+| `--port N` | `7321` | 서버 바인딩 포트 |
+| `--docs DIR` | `docs` | 스캔할 docs 디렉터리 |
+| `--stop` | — | 실행 중인 서버 종료 |
+| `--status` | — | 서버 실행 상태 확인 |
+
+## 0. 인자 파싱
+
+`$ARGUMENTS`에서 다음을 추출한다 (없으면 기본값 사용):
+
+- `PORT`: `--port` 값 (기본 `7321`)
+- `DOCS`: `--docs` 값 (기본 `docs`)
+- `ACTION`: `--stop` → `stop`, `--status` → `status`, 그 외 → `start`
+
+## 1. 기동 플로우
+
+Bash 도구로 실행:
+
+```bash
+"$(python3 -c 'import sys; print(sys.executable)')" "${CLAUDE_PLUGIN_ROOT}/scripts/monitor-launcher.py" \
+  --port {PORT} \
+  --docs {DOCS} \
+  --project-root "$PWD" \
+  {ACTION_FLAG}
+```
+
+> **참고**: `sys.executable`을 사용하는 이유는 `python3` 하드코딩 금지 원칙 때문이다 (CLAUDE.md). Windows(psmux)에서 MS Store App Execution Alias가 `python3`을 가로채 rc=9009를 반환할 수 있다.
+
+여기서 `{ACTION_FLAG}`는:
+- `ACTION=stop` → `--stop`
+- `ACTION=status` → `--status`
+- `ACTION=start` → (플래그 없음)
+
+`{CLAUDE_PLUGIN_ROOT}`는 플러그인 루트 경로로 치환한다.
+
+### 플로우 상세 (ACTION=start)
+
+launcher가 내부적으로 다음 순서로 실행한다:
+
+1. **PID 파일 존재 + 프로세스 생존** → URL 재출력 후 종료 (중복 기동 방지, idempotent)
+2. **socket bind 테스트** → 포트 점유 시 안내 메시지 + `--port` 옵션 힌트 출력
+3. **`subprocess.Popen` detach 기동**
+   - macOS/Linux: `start_new_session=True`
+   - Windows psmux: `DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP`
+4. **PID 파일 기록**: `${TMPDIR}/dev-monitor-{port}.pid`
+5. **URL 출력**: `http://localhost:{port}`
+
+로그는 `${TMPDIR}/dev-monitor-{port}.log`에 append된다.
+
+## 2. 완료 보고
+
+launcher 출력을 그대로 사용자에게 전달한다.
+
+- **기동 성공**: `http://localhost:{port}` URL을 출력하고 브라우저에서 열도록 안내
+- **이미 실행 중**: 기존 PID 재사용 안내
+- **포트 충돌**: 오류 메시지 + `--port` 힌트 안내
+- **--stop**: 종료 결과 안내
+- **--status**: 실행 여부 안내
