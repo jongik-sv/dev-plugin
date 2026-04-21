@@ -2,8 +2,8 @@
   "status": "[im]",
   "started_at": "2026-04-20T23:53:34Z",
   "last": {
-    "event": "test.fail",
-    "at": "2026-04-21T01:15:34Z"
+    "event": "bypass",
+    "at": "2026-04-21T01:21:38Z"
   },
   "phase_history": [
     {
@@ -26,7 +26,16 @@
       "to": "[im]",
       "at": "2026-04-21T01:15:34Z",
       "elapsed_seconds": 327
+    },
+    {
+      "event": "bypass",
+      "from": "[im]",
+      "to": "[im]",
+      "at": "2026-04-21T01:21:38Z",
+      "elapsed_seconds": 364
     }
   ],
-  "updated": "2026-04-21T01:15:34Z"
+  "updated": "2026-04-21T01:21:38Z",
+  "bypassed": true,
+  "bypassed_reason": "escalation retries exhausted"
 }
