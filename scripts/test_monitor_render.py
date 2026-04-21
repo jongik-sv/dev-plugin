@@ -496,5 +496,269 @@ class ContentTypeTests(unittest.TestCase):
         self.assertIn('charset="utf-8"', html.lower().replace("'", '"'))
 
 
+# ---------------------------------------------------------------------------
+# TSK-04-01: v2 렌더 함수 단위 테스트
+# 미구현 함수는 skipUnless 가드로 보호 — discover 수집 단계에서 에러 없이 스킵됨
+# ---------------------------------------------------------------------------
+
+_HAS_KPI_COUNTS = hasattr(monitor_server, "_kpi_counts")
+_HAS_SPARK_BUCKETS = hasattr(monitor_server, "_spark_buckets")
+_HAS_WP_DONUT_STYLE = hasattr(monitor_server, "_wp_donut_style")
+_HAS_SECTION_KPI = hasattr(monitor_server, "_section_kpi")
+_HAS_SECTION_WP_CARDS = hasattr(monitor_server, "_section_wp_cards")
+_HAS_TIMELINE_SVG = hasattr(monitor_server, "_timeline_svg")
+_HAS_SECTION_TEAM_V2 = hasattr(monitor_server, "_section_team") and _HAS_SECTION_KPI
+
+
+def _make_wp_counts(total=10, done=4, running=2, failed=1, bypass=0):
+    """WP 카운트 픽스처."""
+    return {"total": total, "done": done, "running": running,
+            "failed": failed, "bypass": bypass}
+
+
+@unittest.skipUnless(_HAS_KPI_COUNTS, "_kpi_counts 미구현 (TSK-04-02 이후)")
+class KpiCountsTests(unittest.TestCase):
+    """_kpi_counts: 카테고리 합 == 전체, 우선순위 충돌 해소."""
+
+    def test_total_equals_sum_of_categories(self):
+        """5개 카테고리 합이 전체 아이템 수와 일치."""
+        tasks = [
+            _make_task(tsk_id="TSK-A", status="[im]"),
+            _make_task(tsk_id="TSK-B", status="[ts]"),
+            _make_task(tsk_id="TSK-C", status="[xx]"),
+            _make_task(tsk_id="TSK-D", status="[dd]"),
+            _make_task(tsk_id="TSK-E", status="[dd]"),
+        ]
+        signals = []
+        counts = monitor_server._kpi_counts(tasks, [], signals)
+        total = sum([counts["running"], counts["failed"], counts["bypass"],
+                     counts["done"], counts["pending"]])
+        self.assertEqual(total, len(tasks))
+
+    def test_bypass_priority_over_failed_and_running(self):
+        """bypass > failed > running: bypass 아이템은 failed/running에 중복 집계 안 됨."""
+        tasks = [
+            _make_task(tsk_id="TSK-BP", status="[im]", bypassed=True),
+        ]
+        signals = [
+            _make_signal(kind="running", task_id="TSK-BP"),
+            _make_signal(kind="failed", task_id="TSK-BP"),
+        ]
+        counts = monitor_server._kpi_counts(tasks, [], signals)
+        self.assertEqual(counts["bypass"], 1)
+        self.assertEqual(counts["failed"], 0)
+        self.assertEqual(counts["running"], 0)
+
+    def test_done_excludes_bypass_failed_running(self):
+        """done 집합에서 bypass/failed/running 상태 아이템 제외."""
+        tasks = [
+            _make_task(tsk_id="TSK-D1", status="[xx]"),            # pure done
+            _make_task(tsk_id="TSK-D2", status="[xx]", bypassed=True),  # bypass > done
+        ]
+        signals = [
+            _make_signal(kind="running", task_id="TSK-D1"),  # running > done
+        ]
+        counts = monitor_server._kpi_counts(tasks, [], signals)
+        # TSK-D2 는 bypass, TSK-D1 은 running 우선 → done = 0
+        self.assertEqual(counts["done"], 0)
+        self.assertEqual(counts["bypass"], 1)
+        self.assertEqual(counts["running"], 1)
+
+    def test_pending_is_remainder(self):
+        """pending = total - bypass - failed - running - done."""
+        tasks = [
+            _make_task(tsk_id="TSK-P1", status="[dd]"),
+            _make_task(tsk_id="TSK-P2", status="[dd]"),
+            _make_task(tsk_id="TSK-P3", status="[im]"),
+        ]
+        signals = []
+        counts = monitor_server._kpi_counts(tasks, [], signals)
+        expected_pending = (len(tasks) - counts["bypass"] - counts["failed"]
+                            - counts["running"] - counts["done"])
+        self.assertEqual(counts["pending"], expected_pending)
+        self.assertGreaterEqual(counts["pending"], 0)
+
+
+@unittest.skipUnless(_HAS_SPARK_BUCKETS, "_spark_buckets 미구현 (TSK-04-02 이후)")
+class SparkBucketsTests(unittest.TestCase):
+    """_spark_buckets: 범위 외 이벤트 제외, kind 매칭."""
+
+    def _make_item_with_history(self, tsk_id, events):
+        """(tsk_id, [(at_iso, event_name), ...]) 로 WorkItem 생성."""
+        from datetime import datetime, timezone
+        history = [
+            PhaseEntry(
+                event=evt_name,
+                from_status="[dd]",
+                to_status="[im]",
+                at=at_iso,
+                elapsed_seconds=1.0,
+            )
+            for at_iso, evt_name in events
+        ]
+        return _make_task(tsk_id=tsk_id, phase_history_tail=history)
+
+    def test_out_of_range_events_excluded(self):
+        """10분 범위 밖 이벤트는 버킷에 집계되지 않음."""
+        from datetime import datetime, timezone, timedelta
+        now = datetime(2026, 4, 20, 12, 0, 0, tzinfo=timezone.utc)
+        old_at = (now - timedelta(minutes=15)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        item = self._make_item_with_history("TSK-OLD", [(old_at, "build.ok")])
+        buckets = monitor_server._spark_buckets([item], "done", now, span_min=10)
+        self.assertEqual(len(buckets), 10)
+        self.assertEqual(sum(buckets), 0)
+
+    def test_kind_matching(self):
+        """kind 파라미터와 일치하지 않는 이벤트는 제외."""
+        from datetime import datetime, timezone, timedelta
+        now = datetime(2026, 4, 20, 12, 0, 0, tzinfo=timezone.utc)
+        recent_at = (now - timedelta(minutes=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        item = self._make_item_with_history("TSK-K", [(recent_at, "build.ok")])
+        # kind="failed"로 조회 시 "build.ok" 이벤트는 제외
+        buckets = monitor_server._spark_buckets([item], "failed", now, span_min=10)
+        self.assertEqual(sum(buckets), 0)
+
+    def test_bucket_length_equals_span_min(self):
+        """반환 리스트 길이 == span_min."""
+        from datetime import datetime, timezone
+        now = datetime(2026, 4, 20, 12, 0, 0, tzinfo=timezone.utc)
+        buckets = monitor_server._spark_buckets([], "running", now, span_min=10)
+        self.assertEqual(len(buckets), 10)
+        buckets5 = monitor_server._spark_buckets([], "running", now, span_min=5)
+        self.assertEqual(len(buckets5), 5)
+
+
+@unittest.skipUnless(_HAS_WP_DONUT_STYLE, "_wp_donut_style 미구현 (TSK-04-03 이후)")
+class WpDonutStyleTests(unittest.TestCase):
+    """_wp_donut_style: 분모 0 방어, 각도 합 ≤ 360."""
+
+    def test_zero_total_denominator_guard(self):
+        """total=0 시 ZeroDivisionError 없이 반환."""
+        try:
+            result = monitor_server._wp_donut_style(
+                _make_wp_counts(total=0, done=0, running=0))
+        except ZeroDivisionError:
+            self.fail("_wp_donut_style raised ZeroDivisionError for total=0")
+        self.assertIsInstance(result, str)
+
+    def test_angle_sum_not_exceed_360(self):
+        """done_deg + run_deg ≤ 360."""
+        result = monitor_server._wp_donut_style(
+            _make_wp_counts(total=10, done=6, running=5))
+        # CSS 변수에서 deg 값 추출
+        import re as _re
+        nums = [int(x) for x in _re.findall(r"(\d+)deg", result)]
+        self.assertGreaterEqual(len(nums), 2)
+        # 두 번째 값은 done_deg + run_deg
+        self.assertLessEqual(nums[1], 360)
+
+
+@unittest.skipUnless(_HAS_SECTION_KPI, "_section_kpi 미구현 (TSK-04-03 이후)")
+class SectionKpiTests(unittest.TestCase):
+    """_section_kpi: .kpi-card 5개, data-kpi 속성 5종."""
+
+    def _make_kpi_model(self):
+        return _normal_model()
+
+    def test_five_kpi_cards_present(self):
+        """렌더 결과에 .kpi-card 클래스 요소 5개 포함."""
+        model = self._make_kpi_model()
+        html = monitor_server._section_kpi(model)
+        count = html.count('kpi-card')
+        self.assertGreaterEqual(count, 5)
+
+    def test_data_kpi_attributes(self):
+        """data-kpi 속성 5종 (running, failed, bypass, done, pending) 존재."""
+        model = self._make_kpi_model()
+        html = monitor_server._section_kpi(model)
+        for kpi_name in ("running", "failed", "bypass", "done", "pending"):
+            self.assertIn(f'data-kpi="{kpi_name}"', html,
+                          f'data-kpi="{kpi_name}" missing')
+
+
+@unittest.skipUnless(_HAS_SECTION_WP_CARDS, "_section_wp_cards 미구현 (TSK-04-03 이후)")
+class SectionWpCardsTests(unittest.TestCase):
+    """_section_wp_cards: WP 순서 보존, CSS 변수 포함."""
+
+    def _make_tasks_multi_wp(self):
+        return [
+            _make_task(tsk_id="TSK-01-01", wp_id="WP-01"),
+            _make_task(tsk_id="TSK-01-02", wp_id="WP-01"),
+            _make_task(tsk_id="TSK-02-01", wp_id="WP-02"),
+        ]
+
+    def test_wp_order_preserved(self):
+        """WP ID 삽입 순서가 HTML 출현 순서와 일치."""
+        tasks = self._make_tasks_multi_wp()
+        signals = []
+        html = monitor_server._section_wp_cards(tasks, signals)
+        idx_wp01 = html.find("WP-01")
+        idx_wp02 = html.find("WP-02")
+        self.assertGreater(idx_wp01, -1)
+        self.assertGreater(idx_wp02, -1)
+        self.assertLess(idx_wp01, idx_wp02)
+
+    def test_css_variables_present(self):
+        """--pct-done-end CSS 변수 포함."""
+        tasks = self._make_tasks_multi_wp()
+        signals = []
+        html = monitor_server._section_wp_cards(tasks, signals)
+        self.assertIn("--pct-done-end", html)
+
+
+@unittest.skipUnless(_HAS_TIMELINE_SVG, "_timeline_svg 미구현 (TSK-04-03 이후)")
+class TimelineSvgTests(unittest.TestCase):
+    """_timeline_svg: 0건 empty state, fail 구간 class='tl-fail'."""
+
+    def test_empty_state_when_no_tasks(self):
+        """태스크 0건이면 예외 없이 empty state 문자열 반환."""
+        try:
+            result = monitor_server._timeline_svg([], span_minutes=60)
+        except Exception as e:
+            self.fail(f"_timeline_svg raised {e!r} for empty input")
+        self.assertIsInstance(result, str)
+
+    def test_fail_segment_class(self):
+        """fail 구간에 class='tl-fail' 포함."""
+        from datetime import datetime, timezone, timedelta
+        now = datetime(2026, 4, 20, 12, 0, 0, tzinfo=timezone.utc)
+        # phase_history_tail에 test.fail 이벤트 포함
+        history = [
+            PhaseEntry(event="build.ok", from_status="[dd]", to_status="[im]",
+                       at=(now - timedelta(minutes=30)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                       elapsed_seconds=60.0),
+            PhaseEntry(event="test.fail", from_status="[im]", to_status="[im]",
+                       at=(now - timedelta(minutes=15)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                       elapsed_seconds=30.0),
+        ]
+        task = _make_task(tsk_id="TSK-TL", status="[im]", phase_history_tail=history)
+        result = monitor_server._timeline_svg([task], span_minutes=60)
+        self.assertIn("tl-fail", result)
+
+
+@unittest.skipUnless(
+    _HAS_SECTION_TEAM_V2 and hasattr(monitor_server, "_section_kpi"),
+    "_section_team v2 미구현 (TSK-04-03 이후 — data-pane-expand 추가 전)"
+)
+class SectionTeamV2Tests(unittest.TestCase):
+    """_section_team v2: data-pane-expand 버튼, preview <pre> 존재."""
+
+    def _make_panes_with_preview(self):
+        return [_make_pane("%1", window_name="dev", pane_index=0),
+                _make_pane("%2", window_name="dev", pane_index=1)]
+
+    def test_data_pane_expand_button_present(self):
+        """각 pane row에 data-pane-expand 속성 버튼 존재."""
+        panes = self._make_panes_with_preview()
+        html = monitor_server._section_team(panes)
+        self.assertIn("data-pane-expand", html)
+
+    def test_preview_pre_present(self):
+        """각 pane row에 preview <pre> 태그 존재."""
+        panes = self._make_panes_with_preview()
+        html = monitor_server._section_team(panes)
+        self.assertIn("<pre", html)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

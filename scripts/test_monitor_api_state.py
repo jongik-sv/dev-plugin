@@ -642,5 +642,45 @@ class MonitorHandlerRoutingTests(unittest.TestCase):
         self.assertTrue(hasattr(monitor_server, "_handle_api_state"))
 
 
+# ---------------------------------------------------------------------------
+# TSK-04-01: /api/state 스키마 회귀 테스트
+# v1 _build_state_snapshot 반환 키 집합과 1:1 일치 확인
+# ---------------------------------------------------------------------------
+
+
+class ApiStateSchemaRegressionTests(unittest.TestCase):
+    """`_build_state_snapshot` 최상위 키 집합이 v1 스냅샷과 정확히 일치."""
+
+    # v1 /api/state 응답 구조 스냅샷 (TSK-01-06 수락 기준 기준)
+    _V1_KEYS = frozenset({
+        "generated_at",
+        "project_root",
+        "docs_dir",
+        "wbs_tasks",
+        "features",
+        "shared_signals",
+        "agent_pool_signals",
+        "tmux_panes",
+    })
+
+    def test_api_state_keys_match_v1_snapshot(self):
+        """`_build_state_snapshot` 반환 dict의 최상위 키 집합이 v1 스냅샷 8개 키와 정확히 일치."""
+        out = monitor_server._build_state_snapshot(
+            project_root="/abs",
+            docs_dir="docs/monitor",
+            scan_tasks=lambda _d: [_make_task()],
+            scan_features=lambda _d: [_make_feat()],
+            scan_signals=lambda: [_make_signal()],
+            list_tmux_panes=lambda: [_make_pane()],
+        )
+        actual_keys = frozenset(out.keys())
+        self.assertEqual(
+            actual_keys,
+            self._V1_KEYS,
+            f"Key mismatch — extra: {actual_keys - self._V1_KEYS!r}, "
+            f"missing: {self._V1_KEYS - actual_keys!r}",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
