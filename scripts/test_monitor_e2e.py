@@ -110,18 +110,22 @@ class DashboardReachabilityTests(unittest.TestCase):
 
 @unittest.skipUnless(_SERVER_UP, f"monitor-server not reachable at {_E2E_URL}")
 class MetaRefreshLiveTests(unittest.TestCase):
-    """<meta refresh> 가 응답에 포함되어 브라우저가 주기적으로 재요청."""
+    """v2: <meta http-equiv="refresh"> 가 응답에 미포함 (TSK-01-06).
 
-    def test_meta_refresh_present_in_live_response(self) -> None:
+    v1에서는 meta refresh로 자동 갱신했지만, v2에서는 JS 폴링(WP-02)으로 대체.
+    이 테스트는 v2에서 meta refresh가 제거되었음을 검증한다.
+    """
+
+    def test_meta_refresh_absent_in_live_response(self) -> None:
+        """v2: meta http-equiv="refresh" 미포함 검증."""
         with urllib.request.urlopen(_E2E_URL + "/", timeout=3) as resp:
             html_body = resp.read().decode("utf-8")
         matches = re.findall(
             r'<meta http-equiv="refresh" content="(\d+)"',
             html_body,
         )
-        self.assertEqual(len(matches), 1,
-                         f"expected exactly one meta refresh, got {matches!r}")
-        self.assertGreaterEqual(int(matches[0]), 1)
+        self.assertEqual(len(matches), 0,
+                         f"v2 must NOT have meta refresh, got {matches!r}")
 
 
 @unittest.skipUnless(_SERVER_UP, f"monitor-server not reachable at {_E2E_URL}")
@@ -526,6 +530,107 @@ class LiveActivityTimelineE2ETests(unittest.TestCase):
         external = re.findall(r"https?://(?!localhost|127\.0\.0\.1)", html_body)
         self.assertEqual(external, [],
                          f"external http(s) links found: {external!r}")
+
+
+@unittest.skipUnless(_SERVER_UP, f"monitor-server not reachable at {_E2E_URL}")
+class RenderDashboardV2E2ETests(unittest.TestCase):
+    """TSK-01-06 — render_dashboard v2 조립 + 드로어 골격 E2E 검증.
+
+    수락 기준 (QA 체크리스트 fullstack/frontend 필수 항목):
+    1. GET / → 페이지에 <div class="drawer-backdrop"> 정확히 1개, <aside class="drawer"> 정확히 1개
+    2. GET / → <meta http-equiv="refresh"> 미포함 (v2: JS 폴링으로 대체)
+    3. GET / → <div class="page"> + <div class="page-col-left"> + <div class="page-col-right"> 구조 존재
+    4. GET / → data-section 속성이 9개 섹션에 각 1회씩 출현
+    5. GET / → 기존 앵커 id ("wbs", "features", "team", "subagents", "phases") 존재
+    6. GET / → <script id="dashboard-js"> placeholder 존재
+    """
+
+    def _dashboard_html(self) -> str:
+        with urllib.request.urlopen(_E2E_URL + "/", timeout=3) as resp:
+            return resp.read().decode("utf-8")
+
+    def test_drawer_backdrop_exactly_one(self) -> None:
+        """<div class="drawer-backdrop"> 정확히 1개."""
+        html = self._dashboard_html()
+        count = html.count('<div class="drawer-backdrop"')
+        self.assertEqual(count, 1,
+                         f"Expected exactly 1 drawer-backdrop, found {count}")
+
+    def test_drawer_aside_exactly_one(self) -> None:
+        """<aside class="drawer" 정확히 1개."""
+        html = self._dashboard_html()
+        count = html.count('<aside class="drawer"')
+        self.assertEqual(count, 1,
+                         f"Expected exactly 1 aside.drawer, found {count}")
+
+    def test_no_meta_refresh_in_v2(self) -> None:
+        """v2: <meta http-equiv="refresh"> 미포함."""
+        html = self._dashboard_html()
+        self.assertNotIn('http-equiv="refresh"', html,
+                         "<meta http-equiv=\"refresh\"> must be absent in v2")
+
+    def test_page_grid_structure(self) -> None:
+        """<div class="page"> 2컬럼 그리드 wrapper 존재."""
+        html = self._dashboard_html()
+        self.assertIn('<div class="page">', html)
+        self.assertIn('<div class="page-col-left">', html)
+        self.assertIn('<div class="page-col-right">', html)
+
+    def test_data_section_attributes_unique(self) -> None:
+        """9개 data-section 속성이 각 1회씩 출현."""
+        html = self._dashboard_html()
+        expected_keys = [
+            "sticky-header", "kpi", "wp-cards", "features",
+            "live-activity", "phase-timeline", "team", "subagents", "phase-history",
+        ]
+        for key in expected_keys:
+            count = html.count(f'data-section="{key}"')
+            self.assertEqual(count, 1,
+                             f'data-section="{key}" should appear exactly once, found {count}')
+
+    def test_legacy_anchors_present(self) -> None:
+        """기존 앵커 id 5개 모두 존재."""
+        html = self._dashboard_html()
+        for anchor_id in ('wbs', 'features', 'team', 'subagents', 'phases'):
+            pattern = 'id=["\']' + re.escape(anchor_id) + '["\']'
+            self.assertRegex(html, pattern,
+                             f"Legacy anchor id=\"{anchor_id}\" not found in live response")
+
+    def test_dashboard_js_placeholder(self) -> None:
+        """<script id="dashboard-js"> placeholder 존재."""
+        html = self._dashboard_html()
+        self.assertIn('<script id="dashboard-js">', html,
+                      "dashboard-js placeholder script not found")
+
+    def test_drawer_aria_attributes(self) -> None:
+        """드로어 aside에 role="dialog", aria-modal="true", aria-hidden="true" 존재."""
+        html = self._dashboard_html()
+        self.assertIn('role="dialog"', html)
+        self.assertIn('aria-modal="true"', html)
+        aside_match = re.search(r'<aside[^>]*class="drawer"[^>]*>', html)
+        self.assertIsNotNone(aside_match, "No <aside class=\"drawer\"> found")
+        aside_tag = aside_match.group(0)
+        self.assertIn('aria-hidden="true"', aside_tag)
+
+    def test_section_order_in_live_response(self) -> None:
+        """섹션 순서: sticky-header < kpi < wp-cards < ... < phase-history."""
+        html = self._dashboard_html()
+        keys_in_order = [
+            "sticky-header", "kpi", "wp-cards", "features",
+            "live-activity", "phase-timeline", "team", "subagents", "phase-history",
+        ]
+        positions = {}
+        for key in keys_in_order:
+            pos = html.find(f'data-section="{key}"')
+            if pos != -1:
+                positions[key] = pos
+
+        ordered_keys = [k for k in keys_in_order if k in positions]
+        for i in range(len(ordered_keys) - 1):
+            k1 = ordered_keys[i]
+            k2 = ordered_keys[i + 1]
+            self.assertLess(positions[k1], positions[k2],
+                            f"Section '{k1}' must appear before '{k2}'")
 
 
 if __name__ == "__main__":

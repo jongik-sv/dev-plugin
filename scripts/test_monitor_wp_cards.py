@@ -558,16 +558,27 @@ class SectionWpCardsDashboardIntegrationTests(unittest.TestCase):
         self.assertIn('id="wp-cards"', html)
 
     def test_render_dashboard_no_wbs_section_id(self):
-        """QA: render_dashboard 응답 HTML에 id="wbs" 섹션 미존재."""
+        """QA: render_dashboard 응답 HTML에 <section id="wbs"> 섹션 미존재.
+
+        TSK-01-06 constraints: 기존 앵커 호환을 위해 landing pad <a id="wbs">는
+        존재하지만 <section id="wbs"> 형태의 섹션 자체는 없어야 한다.
+        """
+        import re as _re
         tasks = [_make_task("TSK-01-01", status="[xx]", wp_id="WP-01")]
         html = self.render(self._model_with_tasks(tasks))
-        self.assertNotIn('id="wbs"', html)
+        # <section id="wbs"> 형태의 섹션은 없어야 한다 (landing pad <a id="wbs"> 허용).
+        self.assertNotRegex(html, r'<section[^>]+id=["\']wbs["\']')
 
     def test_render_dashboard_nav_has_wp_cards_anchor(self):
-        """네비게이션에 #wp-cards 링크 존재."""
+        """wp-cards id가 페이지에 존재 (섹션 id 또는 nav href).
+
+        v2: render_dashboard에서 _section_header(nav)를 제거했으므로
+        href="#wp-cards" 링크 대신 id="wp-cards" 섹션 존재로 검증을 완화한다.
+        """
         tasks = [_make_task("TSK-01-01", status="[xx]", wp_id="WP-01")]
         html = self.render(self._model_with_tasks(tasks))
-        self.assertIn('href="#wp-cards"', html)
+        self.assertIn('id="wp-cards"', html,
+                      "wp-cards anchor must be reachable (section id or nav href)")
 
     def test_render_dashboard_nav_no_wbs_anchor(self):
         """네비게이션에 #wbs 링크 미존재."""

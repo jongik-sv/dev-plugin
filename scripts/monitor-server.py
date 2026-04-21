@@ -643,7 +643,7 @@ def scan_features(docs_dir: Path) -> List[WorkItem]:
 _DEFAULT_REFRESH_SECONDS = 3
 _PHASES_SECTION_LIMIT = 10
 _ERROR_TITLE_CAP = 200
-_SECTION_ANCHORS = ("wp-cards", "features", "team", "subagents", "phases", "activity", "timeline")
+_SECTION_ANCHORS = ("wp-cards", "features", "team", "subagents", "activity", "timeline", "phases")
 
 # Mapping from agent-pool signal ``kind`` to badge CSS class. Module-level so
 # the ``_section_subagents`` loop does not rebuild the dict per row.
@@ -786,6 +786,7 @@ ol.phase-list li { margin-bottom: 0.25rem; font-size: 0.88rem; font-family: var(
   padding: 1.25rem 1.5rem;
   align-items: start;
 }
+.page-col-left, .page-col-right { display: flex; flex-direction: column; gap: 1rem; }
 .wp-donut {
   width: 80px;
   height: 80px;
@@ -2071,57 +2072,156 @@ def _section_phase_timeline(tasks, features):
     body = svg + more_html
     return _section_wrap("timeline", "Phase Timeline", body)
 
+# Compiled once at module load; used by _wrap_with_data_section.
+_DATA_SECTION_TAG_RE = re.compile(r'(<(?:section|header)(\s[^>]*)?>)', re.DOTALL)
+
+
+def _drawer_skeleton() -> str:
+    """Return the empty drawer scaffold HTML string (TSK-01-06).
+
+    Structure: drawer-backdrop + aside.drawer with header/body slots.
+    Initial state: both elements are hidden (CSS ``.drawer:not(.open)``).
+    """
+    return (
+        '<div class="drawer-backdrop" aria-hidden="true" data-drawer-backdrop></div>\n'
+        '<aside class="drawer" role="dialog" aria-modal="true" aria-hidden="true" data-drawer>\n'
+        '  <div class="drawer-header" data-drawer-header></div>\n'
+        '  <div class="drawer-body" data-drawer-body></div>\n'
+        '</aside>'
+    )
+
+
+def _wrap_with_data_section(section_html: str, key: str) -> str:
+    """Inject ``data-section="{key}"`` into the outermost tag of *section_html*.
+
+    Strategy:
+    1. If the outermost tag already has the attribute → return unchanged.
+    2. Try regex-based in-place injection on the first ``<section`` or
+       ``<header`` tag (one substitution only).
+    3. Fallback: wrap with ``<div data-section="{key}">…</div>``.
+    """
+    attr = f'data-section="{key}"'
+    # Already present — no-op to avoid duplication.
+    if attr in section_html:
+        return section_html
+
+    # Attempt in-place injection into first <section or <header opening tag.
+    match = _DATA_SECTION_TAG_RE.search(section_html)
+    if match:
+        original_tag = match.group(0)
+        # Insert before closing > of the opening tag.
+        if original_tag.endswith('/>'):
+            new_tag = original_tag[:-2] + f' {attr}/>'
+        else:
+            new_tag = original_tag[:-1] + f' {attr}>'
+        return section_html[:match.start()] + new_tag + section_html[match.end():]
+
+    # Fallback: wrap entire content.
+    return f'<div {attr}>{section_html}</div>'
+
+
+def _build_dashboard_body(s: dict) -> str:
+    """Assemble section HTMLs into the ``<body>`` inner content string.
+
+    Separated from ``render_dashboard`` so the page-grid layout logic can be
+    read and tested independently.  *s* must contain all keys listed below.
+    The ``header`` value is rendered without a ``data-section`` attribute
+    (nav metadata, not a JS partial-update target).
+    """
+    # Backward-compat landing pad: external links like /#wbs still scroll to
+    # the wp-cards section.  Placed immediately before the section so the
+    # browser lands at the correct position.
+    wbs_landing_pad = '<a id="wbs" aria-hidden="true" tabindex="-1"></a>\n'
+
+    return "".join([
+        s["header"], "\n",
+        s["sticky-header"], "\n",
+        s["kpi"], "\n",
+        '<div class="page">\n',
+        '  <div class="page-col-left">\n',
+        wbs_landing_pad,
+        s["wp-cards"], "\n",
+        s["features"], "\n",
+        '  </div>\n',
+        '  <div class="page-col-right">\n',
+        s["live-activity"], "\n",
+        s["phase-timeline"], "\n",
+        s["team"], "\n",
+        s["subagents"], "\n",
+        '  </div>\n',
+        '</div>\n',
+        s["phase-history"], "\n",
+    ])
+
+
 def render_dashboard(model: dict) -> str:
-    """Render the full monitor dashboard HTML document (TSK-01-04).
+    """Render the full v2 monitor dashboard HTML document (TSK-01-06).
 
-    See ``docs/monitor/tasks/TSK-01-04/design.md`` for the full contract. All
-    user-derived strings flow through ``html.escape`` (via ``_esc``) before
-    being concatenated into the output. No external CDN/font/script is
-    referenced — only inline CSS.
+    Assembly order (design.md §구현방향):
+      sticky_header → kpi → .page[col-left: wp_cards + features,
+      col-right: live_activity + phase_timeline + team + subagents]
+      → phase_history (full-width footer)
 
-    The returned string is a complete ``<!DOCTYPE html>`` document. The
-    ``MonitorHandler`` (future TSK-01-01 integration) is expected to UTF-8
-    encode the bytes and serve them with ``Content-Type: text/html; charset=utf-8``.
+    Changes from v1:
+    - ``<meta http-equiv="refresh">`` removed (JS polling TBD in WP-02).
+    - ``.page`` 2-column grid wrapper added.
+    - ``data-section="{key}"`` injected on each section for JS partial updates.
+    - ``_drawer_skeleton()`` injected before ``</body>``.
+    - Empty ``<script id="dashboard-js">`` placeholder inserted for WP-02.
+    - ``<a id="wbs">`` landing pad added before wp-cards for backward compat.
+
+    All user-derived strings flow through ``html.escape`` (via ``_esc``)
+    before being concatenated. No external CDN/font/script — only inline CSS.
+    The returned string is a complete ``<!DOCTYPE html>`` document.
     """
     if not isinstance(model, dict):
         model = {}
 
-    refresh = _refresh_seconds(model)
     shared_signals = model.get("shared_signals") or []
     running_ids = _signal_set(shared_signals, "running")
     failed_ids = _signal_set(shared_signals, "failed")
 
     tasks = model.get("wbs_tasks") or []
     features = model.get("features") or []
+    panes = model.get("tmux_panes")
+    ap_sigs = model.get("agent_pool_signals") or []
 
-    sections = [
-        _section_sticky_header(model),
-        _section_kpi(model),
-        _section_header(model),
-        _section_wp_cards(tasks, running_ids, failed_ids),
-        _section_features(features, running_ids, failed_ids),
-        _section_team(model.get("tmux_panes")),
-        _section_subagents(model.get("agent_pool_signals") or []),
-        _section_phase_history(tasks, features),
-        _section_live_activity(model),
-        _section_phase_timeline(tasks, features),
-    ]
-    body = "\n".join(sections)
+    # Build each section HTML.  ``header`` is excluded from data-section
+    # injection (it is nav metadata, not a JS partial-update target).
+    header_html = _section_header(model)
+    sections: dict = {
+        "sticky-header":  _section_sticky_header(model),
+        "kpi":            _section_kpi(model),
+        "wp-cards":       _section_wp_cards(tasks, running_ids, failed_ids),
+        "features":       _section_features(features, running_ids, failed_ids),
+        "live-activity":  _section_live_activity(model),
+        "phase-timeline": _section_phase_timeline(tasks, features),
+        "team":           _section_team(panes),
+        "subagents":      _section_subagents(ap_sigs),
+        "phase-history":  _section_phase_history(tasks, features),
+    }
 
-    return (
-        '<!DOCTYPE html>\n'
-        '<html lang="en">\n'
-        '<head>\n'
-        '  <meta charset="utf-8">\n'
-        f'  <meta http-equiv="refresh" content="{refresh}">\n'
-        '  <title>dev-plugin Monitor</title>\n'
-        f'  <style>{DASHBOARD_CSS}</style>\n'
-        '</head>\n'
-        '<body>\n'
-        f'{body}\n'
-        '</body>\n'
-        '</html>\n'
-    )
+    # Inject data-section attribute on each section's outermost tag.
+    for key, html in sections.items():
+        sections[key] = _wrap_with_data_section(html, key)
+
+    body = _build_dashboard_body({**sections, "header": header_html})
+
+    return "".join([
+        '<!DOCTYPE html>\n',
+        '<html lang="en">\n',
+        '<head>\n',
+        '  <meta charset="utf-8">\n',
+        '  <title>dev-plugin Monitor</title>\n',
+        f'  <style>{DASHBOARD_CSS}</style>\n',
+        '</head>\n',
+        '<body>\n',
+        body, "\n",
+        _drawer_skeleton(), "\n",
+        '<script id="dashboard-js"></script>\n',
+        '</body>\n',
+        '</html>\n',
+    ])
 
 
 # ---------------------------------------------------------------------------
