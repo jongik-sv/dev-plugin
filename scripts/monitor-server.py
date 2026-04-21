@@ -683,6 +683,7 @@ DASHBOARD_CSS = """
   --red: #f85149;
   --yellow: #e3b341;
   --light-gray: #6e7681;
+  --font-mono: "SFMono-Regular", Consolas, monospace;
 }
 * { box-sizing: border-box; }
 body {
@@ -722,7 +723,7 @@ details summary { cursor: pointer; color: var(--accent); font-weight: 600; paddi
 .pane-row { padding: 0.25rem 0.5rem; border-bottom: 1px dashed var(--border); font-size: 0.9rem; }
 .pane-row:last-child { border-bottom: none; }
 ol.phase-list { margin: 0; padding-left: 1.25rem; }
-ol.phase-list li { margin-bottom: 0.25rem; font-size: 0.88rem; font-family: "SFMono-Regular", Consolas, monospace; }
+ol.phase-list li { margin-bottom: 0.25rem; font-size: 0.88rem; font-family: var(--font-mono); }
 .sticky-hdr {
   position: sticky;
   top: 0;
@@ -820,9 +821,9 @@ ol.phase-list li { margin-bottom: 0.25rem; font-size: 0.88rem; font-family: "SFM
   overflow: hidden;
 }
 .task-row:last-child { border-bottom: none; }
-.task-row .id { color: var(--muted); font-family: "SFMono-Regular", Consolas, monospace; }
+.task-row .id { color: var(--muted); font-family: var(--font-mono); }
 .task-row .title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.task-row .elapsed, .task-row .retry { color: var(--muted); font-size: 0.85rem; font-family: "SFMono-Regular", Consolas, monospace; }
+.task-row .elapsed, .task-row .retry { color: var(--muted); font-size: 0.85rem; font-family: var(--font-mono); }
 .task-row::before {
   content: "";
   position: absolute;
@@ -873,7 +874,7 @@ ol.phase-list li { margin-bottom: 0.25rem; font-size: 0.88rem; font-family: "SFM
 .timeline-svg .tl-xx   { fill: var(--gray); }
 .timeline-svg .tl-fail { fill: url(#hatch); }
 .pane-preview {
-  font-family: "SFMono-Regular", Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 0.78rem;
   color: var(--muted);
   background: var(--bg);
