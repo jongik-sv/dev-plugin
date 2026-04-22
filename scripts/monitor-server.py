@@ -65,6 +65,10 @@ _CAPTURE_PANE_SCROLLBACK = "-500"
 _LIST_PANES_TIMEOUT = 2
 _CAPTURE_PANE_TIMEOUT = 3
 
+# Agent-pool signal directory prefix and scope prefix (scan_signals + _classify_signal_scopes).
+_AGENT_POOL_DIR_PREFIX = "agent-pool-signals-"
+_AGENT_POOL_SCOPE_PREFIX = "agent-pool:"
+
 
 # ---------------------------------------------------------------------------
 # Dataclasses (TRD §5.2, §5.3)
@@ -80,7 +84,8 @@ class SignalEntry:
         kind: 확장자로 결정되는 종류 (``running``/``done``/``failed``/``bypassed``).
         task_id: 파일명 stem (확장자 제외).
         mtime: ISO-8601 UTC 수정 시각 문자열.
-        scope: ``shared`` 또는 ``agent-pool:{timestamp}``.
+        scope: subdir 이름(``"proj-a"`` 등), ``"shared"`` (root 직하 파일 fallback),
+        또는 ``"agent-pool:{timestamp}"``.
     """
 
     name: str
@@ -165,11 +170,18 @@ def scan_signals() -> List[SignalEntry]:
 
     Scope resolution:
 
-    - ``${TMPDIR}/claude-signals/**`` (recursive) → ``scope="shared"``
+    - ``${TMPDIR}/claude-signals/{subdir}/**`` (recursive) →
+      ``scope="{subdir}"`` (subdir name is the scope, TRD §3.3 subdir-per-scope).
+    - ``${TMPDIR}/claude-signals/{bare-file}`` (root-direct file, no subdir) →
+      ``scope="shared"`` (backward-compatibility fallback).
     - ``${TMPDIR}/agent-pool-signals-*/**`` (recursive) →
       ``scope="agent-pool:{timestamp}"`` where ``{timestamp}`` is the directory-name
       suffix after the ``agent-pool-signals-`` prefix (preserves the trailing
       ``-$$`` PID used by agent-pool).
+
+    Note: ``_classify_signal_scopes`` treats any scope that is not prefixed with
+    ``agent-pool:`` as the shared bucket (including subdir names), so the dashboard
+    display count is unchanged regardless of the actual scope value.
 
     Files whose extension is not one of ``running``/``done``/``failed``/``bypassed``
     are silently skipped. Missing directories are not errors — they simply yield
@@ -178,15 +190,25 @@ def scan_signals() -> List[SignalEntry]:
     tmp_root = tempfile.gettempdir()
     entries: List[SignalEntry] = []
 
-    # (A) Shared scope — recursive walk under claude-signals/
-    entries.extend(_walk_signal_entries(os.path.join(tmp_root, "claude-signals"), "shared"))
+    # (A) Subdir-per-scope — iterate direct children of claude-signals/
+    cs_root = os.path.join(tmp_root, "claude-signals")
+    if os.path.isdir(cs_root):
+        for child_name in sorted(os.listdir(cs_root)):
+            child_path = os.path.join(cs_root, child_name)
+            if os.path.isdir(child_path):
+                # Directory: use child directory name as scope
+                entries.extend(_walk_signal_entries(child_path, child_name))
+            else:
+                # Root-direct file: backward-compatibility fallback → scope="shared"
+                entry = _signal_entry(child_path, "shared")
+                if entry is not None:
+                    entries.append(entry)
 
     # (B) Agent-pool scope — each agent-pool-signals-{timestamp}/ directory
-    prefix = "agent-pool-signals-"
-    for pool_dir in glob.glob(os.path.join(tmp_root, f"{prefix}*")):
+    for pool_dir in glob.glob(os.path.join(tmp_root, f"{_AGENT_POOL_DIR_PREFIX}*")):
         pool_name = os.path.basename(pool_dir)
-        timestamp = pool_name[len(prefix):] if pool_name.startswith(prefix) else pool_name
-        entries.extend(_walk_signal_entries(pool_dir, f"agent-pool:{timestamp}"))
+        timestamp = pool_name[len(_AGENT_POOL_DIR_PREFIX):]
+        entries.extend(_walk_signal_entries(pool_dir, f"{_AGENT_POOL_SCOPE_PREFIX}{timestamp}"))
 
     return entries
 
@@ -629,6 +651,81 @@ def scan_features(docs_dir: Path) -> List[WorkItem]:
         return _load_feature_title(state_path.parent), None, []
 
     return _scan_dir(docs_dir, "features", "feat", _feat_lookup)
+
+
+# ---------------------------------------------------------------------------
+# --- subproject helpers (TSK-00-03) ---
+# ---------------------------------------------------------------------------
+
+
+def discover_subprojects(docs_dir: Path) -> List[str]:
+    """``{docs_dir}/*/wbs.md`` 를 포함한 child 디렉터리 이름을 정렬된 리스트로 반환.
+
+    - ``docs_dir`` 가 존재하지 않거나 디렉터리가 아니면 ``[]`` 반환 (예외 없음).
+    - ``wbs.md`` 가 없는 child 디렉터리(예: ``tasks/``, ``features/``)는 제외.
+    - 반환 리스트는 알파벳 오름차순 정렬 (결정론적 순서 보장).
+
+    기존 ``args-parse.py:82-92`` 서브프로젝트 규약과 동일 — child 디렉터리에
+    ``wbs.md`` 가 있으면 subproject로 판정한다. stdlib ``pathlib.Path`` 만 사용.
+    """
+    docs_dir = Path(docs_dir)
+    if not docs_dir.is_dir():
+        return []
+    result: List[str] = []
+    for child in sorted(docs_dir.iterdir()):
+        if child.is_dir() and (child / "wbs.md").is_file():
+            result.append(child.name)
+    return result
+
+
+def _filter_by_subproject(state: dict, sp: str, project_name: str) -> dict:
+    """``state`` dict를 in-place 수정하여 ``sp`` 서브프로젝트에 속하는 항목만 남긴다.
+
+    필터 조건:
+
+    **pane** (``state["tmux_panes"]`` 리스트, ``None`` 이면 ``None`` 그대로 유지):
+    - ``window_name`` 이 ``-{sp}`` suffix 로 끝나거나
+    - ``window_name`` 에 ``-{sp}-`` 가 포함되거나
+    - ``pane_current_path`` 에 ``/{sp}/`` 가 포함되면 통과.
+
+    **signal** (``state["signals"]`` 리스트):
+    - ``scope`` 가 ``{project_name}-{sp}`` 와 정확히 일치하거나
+    - ``scope`` 가 ``{project_name}-{sp}-`` 로 시작하면 통과.
+
+    반환 값은 동일한 ``state`` dict (in-place 수정).
+    """
+    prefix = f"{project_name}-{sp}"
+
+    # signals 필터
+    signals = state.get("signals")
+    if isinstance(signals, list):
+        state["signals"] = [
+            s for s in signals
+            if isinstance(s, dict) and (
+                s.get("scope") == prefix
+                or (isinstance(s.get("scope"), str) and s["scope"].startswith(prefix + "-"))
+            )
+        ]
+
+    # pane 필터 — None 이면 그대로 유지
+    panes = state.get("tmux_panes")
+    if panes is not None and isinstance(panes, list):
+        suffix_marker = f"-{sp}"
+        infix_marker = f"-{sp}-"
+        path_marker = f"/{sp}/"
+
+        def _pane_matches(pane: dict) -> bool:
+            wn = pane.get("window_name", "") or ""
+            cwd = pane.get("pane_current_path", "") or ""
+            return (
+                wn.endswith(suffix_marker)
+                or infix_marker in wn
+                or path_marker in cwd
+            )
+
+        state["tmux_panes"] = [p for p in panes if isinstance(p, dict) and _pane_matches(p)]
+
+    return state
 
 
 # ---------------------------------------------------------------------------
@@ -3402,7 +3499,6 @@ def _handle_pane_api(
 # ---------------------------------------------------------------------------
 
 _API_STATE_PATH = "/api/state"
-_AGENT_POOL_SCOPE_PREFIX = "agent-pool:"
 
 
 def _is_api_state_path(path: str) -> bool:
@@ -3476,6 +3572,93 @@ def _classify_signal_scopes(
         else:
             shared.append(sig)
     return shared, agent_pool
+
+
+# ---------------------------------------------------------------------------
+# Project-level pane/signal filter helpers (TSK-00-02)
+# ---------------------------------------------------------------------------
+
+
+def _filter_panes_by_project(
+    panes: Optional[List["PaneInfo"]],
+    project_root: str,
+    project_name: str,
+) -> Optional[List["PaneInfo"]]:
+    """Return panes that belong to the given project.
+
+    A pane passes the filter if **either** condition is true:
+
+    1. ``pane_current_path`` equals *project_root* or is a subdirectory of it
+       (``pane_current_path.startswith(root + os.sep)``).
+    2. ``window_name`` matches the ``WP-*-{project_name}`` pattern, i.e. it starts
+       with ``"WP-"`` and ends with ``"-{project_name}"``.
+
+    Special cases:
+
+    - If *panes* is ``None`` (tmux not installed signal), ``None`` is returned
+      unchanged so the caller can distinguish "no tmux" from "tmux with 0 panes".
+    - Trailing ``os.sep`` on *project_root* is normalised before comparison.
+    - The original list is never mutated — a new list is returned.
+
+    Args:
+        panes: Output of ``list_tmux_panes()`` — ``None`` or ``List[PaneInfo]``.
+        project_root: Absolute path to the project root directory.
+        project_name: Short project name used in WP window-name pattern.
+
+    Returns:
+        ``None`` if *panes* is ``None``, otherwise a filtered ``List[PaneInfo]``.
+    """
+    if panes is None:
+        return None
+
+    root = project_root.rstrip(os.sep)
+    suffix = f"-{project_name}"
+    result: List[PaneInfo] = []
+    for pane in panes:
+        cwd = getattr(pane, "pane_current_path", "") or ""
+        wname = getattr(pane, "window_name", "") or ""
+        # Condition 1: cwd is the root dir or a strict subdirectory.
+        if cwd == root or cwd.startswith(root + os.sep):
+            result.append(pane)
+            continue
+        # Condition 2: window_name matches WP-*-{project_name}.
+        if wname.startswith("WP-") and wname.endswith(suffix):
+            result.append(pane)
+    return result
+
+
+def _filter_signals_by_project(
+    signals: List[SignalEntry],
+    project_name: str,
+) -> List[SignalEntry]:
+    """Return signals whose scope belongs to the given project.
+
+    A signal passes the filter if its ``scope`` field satisfies:
+
+    - ``scope == project_name``  (exact match), **or**
+    - ``scope.startswith(project_name + "-")``  (sub-project prefix match).
+
+    This deliberately excludes:
+
+    - ``"shared"`` scope (cross-project shared signals).
+    - ``"agent-pool:*"`` scope (session-local pool signals).
+    - Other-project scopes including false-positive prefixes like ``myproj2``
+      when *project_name* is ``myproj`` (the ``"-"`` separator prevents it).
+
+    Args:
+        signals: List of ``SignalEntry`` objects from ``scan_signals()``.
+        project_name: Short project name to match against.
+
+    Returns:
+        A new list containing only matching signal entries.
+    """
+    prefix = project_name + "-"
+    result: List[SignalEntry] = []
+    for sig in signals:
+        scope = getattr(sig, "scope", "") or ""
+        if scope == project_name or scope.startswith(prefix):
+            result.append(sig)
+    return result
 
 
 def _build_render_state(
