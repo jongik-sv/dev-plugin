@@ -2,20 +2,22 @@
 """send-prompt.py — Cross-platform tmux/psmux prompt sender.
 
 Sends a text prompt (and optionally Enter) to a tmux/psmux pane, handling
-the Windows/psmux bracketed-paste quirk that swallows the trailing Enter
-when text and Enter are passed to `send-keys` in a single call.
+the bracketed-paste quirk that swallows the trailing Enter when text and
+Enter are passed to `send-keys` in a single call.
 
 Background:
-  On Windows (psmux + Claude Code TUI), `send-keys -t PANE 'TEXT' Enter` in
-  one call wraps the text in bracketed-paste markers (ESC[200~ ... ESC[201~)
-  and the Claude Code TUI treats the trailing CR as a newline INSIDE the
-  paste block instead of submitting the prompt. On real tmux (macOS/Linux)
-  this hasn't been observed in practice.
+  `send-keys -t PANE 'TEXT' Enter` in one call wraps the text in
+  bracketed-paste markers (ESC[200~ ... ESC[201~). The Claude Code TUI
+  treats the trailing CR as a newline INSIDE the paste block instead of
+  submitting the prompt. This was first reported on Windows/psmux, but
+  the same behavior has since been reproduced on macOS (tmux 3.6a +
+  Claude Code v2.1.x) — the prompt text lands in the input buffer but is
+  not submitted, so dev-team workers stayed idle until a second manual
+  Enter was sent.
 
-  To keep macOS/Linux behavior unchanged while fixing Windows, this helper
-  branches on `_platform.IS_WINDOWS`:
-    - Windows: send text, small sleep, send Enter (separate calls)
-    - macOS/Linux: single `send-keys 'TEXT' Enter` call (original behavior)
+  Fix applied on ALL platforms: send text first, short sleep, then send
+  Enter as a separate `send-keys` invocation so the Enter arrives outside
+  the paste block and is interpreted as submit.
 
 Usage:
   send-prompt.py <pane_id> --text "TEXT"               send text + Enter
@@ -78,15 +80,12 @@ def send(pane_id: str, text: str | None, key: str | None,
         print("send-prompt.py: --text, --key, or --slash-command required", file=sys.stderr)
         return 2
 
-    if IS_WINDOWS and enter:
+    if enter:
         rc = _run([mux, "send-keys", "-t", pane_id, text])
         if rc != 0:
             return rc
         time.sleep(SPLIT_DELAY_SEC)
         return _run([mux, "send-keys", "-t", pane_id, "Enter"])
-
-    if enter:
-        return _run([mux, "send-keys", "-t", pane_id, text, "Enter"])
 
     return _run([mux, "send-keys", "-t", pane_id, text])
 

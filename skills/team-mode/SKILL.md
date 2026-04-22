@@ -280,7 +280,7 @@ else
 fi
 ```
 
-> ⚠️ **헬퍼를 사용하는 이유**: `send-prompt.py`는 플랫폼 차이를 내부적으로 흡수한다. Windows/psmux에서는 텍스트와 Enter를 분리 호출(bracketed-paste 회피), macOS/Linux tmux에서는 기존대로 한 번에 전송. 직접 `tmux send-keys '...' Enter`를 호출하면 Windows에서 Claude Code TUI가 Enter를 삼켜 프롬프트가 submit되지 않는다.
+> ⚠️ **헬퍼를 사용하는 이유**: `send-prompt.py`는 bracketed-paste 이슈를 내부적으로 처리한다 — **모든 플랫폼(macOS/Linux/Windows)** 에서 텍스트와 Enter를 분리 호출하여 trailing Enter가 paste 블록 안으로 삼켜지는 문제를 피한다. 직접 `tmux send-keys '...' Enter`를 단일 호출로 쓰면 Claude Code TUI(v2.1.x)가 Enter를 paste 블록 내부 개행으로 해석해 프롬프트가 submit되지 않는다 (tmux 3.6a + macOS에서도 재현됨).
 
 > **왜 Escape를 보내는가?** Claude Code가 idle/churned 상태에 빠지면 send-keys 입력을 무시한다. Escape를 먼저 전송해야 입력 수용 상태로 복귀한다.
 

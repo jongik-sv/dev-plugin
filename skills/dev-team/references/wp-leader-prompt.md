@@ -75,7 +75,7 @@ tmux send-keys -t {paneId} Escape
 {PYTHON_BIN} {PLUGIN_ROOT}/scripts/send-prompt.py {paneId} --text '{prompt_file} 파일을 Read 도구로 읽고 그 안의 작업을 수행하라.'
 ```
 
-> ⚠️ **헬퍼를 반드시 사용**: `send-prompt.py`는 플랫폼별 bracketed-paste 이슈를 내부적으로 처리한다 (Windows/psmux에서는 텍스트와 Enter를 분리 호출, macOS/Linux는 한 번에 전송). 직접 `tmux send-keys '...' Enter`를 호출하면 Windows에서 Claude Code TUI가 Enter를 줄바꿈으로 해석하여 프롬프트가 submit되지 않는다. `/clear`, `/exit` 등 모든 텍스트+Enter 조합에도 동일하게 헬퍼를 사용하라.
+> ⚠️ **헬퍼를 반드시 사용**: `send-prompt.py`는 bracketed-paste 이슈를 내부적으로 처리한다 — **모든 플랫폼(macOS/Linux/Windows)** 에서 텍스트와 Enter를 분리 호출한다. 직접 `tmux send-keys '...' Enter`를 단일 호출로 쓰면 텍스트가 bracketed-paste 블록(`ESC[200~…ESC[201~`)으로 감싸지면서 trailing Enter가 paste 블록 내부 개행으로 처리되어 Claude Code TUI가 프롬프트를 submit하지 않는다(tmux 3.6a + Claude Code v2.1.117 macOS에서 재현). `/clear`, `/exit` 등 모든 텍스트+Enter 조합에 동일하게 헬퍼를 사용하라.
 
 3단계 — 할당 수신 검증 (Bash `run_in_background`로 실행):
 ```bash
