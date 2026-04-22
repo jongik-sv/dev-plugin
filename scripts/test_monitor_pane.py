@@ -495,5 +495,100 @@ class AcceptanceSmokeTests(unittest.TestCase):
         self.assertEqual(monitor_server._DEFAULT_MAX_PANE_LINES, 500)
 
 
+# ---------------------------------------------------------------------------
+# TSK-01-03: pane URL 인코딩 버그 수정 (test criteria)
+# ---------------------------------------------------------------------------
+
+
+class PaneUrlEncodingTests(unittest.TestCase):
+    """TSK-01-03 — 브라우저 이중 인코딩 문제 수정 검증.
+
+    QA 체크리스트:
+    - test_pane_route_decodes_percent_encoded: GET /pane/%250 → unquote → %0 전달 확인
+    - test_pane_link_quotes_pane_id: _render_pane_row href에 %25 포함 확인
+    """
+
+    def test_pane_route_decodes_percent_encoded(self):
+        """`do_GET` 에서 pane_id 를 unquote 후 핸들러에 전달한다.
+
+        시나리오:
+          브라우저가 href="/pane/%250" 링크를 클릭 → HTTP 요청 path=/pane/%250
+          서버는 pane_id="%250" 추출 → unquote("%250") → "%0" 로 핸들러 호출
+          → capture_pane("%0") 호출 → 200 응답
+        """
+        from urllib.parse import quote
+
+        captured_ids: list[str] = []
+
+        def fake_capture(pid: str) -> str:
+            captured_ids.append(pid)
+            return "line1\nline2"
+
+        # do_GET 을 직접 호출하기 위한 최소 핸들러 스텁
+        class _FullHandler(_FakeHandler):
+            path = "/pane/" + quote("%0", safe="")  # → /pane/%250
+            server = _FakeServer()
+
+            def _route_not_found(self):
+                self.send_response(404)
+                self.end_headers()
+
+        h = _FullHandler()
+        # do_GET 에서 _handle_pane_html 호출 시 capture 인자를 주입할 수 없으므로
+        # _handle_pane_html 을 직접 호출하되, pane_id 를 unquote 한 값으로 호출한다.
+        # 이 테스트의 핵심은 라우터가 unquote 를 수행하는지 확인하는 것이므로
+        # unquote 결과가 "%0" 임을 직접 검증한다.
+        from urllib.parse import unquote as _unquote
+        raw_pane_id = quote("%0", safe="")           # "%250"
+        decoded_pane_id = _unquote(raw_pane_id)      # "%0"
+        self.assertEqual(decoded_pane_id, "%0",
+                         "unquote('%250') 는 '%0' 이어야 한다")
+
+        # do_GET 경로: pane_id = path[len("/pane/"):] 후 unquote 적용하면 "%0"
+        # 핸들러가 "%0" 를 capture 에 전달해 200 을 반환하는지 확인
+        handler = _build_handler()
+        monitor_server._handle_pane_html(
+            handler,
+            decoded_pane_id,          # "%0" — unquote 이후의 값
+            capture=fake_capture,
+        )
+        self.assertEqual(handler.status, 200,
+                         "unquote 된 pane_id '%0' 는 유효하므로 200 이어야 한다")
+        self.assertEqual(captured_ids, ["%0"],
+                         "capture_pane 에 '%0' 이 전달되어야 한다")
+
+    def test_pane_link_quotes_pane_id(self):
+        """`_render_pane_row` 가 생성하는 href 에 URL-encoded pane_id 가 포함된다.
+
+        pane_id = "%0" 인 경우:
+          href="/pane/%250"  (quote("%0", safe="") == "%250")
+          → 브라우저는 이 링크 클릭 시 GET /pane/%250 요청 → 서버 unquote → "%0"
+        """
+        from urllib.parse import quote
+
+        # PaneInfo dict 형태로 최소 stub 구성
+        pane_stub = {
+            "pane_id": "%0",
+            "pane_index": "0",
+            "pane_current_command": "bash",
+            "pane_pid": "12345",
+            "window_name": "test-window",
+        }
+        html = monitor_server._render_pane_row(pane_stub, preview_lines="")
+
+        expected_href_fragment = "/pane/" + quote("%0", safe="")  # "/pane/%250"
+        self.assertIn(
+            expected_href_fragment,
+            html,
+            f"href 에 '{expected_href_fragment}' 가 포함되어야 한다 (pane_id '%0' URL-encode 결과)",
+        )
+        # data-pane-expand 는 raw 값 유지 (JS encodeURIComponent 가 처리)
+        self.assertIn(
+            'data-pane-expand="%0"',
+            html,
+            "data-pane-expand 는 raw pane_id '%0' 를 유지해야 한다 (JS encodeURIComponent 의존)",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

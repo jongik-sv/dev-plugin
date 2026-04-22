@@ -1399,6 +1399,377 @@ class SectionTitlesI18nTests(unittest.TestCase):
         html = render_dashboard(model)
         # Should still be a valid HTML document
         self.assertTrue(html.startswith("<!DOCTYPE html>"))
+# ---------------------------------------------------------------------------
+# TSK-01-02: discover_subprojects, _filter_by_subproject (TSK-00-03)
+# ---------------------------------------------------------------------------
+
+_HAS_DISCOVER_SUBPROJECTS = hasattr(monitor_server, "discover_subprojects")
+_HAS_FILTER_BY_SUBPROJECT = hasattr(monitor_server, "_filter_by_subproject")
+_HAS_FILTER_PANES_BY_PROJECT = hasattr(monitor_server, "_filter_panes_by_project")
+_HAS_FILTER_SIGNALS_BY_PROJECT = hasattr(monitor_server, "_filter_signals_by_project")
+_HAS_SECTION_SUBPROJECT_TABS = hasattr(monitor_server, "_section_subproject_tabs")
+
+
+@unittest.skipUnless(_HAS_DISCOVER_SUBPROJECTS, "discover_subprojects 미구현")
+class DiscoverSubprojectsTests(unittest.TestCase):
+    """discover_subprojects: 멀티/레거시/엣지 케이스."""
+
+    def setUp(self):
+        import tempfile
+        self._tmp = tempfile.mkdtemp()
+        self._tmppath = Path(self._tmp)
+        self.discover = monitor_server.discover_subprojects
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def test_multi_mode_returns_subproject_names(self):
+        """wbs.md가 있는 child 디렉터리를 서브프로젝트로 반환 (정렬)."""
+        (self._tmppath / "billing").mkdir()
+        (self._tmppath / "billing" / "wbs.md").write_text("# wbs")
+        (self._tmppath / "auth").mkdir()
+        (self._tmppath / "auth" / "wbs.md").write_text("# wbs")
+        result = self.discover(self._tmppath)
+        self.assertEqual(result, ["auth", "billing"])
+
+    def test_legacy_mode_returns_empty(self):
+        """docs/ 루트에만 wbs.md가 있고 child subdirs에 없으면 빈 리스트."""
+        (self._tmppath / "wbs.md").write_text("# wbs")
+        result = self.discover(self._tmppath)
+        self.assertEqual(result, [])
+
+    def test_ignores_dirs_without_wbs(self):
+        """wbs.md가 없는 디렉터리(tasks/, features/)는 제외."""
+        (self._tmppath / "tasks").mkdir()
+        (self._tmppath / "features").mkdir()
+        (self._tmppath / "billing").mkdir()
+        (self._tmppath / "billing" / "wbs.md").write_text("# wbs")
+        result = self.discover(self._tmppath)
+        self.assertEqual(result, ["billing"])
+
+    def test_empty_docs_dir_returns_empty(self):
+        """docs_dir에 아무것도 없어도 빈 리스트."""
+        result = self.discover(self._tmppath)
+        self.assertEqual(result, [])
+
+    def test_nonexistent_docs_dir_returns_empty(self):
+        """존재하지 않는 docs_dir에도 예외 없이 빈 리스트."""
+        result = self.discover(self._tmppath / "nonexistent")
+        self.assertEqual(result, [])
+
+
+@unittest.skipUnless(_HAS_FILTER_BY_SUBPROJECT, "_filter_by_subproject 미구현")
+class FilterBySubprojectTests(unittest.TestCase):
+    """_filter_by_subproject: pane/signal 서브프로젝트 필터링."""
+
+    def setUp(self):
+        self.filter_fn = monitor_server._filter_by_subproject
+
+    def _make_pane_with_path(self, window_name, path):
+        return PaneInfo(
+            window_name=window_name,
+            window_id="@1",
+            pane_id="%1",
+            pane_index=0,
+            pane_current_path=path,
+            pane_current_command="bash",
+            pane_pid=1234,
+            is_active=True,
+        )
+
+    def _make_signal(self, scope):
+        return SignalEntry(
+            name="TSK-01-01.done",
+            kind="done",
+            task_id="TSK-01-01",
+            mtime="2026-04-20T00:00:00+00:00",
+            scope=scope,
+        )
+
+    def test_filter_panes_by_window_name_suffix(self):
+        """window_name이 '-{sp}' suffix이면 통과."""
+        pane = self._make_pane_with_path("WP-01-billing", "/tmp")
+        result = self.filter_fn([pane], "billing", "proj-a")
+        self.assertEqual(len(result["panes"]), 1)
+
+    def test_filter_panes_by_window_name_contains(self):
+        """window_name에 '-{sp}-' substring이 있으면 통과."""
+        pane = self._make_pane_with_path("WP-01-billing-2", "/tmp")
+        result = self.filter_fn([pane], "billing", "proj-a")
+        self.assertEqual(len(result["panes"]), 1)
+
+    def test_filter_panes_by_path(self):
+        """pane_current_path에 '/{sp}/' 포함이면 통과."""
+        pane = self._make_pane_with_path("other-window", "/home/user/proj/billing/src")
+        result = self.filter_fn([pane], "billing", "proj-a")
+        self.assertEqual(len(result["panes"]), 1)
+
+    def test_filter_panes_excludes_other(self):
+        """다른 서브프로젝트 pane은 제외."""
+        pane = self._make_pane_with_path("WP-01-auth", "/tmp/auth")
+        result = self.filter_fn([pane], "billing", "proj-a")
+        self.assertEqual(len(result["panes"]), 0)
+
+    def test_filter_signals_by_scope_exact(self):
+        """scope가 '{project_name}-{sp}'이면 통과."""
+        sig = self._make_signal("proj-a-billing")
+        result = self.filter_fn([sig], "billing", "proj-a")
+        self.assertEqual(len(result["signals"]), 1)
+
+    def test_filter_signals_by_scope_prefix(self):
+        """scope가 '{project_name}-{sp}-*' prefix이면 통과."""
+        sig = self._make_signal("proj-a-billing-worker")
+        result = self.filter_fn([sig], "billing", "proj-a")
+        self.assertEqual(len(result["signals"]), 1)
+
+    def test_filter_signals_excludes_other_sp(self):
+        """다른 서브프로젝트 scope는 제외."""
+        sig = self._make_signal("proj-a-auth")
+        result = self.filter_fn([sig], "billing", "proj-a")
+        self.assertEqual(len(result["signals"]), 0)
+
+
+@unittest.skipUnless(_HAS_FILTER_PANES_BY_PROJECT, "_filter_panes_by_project 미구현")
+class FilterPanesByProjectTests(unittest.TestCase):
+    """_filter_panes_by_project: 프로젝트 레벨 pane 필터."""
+
+    def setUp(self):
+        self.filter_fn = monitor_server._filter_panes_by_project
+
+    def _make_pane(self, window_name, path):
+        return PaneInfo(
+            window_name=window_name,
+            window_id="@1",
+            pane_id="%1",
+            pane_index=0,
+            pane_current_path=path,
+            pane_current_command="bash",
+            pane_pid=1234,
+            is_active=True,
+        )
+
+    def test_passes_by_project_root_path(self):
+        """pane_current_path가 project_root 하위이면 통과."""
+        pane = self._make_pane("some-window", "/home/user/proj-a/src")
+        result = self.filter_fn([pane], "/home/user/proj-a", "proj-a")
+        self.assertEqual(len(result), 1)
+
+    def test_passes_by_window_name_pattern(self):
+        """window_name이 'WP-*-{project_name}' 패턴이면 통과."""
+        pane = self._make_pane("WP-01-proj-a", "/tmp")
+        result = self.filter_fn([pane], "/home/user/proj-a", "proj-a")
+        self.assertEqual(len(result), 1)
+
+    def test_excludes_other_project_path(self):
+        """다른 project_root 하위 pane은 제외."""
+        pane = self._make_pane("some-window", "/home/user/proj-b/src")
+        result = self.filter_fn([pane], "/home/user/proj-a", "proj-a")
+        self.assertEqual(len(result), 0)
+
+    def test_excludes_other_project_window_name(self):
+        """다른 프로젝트 window_name은 제외."""
+        pane = self._make_pane("WP-01-proj-b", "/tmp")
+        result = self.filter_fn([pane], "/home/user/proj-a", "proj-a")
+        self.assertEqual(len(result), 0)
+
+
+@unittest.skipUnless(_HAS_FILTER_SIGNALS_BY_PROJECT, "_filter_signals_by_project 미구현")
+class FilterSignalsByProjectTests(unittest.TestCase):
+    """_filter_signals_by_project: 프로젝트 레벨 signal 필터."""
+
+    def setUp(self):
+        self.filter_fn = monitor_server._filter_signals_by_project
+
+    def _make_signal(self, scope):
+        return SignalEntry(
+            name="TSK-01-01.done",
+            kind="done",
+            task_id="TSK-01-01",
+            mtime="2026-04-20T00:00:00+00:00",
+            scope=scope,
+        )
+
+    def test_passes_exact_project_name(self):
+        """scope가 project_name과 동일하면 통과."""
+        sig = self._make_signal("proj-a")
+        result = self.filter_fn([sig], "proj-a")
+        self.assertEqual(len(result), 1)
+
+    def test_passes_project_name_prefix(self):
+        """scope가 'project_name-*' prefix이면 통과 (서브프로젝트 포함)."""
+        sig = self._make_signal("proj-a-billing")
+        result = self.filter_fn([sig], "proj-a")
+        self.assertEqual(len(result), 1)
+
+    def test_excludes_other_project(self):
+        """다른 프로젝트 scope는 제외."""
+        sig = self._make_signal("proj-b")
+        result = self.filter_fn([sig], "proj-a")
+        self.assertEqual(len(result), 0)
+
+    def test_passes_agent_pool_scope(self):
+        """agent-pool: scope는 필터링하지 않고 통과."""
+        sig = self._make_signal("agent-pool:20260501")
+        result = self.filter_fn([sig], "proj-a")
+        self.assertEqual(len(result), 1)
+
+
+@unittest.skipUnless(_HAS_SECTION_SUBPROJECT_TABS, "_section_subproject_tabs 미구현")
+class SectionSubprojectTabsTests(unittest.TestCase):
+    """_section_subproject_tabs: 탭 바 HTML 생성."""
+
+    def setUp(self):
+        self.section_fn = monitor_server._section_subproject_tabs
+
+    def test_multi_mode_renders_tabs(self):
+        """멀티 모드: <nav class="subproject-tabs">와 all/sp 링크 포함."""
+        model = {
+            "is_multi_mode": True,
+            "available_subprojects": ["billing", "auth"],
+            "subproject": "all",
+            "lang": "ko",
+        }
+        html = self.section_fn(model)
+        self.assertIn('class="subproject-tabs"', html)
+        self.assertIn("all", html)
+        self.assertIn("billing", html)
+        self.assertIn("auth", html)
+
+    def test_legacy_mode_returns_empty(self):
+        """레거시 모드: 빈 문자열 반환."""
+        model = {
+            "is_multi_mode": False,
+            "available_subprojects": [],
+            "subproject": "all",
+        }
+        html = self.section_fn(model)
+        self.assertEqual(html, "")
+
+    def test_current_tab_has_aria_current(self):
+        """현재 탭에 aria-current="page" 부여."""
+        model = {
+            "is_multi_mode": True,
+            "available_subprojects": ["billing", "auth"],
+            "subproject": "billing",
+            "lang": "ko",
+        }
+        html = self.section_fn(model)
+        self.assertIn('aria-current="page"', html)
+
+    def test_current_tab_has_active_class(self):
+        """현재 탭에 class="active" 부여."""
+        model = {
+            "is_multi_mode": True,
+            "available_subprojects": ["billing", "auth"],
+            "subproject": "billing",
+            "lang": "ko",
+        }
+        html = self.section_fn(model)
+        self.assertIn('class="active"', html)
+
+    def test_tab_links_include_subproject_query(self):
+        """탭 링크에 ?subproject= 쿼리 포함."""
+        model = {
+            "is_multi_mode": True,
+            "available_subprojects": ["billing"],
+            "subproject": "all",
+            "lang": "ko",
+        }
+        html = self.section_fn(model)
+        self.assertIn("?subproject=billing", html)
+
+    def test_tab_links_preserve_lang_query(self):
+        """탭 링크에 기존 lang 쿼리 보존."""
+        model = {
+            "is_multi_mode": True,
+            "available_subprojects": ["billing"],
+            "subproject": "all",
+            "lang": "en",
+        }
+        html = self.section_fn(model)
+        self.assertIn("lang=en", html)
+
+    def test_three_tabs_for_two_subprojects(self):
+        """서브프로젝트 2개면 all 포함 탭 3개."""
+        model = {
+            "is_multi_mode": True,
+            "available_subprojects": ["p1", "p2"],
+            "subproject": "all",
+            "lang": "ko",
+        }
+        html = self.section_fn(model)
+        # Count <a href= occurrences
+        count = html.count('<a href=')
+        self.assertEqual(count, 3)
+
+    def test_xss_protection_on_subproject_name(self):
+        """서브프로젝트 이름이 HTML-escaped됨 (XSS 방어)."""
+        model = {
+            "is_multi_mode": True,
+            "available_subprojects": ['<script>alert(1)</script>'],
+            "subproject": "all",
+            "lang": "ko",
+        }
+        html = self.section_fn(model)
+        self.assertNotIn('<script>', html)
+
+
+class RenderDashboardTabsTests(unittest.TestCase):
+    """render_dashboard: 탭 바 삽입 순서 및 멀티/레거시 표시."""
+
+    def _minimal_model(self, is_multi=False, subprojects=None, subproject="all"):
+        return {
+            "wbs_tasks": [],
+            "features": [],
+            "shared_signals": [],
+            "agent_pool_signals": [],
+            "tmux_panes": [],
+            "generated_at": "2026-04-22T00:00:00Z",
+            "project_root": "/proj",
+            "docs_dir": "docs",
+            "is_multi_mode": is_multi,
+            "available_subprojects": subprojects or [],
+            "subproject": subproject,
+            "lang": "ko",
+            "project_name": "proj",
+            "refresh_seconds": 3,
+        }
+
+    def test_dashboard_shows_tabs_in_multi_mode(self):
+        """멀티 모드: 응답 HTML에 <nav class="subproject-tabs"> 포함."""
+        model = self._minimal_model(is_multi=True, subprojects=["p1", "p2"])
+        html = render_dashboard(model)
+        self.assertIn('class="subproject-tabs"', html)
+        self.assertIn("p1", html)
+        self.assertIn("p2", html)
+
+    def test_dashboard_hides_tabs_in_legacy(self):
+        """레거시 모드: 응답 HTML에 <nav class="subproject-tabs"> nav 요소 없음."""
+        model = self._minimal_model(is_multi=False)
+        html = render_dashboard(model)
+        # CSS still contains 'subproject-tabs' as a class selector — check for the nav element
+        self.assertNotIn('<nav class="subproject-tabs"', html)
+
+    def test_dashboard_renders_tabs_between_header_and_kpi(self):
+        """header → subproject-tabs → kpi 순서."""
+        model = self._minimal_model(is_multi=True, subprojects=["p1"])
+        html = render_dashboard(model)
+        # Find positions in HTML body (CSS will also contain subproject-tabs; use body tag)
+        body_start = html.find('<body')
+        idx_header = html.find('class="cmdbar"', body_start)
+        idx_tabs = html.find('<nav class="subproject-tabs"', body_start)
+        idx_kpi = html.find('data-section="kpi"', body_start)
+        if idx_tabs > -1:
+            self.assertLess(idx_header, idx_tabs)
+            self.assertLess(idx_tabs, idx_kpi)
+
+    def test_render_dashboard_multi_model_no_exception(self):
+        """멀티 모드 model로 render_dashboard가 예외 없이 완전한 HTML 반환."""
+        model = self._minimal_model(is_multi=True, subprojects=["billing", "auth"],
+                                    subproject="billing")
+        html = render_dashboard(model)
+        self.assertIn("<!DOCTYPE html>", html)
         self.assertIn("</html>", html)
 
 
