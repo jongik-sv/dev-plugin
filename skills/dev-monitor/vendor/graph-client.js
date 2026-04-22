@@ -275,9 +275,10 @@
   }
 
   // -- DOM 준비 후 기동 --
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", init);
-  } else {
+  // window load 이후 기동하여 레이아웃 확정 후 cytoscape 마운트
+  if (document.readyState === "complete") {
     init();
+  } else {
+    window.addEventListener("load", init);
   }
 })();

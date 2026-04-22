@@ -3187,6 +3187,9 @@ _DASHBOARD_JS = """\
   function patchSection(name,newHtml){
     var current=document.querySelector('[data-section="'+name+'"]');
     if(!current)return;
+    /* dep-graph is managed autonomously by graph-client.js; skip DOM replacement
+       to prevent cytoscape canvas destruction on every 5-second dashboard poll. */
+    if(name==='dep-graph')return;
     if(name==='hdr'){
       /* Preserve chip aria-pressed states and refresh-toggle visual state
          across DOM replacement so client-side filter/toggle survive server push. */
