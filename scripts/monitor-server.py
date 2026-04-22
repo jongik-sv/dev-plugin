@@ -107,6 +107,21 @@ _AGENT_POOL_SCOPE_PREFIX = "agent-pool:"
 # TSK-01-01: WP-scoped signal task_id prefix pattern (e.g. "WP-01-").
 _WP_SIGNAL_PREFIX_RE = re.compile(r"^WP-\d{2}-")
 
+# ---------------------------------------------------------------------------
+# Static file serving constants (TSK-03-03)
+# ---------------------------------------------------------------------------
+
+_STATIC_PATH_PREFIX = "/static/"
+
+# Whitelist of allowed vendor filenames under skills/dev-monitor/vendor/.
+# graph-client.js is a TSK-03-04 placeholder committed as an empty file.
+_STATIC_WHITELIST: "frozenset[str]" = frozenset({
+    "cytoscape.min.js",
+    "dagre.min.js",
+    "cytoscape-dagre.min.js",
+    "graph-client.js",
+})
+
 
 # ---------------------------------------------------------------------------
 # Dataclasses (TRD §5.2, §5.3)
@@ -3480,6 +3495,116 @@ pre.pane-capture {
 .footer { color: var(--muted); font-size: 0.8rem; margin-top: 0.5rem; }"""
 
 
+# ---------------------------------------------------------------------------
+# Static file route helpers (TSK-03-03)
+# ---------------------------------------------------------------------------
+
+
+def _resolve_plugin_root() -> str:
+    """Return the plugin root directory path.
+
+    Resolution order:
+    1. ``$CLAUDE_PLUGIN_ROOT`` environment variable — set when running inside
+       the dev-plugin Claude Code plugin context.
+    2. Fallback: parent of the parent of ``__file__`` (i.e., the repository
+       root when ``__file__`` is ``scripts/monitor-server.py``).
+    """
+    env_val = os.environ.get("CLAUDE_PLUGIN_ROOT", "")
+    if env_val:
+        return env_val
+    return str(Path(__file__).resolve().parent.parent)
+
+
+def _is_static_path(path: str) -> bool:
+    """Return True iff *path* is a valid /static/{whitelist-file} URL.
+
+    Returns False for:
+    - Paths not starting with ``_STATIC_PATH_PREFIX``
+    - Paths that contain ``..`` (directory traversal attempt)
+    - Filenames not in ``_STATIC_WHITELIST``
+    - Empty filename after the prefix
+
+    This function is the *first* defence line — ``_handle_static`` performs a
+    second ``Path.resolve()``-based guard as belt-and-suspenders.
+    """
+    if not isinstance(path, str):
+        return False
+    if not path.startswith(_STATIC_PATH_PREFIX):
+        return False
+    if ".." in path:
+        return False
+    filename = path[len(_STATIC_PATH_PREFIX):]
+    if not filename:
+        return False
+    return filename in _STATIC_WHITELIST
+
+
+def _handle_static(handler: "BaseHTTPRequestHandler", path: str) -> None:
+    """Serve a static vendor JS file to *handler*.
+
+    Protocol:
+    - Extract filename from *path* after ``_STATIC_PATH_PREFIX``.
+    - Re-validate whitelist + ``..`` guard (second defence line).
+    - Resolve absolute path under ``handler.server.plugin_root/skills/dev-monitor/vendor/``.
+    - Verify resolved path is still under ``vendor_dir`` (traversal post-resolve).
+    - On any failure (whitelist miss, file missing, traversal) → 404.
+    - On success → 200 with ``Content-Type: application/javascript; charset=utf-8``
+      and ``Cache-Control: public, max-age=3600``.
+    """
+
+    def _send_404() -> None:
+        body = b"404 Not Found"
+        handler.send_response(404)
+        handler.send_header("Content-Type", "text/plain; charset=utf-8")
+        handler.send_header("Content-Length", str(len(body)))
+        handler.end_headers()
+        handler.wfile.write(body)
+
+    # ── Guard 1: prefix + traversal + whitelist ──────────────────────────────
+    if not isinstance(path, str) or not path.startswith(_STATIC_PATH_PREFIX):
+        _send_404()
+        return
+    if ".." in path:
+        _send_404()
+        return
+    filename = path[len(_STATIC_PATH_PREFIX):]
+    if not filename or filename not in _STATIC_WHITELIST:
+        _send_404()
+        return
+
+    # ── Resolve vendor directory via plugin_root ──────────────────────────────
+    plugin_root = getattr(getattr(handler, "server", None), "plugin_root", None) or _resolve_plugin_root()
+    vendor_dir = Path(plugin_root) / "skills" / "dev-monitor" / "vendor"
+    target = vendor_dir / filename
+
+    # ── Guard 2: post-resolve traversal check ────────────────────────────────
+    try:
+        resolved = target.resolve()
+        vendor_resolved = vendor_dir.resolve()
+        # resolved must be vendor_dir itself or a direct child
+        if vendor_resolved not in (resolved, *resolved.parents):
+            _send_404()
+            return
+    except (OSError, ValueError):
+        _send_404()
+        return
+
+    # ── File read ────────────────────────────────────────────────────────────
+    try:
+        data = target.read_bytes()
+    except OSError:
+        _send_404()
+        return
+
+    # ── Successful response ───────────────────────────────────────────────────
+    handler.send_response(200)
+    handler.send_header("Content-Type", "application/javascript; charset=utf-8")
+    handler.send_header("Cache-Control", "public, max-age=3600")
+    handler.send_header("Content-Length", str(len(data)))
+    handler.end_headers()
+    handler.wfile.write(data)
+
+
 def _is_pane_html_path(path: str) -> bool:
     """Return True iff *path* starts with ``/pane/`` but NOT ``/api/pane/``."""
     if not isinstance(path, str):
@@ -4259,6 +4384,8 @@ class MonitorHandler(BaseHTTPRequestHandler):
 
         if path == "/":
             self._route_root()
+        elif _is_static_path(path):
+            _handle_static(self, path)
         elif _is_api_state_path(self.path):
             self._route_api_state()
         elif _is_pane_api_path(path):
@@ -4401,6 +4528,8 @@ class ThreadingMonitorServer(ThreadingHTTPServer):
         max_pane_lines (int): scrollback line cap for pane capture.
         refresh_seconds (int): dashboard meta-refresh interval.
         no_tmux (bool): when True, tmux calls should be skipped.
+        plugin_root (str): plugin root directory for static file serving
+            (TSK-03-03). Resolved by ``_resolve_plugin_root()`` in ``main()``.
 
     ``allow_reuse_address = True`` prevents ``OSError: Address already in use``
     when the server restarts quickly (e.g., during test runs).
@@ -4416,6 +4545,7 @@ class ThreadingMonitorServer(ThreadingHTTPServer):
         self.max_pane_lines: int = 500
         self.refresh_seconds: int = 3
         self.no_tmux: bool = False
+        self.plugin_root: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -4532,6 +4662,7 @@ def main(argv: Optional[List[str]] = None) -> None:
     server.max_pane_lines = args.max_pane_lines
     server.refresh_seconds = args.refresh_seconds
     server.no_tmux = args.no_tmux
+    server.plugin_root = _resolve_plugin_root()  # TSK-03-03: static file serving
 
     _setup_signal_handler(server, pid_path)
 
