@@ -8,6 +8,7 @@ QA 체크리스트 기반 — design.md §QA 체크리스트 전항목 포함.
 from __future__ import annotations
 
 import importlib.util
+import os
 import sys
 import unittest
 from pathlib import Path
@@ -90,7 +91,6 @@ class TestFilterPanesByProjectRootStartswith(unittest.TestCase):
 
         단순 startswith("/proj/a") 오탐 방지 — root + os.sep 비교 필수.
         """
-        import os
         pane = _make_pane(pane_current_path="/proj/alpha/src")
         result = MS._filter_panes_by_project([pane], "/proj/a", "myproj")
         self.assertNotIn(pane, result)

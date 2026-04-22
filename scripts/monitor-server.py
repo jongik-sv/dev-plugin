@@ -671,11 +671,11 @@ def discover_subprojects(docs_dir: Path) -> List[str]:
     docs_dir = Path(docs_dir)
     if not docs_dir.is_dir():
         return []
-    result: List[str] = []
-    for child in sorted(docs_dir.iterdir()):
-        if child.is_dir() and (child / "wbs.md").is_file():
-            result.append(child.name)
-    return result
+    return [
+        child.name
+        for child in sorted(docs_dir.iterdir())
+        if child.is_dir() and (child / "wbs.md").is_file()
+    ]
 
 
 def _filter_by_subproject(state: dict, sp: str, project_name: str) -> dict:
@@ -695,6 +695,10 @@ def _filter_by_subproject(state: dict, sp: str, project_name: str) -> dict:
     반환 값은 동일한 ``state`` dict (in-place 수정).
     """
     prefix = f"{project_name}-{sp}"
+    prefix_dash = f"{prefix}-"
+    suffix_marker = f"-{sp}"
+    infix_marker = f"-{sp}-"
+    path_marker = f"/{sp}/"
 
     # signals 필터
     signals = state.get("signals")
@@ -703,17 +707,13 @@ def _filter_by_subproject(state: dict, sp: str, project_name: str) -> dict:
             s for s in signals
             if isinstance(s, dict) and (
                 s.get("scope") == prefix
-                or (isinstance(s.get("scope"), str) and s["scope"].startswith(prefix + "-"))
+                or (isinstance(s.get("scope"), str) and s["scope"].startswith(prefix_dash))
             )
         ]
 
     # pane 필터 — None 이면 그대로 유지
     panes = state.get("tmux_panes")
     if panes is not None and isinstance(panes, list):
-        suffix_marker = f"-{sp}"
-        infix_marker = f"-{sp}-"
-        path_marker = f"/{sp}/"
-
         def _pane_matches(pane: dict) -> bool:
             wn = pane.get("window_name", "") or ""
             cwd = pane.get("pane_current_path", "") or ""
@@ -3612,13 +3612,14 @@ def _filter_panes_by_project(
         return None
 
     root = project_root.rstrip(os.sep)
+    root_sep = root + os.sep  # pre-computed once; reused per pane
     suffix = f"-{project_name}"
     result: List[PaneInfo] = []
     for pane in panes:
         cwd = getattr(pane, "pane_current_path", "") or ""
         wname = getattr(pane, "window_name", "") or ""
         # Condition 1: cwd is the root dir or a strict subdirectory.
-        if cwd == root or cwd.startswith(root + os.sep):
+        if cwd == root or cwd.startswith(root_sep):
             result.append(pane)
             continue
         # Condition 2: window_name matches WP-*-{project_name}.
