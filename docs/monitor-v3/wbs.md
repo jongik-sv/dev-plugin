@@ -16,7 +16,7 @@
 |--------|-------------|-----------|----------|------------|---------|
 | backend | Python scripts (monitor-server.py HTTP handler, dep-analysis.py, signal scanners, filter helpers) | `pytest -q scripts/` | - | - | - |
 | frontend | SSR HTML/CSS + 벤더 JS(`skills/dev-monitor/vendor/*.js`). monitor-server.py 내부 `render_dashboard`/`_section_*` 함수가 SSR. 클라이언트 graph-client.js가 `/api/graph` 2초 폴링. | `pytest -q scripts/` | - | - | - |
-| fullstack | backend + frontend 통합 (대시보드 라우트, 탭 바, i18n, 그래프 섹션) | `pytest -q scripts/` | - | - | - |
+| fullstack | backend + frontend 통합 (대시보드 라우트, 탭 바, i18n, 그래프 섹션) | `pytest -q scripts/` | `python3 scripts/test_monitor_e2e.py` | `python3 scripts/monitor-server.py --port 7321 --docs docs/monitor-v3` | `http://localhost:7321` |
 | infra | `/static/` 라우팅, 벤더 JS 바인딩, 플러그인 캐시 동기화 | - | - | - | - |
 
 ### Design Guidance
@@ -285,7 +285,7 @@ monitor-server, monitor-launcher
 - category: development
 - domain: frontend
 - model: sonnet
-- status: [ ]
+- status: [xx]
 - priority: medium
 - assignee: -
 - schedule: 2026-04-24 ~ 2026-04-24
@@ -322,7 +322,7 @@ monitor-server, monitor-launcher
 - category: development
 - domain: fullstack
 - model: sonnet
-- status: [ ]
+- status: [xx]
 - priority: medium
 - assignee: -
 - schedule: 2026-04-24 ~ 2026-04-25

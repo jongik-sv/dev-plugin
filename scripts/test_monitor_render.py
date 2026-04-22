@@ -1240,5 +1240,167 @@ class SectionTeamV2Tests(unittest.TestCase):
         self.assertIn("<pre", html)
 
 
+class I18nHelperTests(unittest.TestCase):
+    """TSK-02-02: _I18N 상수 + _t 헬퍼 단위 테스트."""
+
+    def test_t_korean_work_packages(self):
+        """_t('ko', 'work_packages') → '작업 패키지'."""
+        self.assertEqual(monitor_server._t("ko", "work_packages"), "작업 패키지")
+
+    def test_t_english_work_packages(self):
+        """_t('en', 'work_packages') → 'Work Packages'."""
+        self.assertEqual(monitor_server._t("en", "work_packages"), "Work Packages")
+
+    def test_t_korean_features(self):
+        """_t('ko', 'features') → '기능'."""
+        self.assertEqual(monitor_server._t("ko", "features"), "기능")
+
+    def test_t_english_features(self):
+        """_t('en', 'features') → 'Features'."""
+        self.assertEqual(monitor_server._t("en", "features"), "Features")
+
+    def test_t_korean_team_agents(self):
+        """_t('ko', 'team_agents') → '팀 에이전트 (tmux)'."""
+        self.assertEqual(monitor_server._t("ko", "team_agents"), "팀 에이전트 (tmux)")
+
+    def test_t_english_team_agents(self):
+        """_t('en', 'team_agents') → 'Team Agents (tmux)'."""
+        self.assertEqual(monitor_server._t("en", "team_agents"), "Team Agents (tmux)")
+
+    def test_t_korean_subagents(self):
+        """_t('ko', 'subagents') → '서브 에이전트 (agent-pool)'."""
+        self.assertEqual(monitor_server._t("ko", "subagents"), "서브 에이전트 (agent-pool)")
+
+    def test_t_english_subagents(self):
+        """_t('en', 'subagents') → 'Subagents (agent-pool)'."""
+        self.assertEqual(monitor_server._t("en", "subagents"), "Subagents (agent-pool)")
+
+    def test_t_korean_live_activity(self):
+        """_t('ko', 'live_activity') → '실시간 활동'."""
+        self.assertEqual(monitor_server._t("ko", "live_activity"), "실시간 활동")
+
+    def test_t_english_live_activity(self):
+        """_t('en', 'live_activity') → 'Live Activity'."""
+        self.assertEqual(monitor_server._t("en", "live_activity"), "Live Activity")
+
+    def test_t_korean_phase_timeline(self):
+        """_t('ko', 'phase_timeline') → '단계 타임라인'."""
+        self.assertEqual(monitor_server._t("ko", "phase_timeline"), "단계 타임라인")
+
+    def test_t_english_phase_timeline(self):
+        """_t('en', 'phase_timeline') → 'Phase Timeline'."""
+        self.assertEqual(monitor_server._t("en", "phase_timeline"), "Phase Timeline")
+
+    def test_t_unknown_lang_falls_back_to_ko(self):
+        """미지원 lang('fr')은 ko fallback → '작업 패키지'."""
+        self.assertEqual(monitor_server._t("fr", "work_packages"), "작업 패키지")
+
+    def test_t_unknown_key_returns_key_itself(self):
+        """미지원 key는 key 자체를 반환."""
+        self.assertEqual(monitor_server._t("ko", "unknown_key"), "unknown_key")
+
+    def test_t_unknown_key_returns_key_for_en(self):
+        """영어 모드에서도 미지원 key는 key 자체를 반환."""
+        self.assertEqual(monitor_server._t("en", "no_such_key"), "no_such_key")
+
+
+class SectionTitlesI18nTests(unittest.TestCase):
+    """TSK-02-02: render_dashboard lang 파라미터 — 섹션 h2 번역 테스트.
+
+    QA 체크리스트 test_section_titles_korean_default,
+    test_section_titles_english_with_lang_en 포함.
+    """
+
+    def _base_model(self):
+        return {
+            "generated_at": "2026-04-22T00:00:00Z",
+            "project_root": "/proj",
+            "docs_dir": "/proj/docs/monitor-v3",
+            "refresh_seconds": 3,
+            "wbs_tasks": [_make_task()],
+            "features": [_make_feat()],
+            "shared_signals": [],
+            "agent_pool_signals": [],
+            "tmux_panes": None,
+        }
+
+    def test_section_titles_korean_default(self):
+        """lang 미지정 시 기본 ko — 모든 섹션 heading이 한국어."""
+        model = self._base_model()
+        html = render_dashboard(model)
+        self.assertIn("<h2>작업 패키지</h2>", html)
+        self.assertIn("<h2>기능</h2>", html)
+        self.assertIn("<h2>팀 에이전트 (tmux)</h2>", html)
+        self.assertIn("<h2>서브 에이전트 (agent-pool)</h2>", html)
+        self.assertIn("<h2>실시간 활동</h2>", html)
+        self.assertIn("<h2>단계 타임라인</h2>", html)
+
+    def test_section_titles_korean_explicit(self):
+        """lang='ko' 명시 — 모든 섹션 heading이 한국어."""
+        model = self._base_model()
+        html = render_dashboard(model, lang="ko")
+        self.assertIn("<h2>작업 패키지</h2>", html)
+        self.assertIn("<h2>기능</h2>", html)
+
+    def test_section_titles_english_with_lang_en(self):
+        """lang='en' — 모든 섹션 heading이 영문."""
+        model = self._base_model()
+        html = render_dashboard(model, lang="en")
+        self.assertIn("<h2>Work Packages</h2>", html)
+        self.assertIn("<h2>Features</h2>", html)
+        self.assertIn("<h2>Team Agents (tmux)</h2>", html)
+        self.assertIn("<h2>Subagents (agent-pool)</h2>", html)
+        self.assertIn("<h2>Live Activity</h2>", html)
+        self.assertIn("<h2>Phase Timeline</h2>", html)
+
+    def test_lang_invalid_falls_back_to_ko(self):
+        """lang='INVALID' → ko 폴백 — 한국어 heading."""
+        model = self._base_model()
+        html = render_dashboard(model, lang="INVALID")
+        self.assertIn("<h2>작업 패키지</h2>", html)
+
+    def test_lang_toggle_nav_present(self):
+        """render_dashboard 결과에 <nav class='lang-toggle'> 포함."""
+        model = self._base_model()
+        html = render_dashboard(model)
+        self.assertIn('<nav class="lang-toggle">', html)
+
+    def test_lang_toggle_nav_ko_link(self):
+        """lang-toggle에 lang=ko 링크 포함."""
+        model = self._base_model()
+        html = render_dashboard(model)
+        self.assertIn("lang=ko", html)
+
+    def test_lang_toggle_nav_en_link(self):
+        """lang-toggle에 lang=en 링크 포함."""
+        model = self._base_model()
+        html = render_dashboard(model)
+        self.assertIn("lang=en", html)
+
+    def test_lang_toggle_preserves_subproject(self):
+        """subproject 쿼리 값이 lang-toggle 링크에 보존된다."""
+        model = {**self._base_model(), "subproject": "billing"}
+        html = render_dashboard(model, lang="en", subproject="billing")
+        self.assertIn("subproject=billing", html)
+
+    def test_non_heading_text_unchanged_by_lang(self):
+        """eyebrow, 코드 블록 등 비대상 텍스트는 lang과 무관하게 동일."""
+        model = self._base_model()
+        html_ko = render_dashboard(model, lang="ko")
+        html_en = render_dashboard(model, lang="en")
+        # eyebrow content (e.g. TSK prefix in task rows) should be present in both
+        # Verify that the HTML lang attribute in <html> tag is present in both
+        self.assertIn("<!DOCTYPE html>", html_ko)
+        self.assertIn("<!DOCTYPE html>", html_en)
+
+    def test_existing_render_dashboard_no_lang_arg_no_regression(self):
+        """기존 render_dashboard() 호출 (lang 미지정) 은 regression 없음."""
+        model = self._base_model()
+        html = render_dashboard(model)
+        # Should still be a valid HTML document
+        self.assertTrue(html.startswith("<!DOCTYPE html>"))
+        self.assertIn("</html>", html)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

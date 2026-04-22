@@ -38,7 +38,41 @@ from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, quote, unquote, urlsplit
+
+
+# ---------------------------------------------------------------------------
+# i18n (TSK-02-02)
+# ---------------------------------------------------------------------------
+
+_I18N: dict = {
+    "ko": {
+        "work_packages": "작업 패키지",
+        "features": "기능",
+        "team_agents": "팀 에이전트 (tmux)",
+        "subagents": "서브 에이전트 (agent-pool)",
+        "live_activity": "실시간 활동",
+        "phase_timeline": "단계 타임라인",
+    },
+    "en": {
+        "work_packages": "Work Packages",
+        "features": "Features",
+        "team_agents": "Team Agents (tmux)",
+        "subagents": "Subagents (agent-pool)",
+        "live_activity": "Live Activity",
+        "phase_timeline": "Phase Timeline",
+    },
+}
+
+
+def _normalize_lang(lang: str) -> str:
+    """lang 정규화 헬퍼. ko/en 이외의 값은 'ko'로 폴백."""
+    return lang if lang in _I18N else "ko"
+
+
+def _t(lang: str, key: str) -> str:
+    """i18n 헬퍼. 미지원 lang은 'ko' fallback, 미지원 key는 key 자체 반환."""
+    return _I18N[_normalize_lang(lang)].get(key, key)
 
 
 # ---------------------------------------------------------------------------
@@ -799,6 +833,11 @@ DASHBOARD_CSS = """
 
   --radius: 4px;
   --radius-lg: 6px;
+
+  /* font size */
+  --font-body: 14px;
+  --font-mono: 14px;
+  --font-h2: 17px;
 }
 
 /* ---------- reset ---------- */
@@ -808,7 +847,7 @@ body{
   background: var(--bg);
   color: var(--ink);
   font-family: var(--mono);
-  font-size: 13px;
+  font-size: var(--font-body);
   line-height: 1.45;
   -webkit-font-smoothing: antialiased;
   letter-spacing: 0.01em;
@@ -936,7 +975,7 @@ summary::-webkit-details-marker{ display:none; }
 .section-head h2{
   margin: 0;
   font-family: var(--display);
-  font-size: 15px; font-weight: 600;
+  font-size: var(--font-h2); font-weight: 600;
   color: var(--ink);
 }
 .section-head h2::before{
@@ -1047,7 +1086,7 @@ summary::-webkit-details-marker{ display:none; }
   position:absolute; inset:0;
   display:grid; place-items:center;
   font-family: var(--mono);
-  font-size: 15px; font-weight: 600;
+  font-size: var(--font-h2); font-weight: 600;
   color: var(--ink);
 }
 .wp-donut .pct small{ font-size: 9px; color: var(--ink-4); font-weight: 400; display:block; }
@@ -1069,7 +1108,7 @@ summary::-webkit-details-marker{ display:none; }
   white-space: nowrap;
 }
 .wp-title h3{
-  margin: 0; font-weight: 500; font-size: 15px;
+  margin: 0; font-weight: 500; font-size: var(--font-h2);
   color: var(--ink);
   font-family: var(--display);
   white-space: nowrap; overflow:hidden; text-overflow: ellipsis;
@@ -1172,7 +1211,7 @@ summary::-webkit-details-marker{ display:none; }
 .trow .ttitle{
   color: var(--ink);
   font-family: var(--sans);
-  font-size: 13px;
+  font-size: var(--font-body);
   white-space: nowrap; overflow:hidden; text-overflow: ellipsis;
   min-width: 0;
 }
@@ -1584,12 +1623,34 @@ def _empty_section(anchor: str, heading: str, message: str, css: str = "empty") 
     return _section_wrap(anchor, heading, f'  <p class="{css}">{message}</p>')
 
 
-def _section_header(model: dict) -> str:
-    """v3 cmdbar header: brand + meta + actions (replaces old section#header)."""
+def _section_header(model: dict, lang: str = "ko", subproject: str = "") -> str:
+    """v3 cmdbar header: brand + meta + lang-toggle + actions.
+
+    TSK-02-02: ``lang`` / ``subproject`` 파라미터 추가.  헤더 우측
+    actions 블록 안에 ``<nav class="lang-toggle">`` 를 삽입하여 ko/en
+    전환 링크를 렌더링한다.  subproject 쿼리가 있으면 lang 링크에 보존한다.
+    """
     generated_at = _esc(model.get("generated_at", ""))
     project_root = _esc(model.get("project_root", ""))
     docs_dir = _esc(model.get("docs_dir", ""))
     refresh_s = _refresh_seconds(model)
+
+    # Build lang-toggle href pairs (subproject preserved when non-empty).
+    if subproject:
+        sp_enc = quote(subproject, safe="")
+        href_ko = f"?lang=ko&subproject={sp_enc}"
+        href_en = f"?lang=en&subproject={sp_enc}"
+    else:
+        href_ko = "?lang=ko"
+        href_en = "?lang=en"
+
+    lang_toggle_html = (
+        f'<nav class="lang-toggle">'
+        f'<a href="{href_ko}">한</a>'
+        f' <a href="{href_en}">EN</a>'
+        f'</nav>\n'
+    )
+
     return (
         '<header class="cmdbar" data-section="hdr" role="banner" aria-label="Command bar">\n'
         '  <div class="brand">\n'
@@ -1617,6 +1678,7 @@ def _section_header(model: dict) -> str:
         f'<span class="v">{refresh_s}s</span></span>\n'
         '  </div>\n'
         '  <div class="actions">\n'
+        f'    {lang_toggle_html}'
         '    <span class="pulse" aria-live="polite">'
         '<span class="dot" aria-hidden="true"></span> live</span>\n'
         '    <button class="btn refresh-toggle" type="button"'
@@ -2095,7 +2157,7 @@ def _render_task_row_v2(item, running_ids: set, failed_ids: set) -> str:
     )
 
 
-def _section_wp_cards(tasks, running_ids: set, failed_ids: set) -> str:
+def _section_wp_cards(tasks, running_ids: set, failed_ids: set, heading: str = "Work Packages") -> str:
     """WP card section: tasks grouped by wp_id, each WP as a v3 .wp card.
 
     v3 structure per card:
@@ -2107,9 +2169,11 @@ def _section_wp_cards(tasks, running_ids: set, failed_ids: set) -> str:
 
     Empty tasks list → empty-state. Individual empty WP → empty-state per card.
     WP name XSS is escaped via ``_esc``.
+
+    TSK-02-02: heading 파라미터 추가 — i18n 지원.
     """
     if not tasks:
-        return _empty_section("wp-cards", "Work Packages", "no tasks found — docs/tasks/ is empty")
+        return _empty_section("wp-cards", heading, "no tasks found — docs/tasks/ is empty")
 
     groups, order = _group_preserving_order(
         tasks, lambda item: getattr(item, "wp_id", None) or "WP-unknown"
@@ -2197,19 +2261,22 @@ def _section_wp_cards(tasks, running_ids: set, failed_ids: set) -> str:
             '</details>'
         )
 
-    return _section_wrap("wp-cards", "Work Packages", "\n".join(blocks))
+    return _section_wrap("wp-cards", heading, "\n".join(blocks))
 
 
-def _section_features(features, running_ids: set, failed_ids: set) -> str:
-    """Feature section: flat .trow list inside .features-wrap panel (no WP grouping)."""
+def _section_features(features, running_ids: set, failed_ids: set, heading: str = "Features") -> str:
+    """Feature section: flat .trow list inside .features-wrap panel (no WP grouping).
+
+    TSK-02-02: heading 파라미터 추가 — i18n 지원.
+    """
     if not features:
         return _empty_section(
-            "features", "Features", "no features found — docs/features/ is empty"
+            "features", heading, "no features found — docs/features/ is empty"
         )
     rows = "\n".join(
         _render_task_row_v2(item, running_ids, failed_ids) for item in features
     )
-    return _section_wrap("features", "Features", f'<div class="features-wrap">\n{rows}\n</div>')
+    return _section_wrap("features", heading, f'<div class="features-wrap">\n{rows}\n</div>')
 
 
 def _pane_attr(pane, key: str, default=""):
@@ -2277,7 +2344,7 @@ def _render_pane_row(pane, preview_lines: "Optional[str]" = "") -> str:
         f'  <div class="pane-head">\n'
         f'    <div class="name">{window_name}</div>\n'
         f'    <div class="meta">{pane_id_esc} · <span class="cmd">{cmd}</span> · pid {pid}</div>\n'
-        f'    <a class="mini-btn" href="/pane/{pane_id_esc}">show output</a>\n'
+        f'    <a class="mini-btn" href="/pane/{quote(pane_id_raw, safe="")}">show output</a>\n'
         f'    <button class="mini-btn primary" type="button"'
         f' data-pane-expand="{pane_id_esc}"'
         f' aria-label="Expand pane {pane_id_esc}">expand <span class="kbd">&#x21B5;</span></button>\n'
@@ -2290,17 +2357,19 @@ def _render_pane_row(pane, preview_lines: "Optional[str]" = "") -> str:
 _TOO_MANY_PANES_THRESHOLD = 20
 
 
-def _section_team(panes) -> str:
+def _section_team(panes, heading: str = "Team Agents (tmux)") -> str:
     """Team section: tmux panes + inline preview + expand button.
 
     When ``panes`` contains ≥ ``_TOO_MANY_PANES_THRESHOLD`` entries the
     preview is suppressed (``preview_lines=None``) to control subprocess cost.
     ``capture_pane()`` is the v1 implementation and is not called in that case.
+
+    TSK-02-02: heading 파라미터 추가 — i18n 지원.
     """
     if panes is None:
         return _empty_section(
             "team",
-            "Team Agents (tmux)",
+            heading,
             "tmux not available on this host — Team section shows no data,"
             " other sections work normally.",
             css="info",
@@ -2308,7 +2377,7 @@ def _section_team(panes) -> str:
 
     all_panes = list(panes)
     if not all_panes:
-        return _empty_section("team", "Team Agents (tmux)", "no tmux panes running")
+        return _empty_section("team", heading, "no tmux panes running")
 
     too_many = len(all_panes) >= _TOO_MANY_PANES_THRESHOLD
 
@@ -2337,7 +2406,7 @@ def _section_team(panes) -> str:
         )
 
     team_body = '<div class="panel team">\n' + "\n".join(blocks) + '\n</div>'
-    return _section_wrap("team", "Team Agents (tmux)", team_body)
+    return _section_wrap("team", heading, team_body)
 
 
 _SUBAGENT_INFO = (
@@ -2370,12 +2439,15 @@ def _render_subagent_row(sig) -> str:
     )
 
 
-def _section_subagents(signals) -> str:
-    """Subagent section: agent-pool signal slots grouped by scope."""
+def _section_subagents(signals, heading: str = "Subagents (agent-pool)") -> str:
+    """Subagent section: agent-pool signal slots grouped by scope.
+
+    TSK-02-02: heading 파라미터 추가 — i18n 지원.
+    """
     if not signals:
         return _section_wrap(
             "subagents",
-            "Subagents (agent-pool)",
+            heading,
             f'  {_SUBAGENT_INFO}\n  <p class="empty">no agent-pool signals</p>',
         )
 
@@ -2384,7 +2456,7 @@ def _section_subagents(signals) -> str:
         f'  {_SUBAGENT_INFO}\n'
         f'  <div class="panel"><div class="subs">\n{pills}\n  </div></div>'
     )
-    return _section_wrap("subagents", "Subagents (agent-pool)", subs_body)
+    return _section_wrap("subagents", heading, subs_body)
 
 
 def _status_class_for_phase(status_str: str) -> str:
@@ -2545,18 +2617,20 @@ def _live_activity_rows(tasks, features, limit=_LIVE_ACTIVITY_LIMIT):
     return collected[:limit]
 
 
-def _section_live_activity(model):
+def _section_live_activity(model, heading: str = "Live Activity"):
     """Live Activity 섹션을 렌더링한다.
 
     모든 WBS 태스크 + 피처의 phase_history_tail을 평탄화하여 최신 20건을
     내림차순으로 activity-row div 목록으로 렌더한다.
+
+    TSK-02-02: heading 파라미터 추가 — i18n 지원.
     """
     tasks = model.get("wbs_tasks") or []
     features = model.get("features") or []
     rows = _live_activity_rows(tasks, features)
 
     if not rows:
-        return _empty_section("activity", "Live Activity", "no recent events")
+        return _empty_section("activity", heading, "no recent events")
 
     row_htmls = []
     for item_id, entry, dt in rows:
@@ -2603,7 +2677,7 @@ def _section_live_activity(model):
         row_htmls.append(row_html)
 
     body = '<div class="panel"><div class="activity" aria-live="polite">\n' + "\n".join(row_htmls) + '\n</div></div>'
-    return _section_wrap("activity", "Live Activity", body)
+    return _section_wrap("activity", heading, body)
 
 
 def _phase_label(status_str):
@@ -2774,12 +2848,14 @@ def _timeline_svg(rows, span_minutes, now, max_rows=_TIMELINE_MAX_ROWS, W=600):
     return "\n".join(parts)
 
 
-def _section_phase_timeline(tasks, features):
+def _section_phase_timeline(tasks, features, heading: str = "Phase Timeline"):
     """Phase Timeline 섹션을 렌더링한다 (v3: CSS positional .tl-track/.seg divs).
 
     시간축: 현재 - 60분 = left:0%, 현재 = left:100%.
     Task 수 50 초과 시 상위 50건만 렌더 후 +N more 링크 표시.
     SVG 사용 안 함 — CSS left%/width% 배치.
+
+    TSK-02-02: heading 파라미터 추가 — i18n 지원.
     """
     now = datetime.now(timezone.utc)
     rows = _timeline_rows(tasks, features, now)
@@ -2789,7 +2865,7 @@ def _section_phase_timeline(tasks, features):
 
     if not visible:
         body = '<p class="tl-empty">no phase history</p>'
-        return _section_wrap("timeline", "Phase Timeline", body)
+        return _section_wrap("timeline", heading, body)
 
     span_sec = _TIMELINE_SPAN_MINUTES * 60
     origin = now - timedelta(minutes=_TIMELINE_SPAN_MINUTES)
@@ -2885,7 +2961,7 @@ def _section_phase_timeline(tasks, features):
         + '\n</div>'
         + more_html
     )
-    return _section_wrap("timeline", "Phase Timeline", body)
+    return _section_wrap("timeline", heading, body)
 
 # Compiled once at module load; used by _wrap_with_data_section.
 _DATA_SECTION_TAG_RE = re.compile(r'(<(?:section|header)(\s[^>]*)?>)', re.DOTALL)
@@ -2953,7 +3029,7 @@ _DASHBOARD_JS = """\
     fetchAndPatch(state.mainAbort.signal);
   }
   function fetchAndPatch(signal){
-    fetch('/',{cache:'no-store',signal:signal})
+    fetch(window.location.search?'/'+window.location.search:'/',{cache:'no-store',signal:signal})
       .then(function(r){return r.ok?r.text():null;})
       .then(function(text){
         if(!text)return;
@@ -3181,7 +3257,7 @@ def _build_dashboard_body(s: dict) -> str:
     ])
 
 
-def render_dashboard(model: dict) -> str:
+def render_dashboard(model: dict, lang: str = "ko", subproject: str = "") -> str:
     """Render the full v2 monitor dashboard HTML document (TSK-01-06).
 
     Assembly order (design.md §구현방향):
@@ -3197,12 +3273,23 @@ def render_dashboard(model: dict) -> str:
     - Empty ``<script id="dashboard-js">`` placeholder inserted for WP-02.
     - ``<a id="wbs">`` landing pad added before wp-cards for backward compat.
 
+    TSK-02-02: ``lang`` / ``subproject`` 파라미터 추가.
+    - ``lang`` ('ko'|'en', 기본 'ko'): 섹션 h2 heading 번역.
+    - ``subproject`` (str): lang-toggle 링크에 보존할 subproject 쿼리 값.
+    - ko/en 이외의 lang 값은 'ko'로 정규화한다.
+
     All user-derived strings flow through ``html.escape`` (via ``_esc``)
     before being concatenated. No external CDN/font/script — only inline CSS.
     The returned string is a complete ``<!DOCTYPE html>`` document.
     """
     if not isinstance(model, dict):
         model = {}
+
+    lang = _normalize_lang(lang)
+
+    # subproject: model에서도 읽을 수 있도록 fallback.
+    if not subproject:
+        subproject = model.get("subproject", "") or ""
 
     shared_signals = model.get("shared_signals") or []
     running_ids = _signal_set(shared_signals, "running")
@@ -3215,15 +3302,20 @@ def render_dashboard(model: dict) -> str:
 
     # Build each section HTML.  ``header`` is excluded from data-section
     # injection (it is nav metadata, not a JS partial-update target).
-    header_html = _section_header(model)
+    header_html = _section_header(model, lang=lang, subproject=subproject)
     sections: dict = {
         "kpi":            _section_kpi(model),
-        "wp-cards":       _section_wp_cards(tasks, running_ids, failed_ids),
-        "features":       _section_features(features, running_ids, failed_ids),
-        "live-activity":  _section_live_activity(model),
-        "phase-timeline": _section_phase_timeline(tasks, features),
-        "team":           _section_team(panes),
-        "subagents":      _section_subagents(ap_sigs),
+        "wp-cards":       _section_wp_cards(tasks, running_ids, failed_ids,
+                                            heading=_t(lang, "work_packages")),
+        "features":       _section_features(features, running_ids, failed_ids,
+                                            heading=_t(lang, "features")),
+        "live-activity":  _section_live_activity(model,
+                                                  heading=_t(lang, "live_activity")),
+        "phase-timeline": _section_phase_timeline(tasks, features,
+                                                   heading=_t(lang, "phase_timeline")),
+        "team":           _section_team(panes, heading=_t(lang, "team_agents")),
+        "subagents":      _section_subagents(ap_sigs,
+                                              heading=_t(lang, "subagents")),
         "phase-history":  _section_phase_history(tasks, features),
     }
 
@@ -3877,10 +3969,10 @@ class MonitorHandler(BaseHTTPRequestHandler):
         elif _is_api_state_path(self.path):
             self._route_api_state()
         elif _is_pane_api_path(path):
-            pane_id = path[len(_API_PANE_PATH_PREFIX):]
+            pane_id = unquote(path[len(_API_PANE_PATH_PREFIX):])
             _handle_pane_api(self, pane_id)
         elif _is_pane_html_path(path):
-            pane_id = path[len(_PANE_PATH_PREFIX):]
+            pane_id = unquote(path[len(_PANE_PATH_PREFIX):])
             _handle_pane_html(self, pane_id)
         else:
             self._route_not_found()
@@ -3896,6 +3988,8 @@ class MonitorHandler(BaseHTTPRequestHandler):
         :func:`_build_state_snapshot` (dict lists) because the renderer
         accesses fields via ``getattr(item, "id")``; dict items would silently
         render as empty spans.
+
+        TSK-02-02: Parses ?lang= and ?subproject= query parameters.
         """
         server = getattr(self, "server", None)
         refresh_seconds = int(getattr(server, "refresh_seconds", _DEFAULT_REFRESH_SECONDS))
@@ -3912,7 +4006,16 @@ class MonitorHandler(BaseHTTPRequestHandler):
             list_tmux_panes=_tmux_fn,
         )
         model = {**state, "refresh_seconds": refresh_seconds}
-        html_body = render_dashboard(model)
+
+        # Parse ?lang= and ?subproject= query parameters (TSK-02-02).
+        query_string = urlsplit(self.path).query or ""
+        query_params = parse_qs(query_string)
+
+        lang = _normalize_lang((query_params.get("lang") or ["ko"])[0])
+
+        subproject = (query_params.get("subproject") or [""])[0]
+
+        html_body = render_dashboard(model, lang=lang, subproject=subproject)
         _send_html_response(self, 200, html_body)
 
     def _route_api_state(self) -> None:
