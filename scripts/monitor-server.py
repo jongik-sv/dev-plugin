@@ -4016,7 +4016,7 @@ def _build_render_state(
     # find the original docs root — but for discover we need the top-level
     # docs dir, which is stored in the server's docs_dir attribute).
     available_subprojects = discover_subprojects(docs_dir)
-    is_multi_mode = len(available_subprojects) > 0
+    is_multi_mode = bool(available_subprojects)
     project_name = os.path.basename(os.path.normpath(project_root)) if project_root else ""
 
     return {
@@ -4307,7 +4307,7 @@ class MonitorHandler(BaseHTTPRequestHandler):
 
         # Discover available subprojects from base docs dir
         available_subprojects = discover_subprojects(base_docs_dir)
-        is_multi_mode = len(available_subprojects) > 0
+        is_multi_mode = bool(available_subprojects)
 
         # Validate subproject whitelist (path-traversal guard + fallback)
         if raw_sp != "all" and raw_sp not in available_subprojects:

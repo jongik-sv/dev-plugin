@@ -200,7 +200,7 @@ monitor-server, monitor-launcher
 - category: development
 - domain: fullstack
 - model: opus
-- status: [im]
+- status: [xx]
 - priority: high
 - assignee: -
 - schedule: 2026-04-25 ~ 2026-04-26
