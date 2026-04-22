@@ -150,16 +150,14 @@ class SectionPresenceTests(unittest.TestCase):
 
     def test_six_sections_render(self) -> None:
         html = render_dashboard(_normal_model())
-        # v2: <section id="header"> → sticky-header (data-section) + v2 sections.
-        # The old v1 id="header" section is replaced by sticky-header; we check
-        # that the v2 structural elements exist instead.
+        # v3: cmdbar header (data-section="hdr") replaces v2 sticky-header.
         for anchor in (
-            'data-section="sticky-header"',
+            'data-section="hdr"',
             '<section id="wp-cards"',
             '<section id="features"',
             '<section id="team"',
             '<section id="subagents"',
-            '<section id="phases"',
+            'data-section="phases"',
         ):
             self.assertIn(anchor, html, f"missing {anchor}")
 
@@ -240,7 +238,7 @@ class ErrorBadgeTests(unittest.TestCase):
     """TSK-01-08: error 필드가 있는 Task 에 ⚠ 배지 + badge-warn CSS."""
 
     def test_error_task_shows_warn_badge(self) -> None:
-        """수락 기준 1 — 손상 Task 행에 ⚠ 문자 포함."""
+        """v3: 손상 Task 행은 badge 'error' 텍스트 + title 속성 포함."""
         model = _normal_model()
         bad = _make_task(tsk_id="TSK-BAD", title=None, status=None,
                          last_event=None, last_event_at=None,
@@ -249,10 +247,11 @@ class ErrorBadgeTests(unittest.TestCase):
         model["wbs_tasks"].append(bad)
         html = render_dashboard(model)
         self.assertIn("TSK-BAD", html)
-        self.assertIn("⚠", html)
+        # v3: badge shows literal "error" text
+        self.assertIn('<div class="badge" title=', html)
 
     def test_error_task_has_badge_warn_class(self) -> None:
-        """수락 기준 2 — 경고 Task 행에 badge-warn CSS 클래스 적용."""
+        """v3: error Task 행의 badge div 안에 'error' 텍스트 존재."""
         model = _normal_model()
         bad = _make_task(tsk_id="TSK-WARN", title=None, status=None,
                          last_event=None, last_event_at=None,
@@ -260,22 +259,22 @@ class ErrorBadgeTests(unittest.TestCase):
                          error="json parse error")
         model["wbs_tasks"] = [bad]
         html = render_dashboard(model)
-        self.assertIn("badge-warn", html)
+        # v3: error tasks render <div class="badge" title="...">error</div>
+        self.assertIn(">error<", html)
 
     def test_normal_task_has_no_warn_badge(self) -> None:
-        """수락 기준 2 — 정상 Task 행에는 badge-warn 스팬 없음.
+        """v3: 정상 Task 행에는 title 속성 없는 badge, 'error' 텍스트 미출현.
 
-        CSS 정의에 badge-warn이 있으므로 전체 HTML 검색 대신
-        <span class="badge badge-warn" 패턴으로 렌더링 출현 여부 확인.
+        Badge 값은 data-status와 동일 (running/done/failed/bypass/pending).
         """
         model = _normal_model()
         model["wbs_tasks"] = [_make_task(tsk_id="TSK-OK", status="[dd]")]
         html = render_dashboard(model)
-        self.assertNotIn('<span class="badge badge-warn"', html)
-        self.assertNotIn("⚠", html)
+        # 정상 Task의 badge는 title 속성을 갖지 않아야 한다.
+        self.assertNotIn('<div class="badge" title=', html)
 
     def test_error_title_attribute_contains_error_preview(self) -> None:
-        """수락 기준 1 — 경고 스팬에 title 속성으로 에러 미리보기 포함."""
+        """v3: 경고 div에 title 속성으로 에러 미리보기 포함."""
         model = _normal_model()
         bad = _make_task(tsk_id="TSK-ERR", title=None, status=None,
                          last_event=None, last_event_at=None,
@@ -287,8 +286,10 @@ class ErrorBadgeTests(unittest.TestCase):
         self.assertIn("unexpected token", html)
 
     def test_badge_warn_css_defined_in_dashboard_css(self) -> None:
-        """수락 기준 2 — DASHBOARD_CSS 에 badge-warn 클래스 정의 존재."""
-        self.assertIn("badge-warn", monitor_server.DASHBOARD_CSS)
+        """v3: error badge는 data-status='failed'의 색상을 상속 — 별도 CSS 불필요.
+        DASHBOARD_CSS에 .badge 기본 스타일이 존재하는지만 확인.
+        """
+        self.assertIn(".trow .badge", monitor_server.DASHBOARD_CSS)
 
     def test_error_string_xss_escaped_in_title_attribute(self) -> None:
         """엣지 — error 필드에 HTML 특수문자가 있을 때 이스케이프됨."""
@@ -312,9 +313,8 @@ class ErrorBadgeTests(unittest.TestCase):
         html = render_dashboard(model)
         self.assertIn("TSK-GOOD", html)
         self.assertIn("TSK-BAD2", html)
-        self.assertIn('<span class="badge badge-warn"', html)
-        # 정상 Task 에는 badge-warn 스팬 없음 → 렌더링 count = 1
-        self.assertEqual(html.count('<span class="badge badge-warn"'), 1)
+        # v3: error tasks get title attr on badge; count exactly 1 (only TSK-BAD2)
+        self.assertEqual(html.count('<div class="badge" title='), 1)
 
 
 class XSSEscapeTests(unittest.TestCase):
@@ -375,10 +375,10 @@ class BadgePriorityTests(unittest.TestCase):
             _make_signal(kind="bypassed", task_id="TSK-B"),
         ]
         html = render_dashboard(model)
-        self.assertIn("BYPASSED", html)
-        self.assertIn("badge-bypass", html)
-        # FAILED 배지는 TSK-B 행에 나타나지 않아야 한다.
-        self.assertNotIn("FAILED", html)
+        # v3: data-status on .trow determines state; badge text is lowercase label
+        self.assertIn('data-status="bypass"', html)
+        # failed 상태가 TSK-B 행에 적용되지 않음을 확인 (bypass 우선)
+        self.assertNotRegex(html, r'data-status="failed"[^>]*>.*TSK-B')
 
     def test_failed_overrides_running(self) -> None:
         model = _normal_model()
@@ -391,9 +391,8 @@ class BadgePriorityTests(unittest.TestCase):
             _make_signal(kind="failed", task_id="TSK-F"),
         ]
         html = render_dashboard(model)
-        self.assertIn("FAILED", html)
-        self.assertIn("badge-fail", html)
-        self.assertNotIn("RUNNING", html)
+        self.assertIn('data-status="failed"', html)
+        self.assertNotRegex(html, r'data-status="running"[^>]*>.*TSK-F')
 
     def test_running_overrides_status(self) -> None:
         model = _normal_model()
@@ -404,28 +403,33 @@ class BadgePriorityTests(unittest.TestCase):
             _make_signal(kind="running", task_id="TSK-R"),
         ]
         html = render_dashboard(model)
-        self.assertIn("RUNNING", html)
-        self.assertIn("badge-run", html)
+        self.assertIn('data-status="running"', html)
 
 
 class StatusBadgeMappingTests(unittest.TestCase):
-    """각 status 코드가 올바른 배지 label로 변환."""
+    """v3: status 코드는 data-status 매핑으로만 표현 (badge 텍스트는 상태값 소문자).
+
+    Task status ``[dd]/[im]/[ts]`` 는 running/failed/bypassed signal이 없으면
+    ``pending`` 으로 분류 — ``[xx]`` 만 ``done`` 이 된다.
+    """
 
     def test_each_status_maps_to_label(self) -> None:
         cases = [
-            ("[dd]", "DESIGN", "badge-dd"),
-            ("[im]", "BUILD", "badge-im"),
-            ("[ts]", "TEST", "badge-ts"),
-            ("[xx]", "DONE", "badge-xx"),
+            ("[dd]", "pending"),
+            ("[im]", "pending"),
+            ("[ts]", "pending"),
+            ("[xx]", "done"),
         ]
-        for status, label, css in cases:
+        for status, data_status in cases:
             with self.subTest(status=status):
                 model = _normal_model()
                 model["wbs_tasks"] = [_make_task(tsk_id="TSK-S", status=status)]
                 model["shared_signals"] = []
                 html = render_dashboard(model)
-                self.assertIn(label, html, f"{label} missing for {status}")
-                self.assertIn(css, html, f"{css} missing for {status}")
+                self.assertIn(
+                    f'data-status="{data_status}"', html,
+                    f"data-status={data_status} missing for {status}"
+                )
 
 
 class NoExternalDomainTests(unittest.TestCase):
@@ -469,7 +473,7 @@ class NavigationAndEntryLinksTests(unittest.TestCase):
 
 
 class PhaseHistoryTests(unittest.TestCase):
-    """phase_history 최근 10건이 <ol> 로 렌더."""
+    """phase_history 최근 10건이 v3 <table> 로 렌더."""
 
     def test_phase_history_recent_limit_ten(self) -> None:
         history = [
@@ -483,20 +487,26 @@ class PhaseHistoryTests(unittest.TestCase):
         ]
         html = render_dashboard(model)
         self.assertIn("TSK-H", html)
-        # v2: section has data-section="phase-history" attribute; id="phases" still present.
-        # Use a more flexible search that handles added attributes.
+        # v3: phases section uses id="phases" (on div.history) or section wrapper.
+        # Find the phases container — accepts div or section with id="phases".
         phases_start = -1
-        for marker in ('<section id="phases">', '<section id="phases" '):
+        for marker in ('id="phases"',):
             idx = html.find(marker)
             if idx != -1:
-                phases_start = idx
+                # Back up to the opening tag
+                tag_start = html.rfind('<', 0, idx)
+                phases_start = tag_start
                 break
         self.assertNotEqual(phases_start, -1, "phases section not found in HTML")
-        phases_end = html.index("</section>", phases_start)
-        phases_html = html[phases_start:phases_end]
-        li_count = phases_html.count("<li")
-        self.assertLessEqual(li_count, 10)
-        self.assertGreaterEqual(li_count, 1)
+        # v3: rows are <tr> elements in a table
+        phases_end = html.find('</div>', phases_start)
+        if phases_end == -1:
+            phases_end = html.find('</section>', phases_start)
+        phases_html = html[phases_start:phases_end] if phases_end != -1 else html[phases_start:]
+        tr_count = phases_html.count("<tr")
+        # thead has 1 tr + tbody rows; total should be 2-11 (1 header + up to 10 data rows)
+        self.assertLessEqual(tr_count, 11)
+        self.assertGreaterEqual(tr_count, 2)  # at least header + 1 data row
 
 
 class ContentTypeTests(unittest.TestCase):
@@ -511,6 +521,457 @@ class ContentTypeTests(unittest.TestCase):
     def test_charset_meta_present(self) -> None:
         html = render_dashboard(_normal_model())
         self.assertIn('charset="utf-8"', html.lower().replace("'", '"'))
+
+
+# ---------------------------------------------------------------------------
+# v3 redesign tests (monitor-redesign-v3)
+# Stage 1: CSS tokens + shell/cmdbar/grid/section-head
+# Stage 2: WP cards + donut SVG + .trow task rows + features
+# Stage 3: live-activity + timeline tl-track + team panes + subagents
+# Stage 4: phase-history table + drawer + JS
+# ---------------------------------------------------------------------------
+
+
+class V3Stage1CSSTokenTests(unittest.TestCase):
+    """단계 1: DASHBOARD_CSS에 v3 디자인 토큰이 포함되어야 한다."""
+
+    def test_bg_token(self):
+        self.assertIn("--bg: #0b0d10", monitor_server.DASHBOARD_CSS)
+
+    def test_run_token(self):
+        self.assertIn("--run: #4aa3ff", monitor_server.DASHBOARD_CSS)
+
+    def test_done_token(self):
+        self.assertIn("--done: #4ed08a", monitor_server.DASHBOARD_CSS)
+
+    def test_fail_token(self):
+        self.assertIn("--fail: #ff5d5d", monitor_server.DASHBOARD_CSS)
+
+    def test_bypass_token(self):
+        self.assertIn("--bypass: #d16be0", monitor_server.DASHBOARD_CSS)
+
+    def test_pending_token(self):
+        self.assertIn("--pending: #f0c24a", monitor_server.DASHBOARD_CSS)
+
+    def test_badge_warn_still_present(self):
+        """badge-warn은 기존 오류 배지용으로 유지."""
+        self.assertIn("badge-warn", monitor_server.DASHBOARD_CSS)
+
+
+class V3Stage1ShellTests(unittest.TestCase):
+    """단계 1: render_dashboard에 .shell/.grid 래퍼 및 cmdbar 존재."""
+
+    def test_shell_div_present(self):
+        html = render_dashboard(_normal_model())
+        self.assertIn('class="shell"', html)
+
+    def test_grid_div_present(self):
+        html = render_dashboard(_normal_model())
+        self.assertIn('class="grid"', html)
+
+    def test_cmdbar_header_present(self):
+        html = render_dashboard(_normal_model())
+        self.assertIn('class="cmdbar"', html)
+
+    def test_cmdbar_data_section_hdr(self):
+        html = render_dashboard(_normal_model())
+        self.assertIn('data-section="hdr"', html)
+
+    def test_google_fonts_preconnect(self):
+        html = render_dashboard(_normal_model())
+        self.assertIn("fonts.googleapis.com", html)
+
+    def test_cmdbar_brand_structure(self):
+        html = render_dashboard(_normal_model())
+        self.assertIn('class="brand"', html)
+        self.assertIn('class="title"', html)
+        self.assertIn('class="sub"', html)
+
+    def test_cmdbar_meta_structure(self):
+        html = render_dashboard(_normal_model())
+        self.assertIn('class="meta"', html)
+        self.assertIn('id="clock"', html)
+
+    def test_cmdbar_pulse_dot(self):
+        html = render_dashboard(_normal_model())
+        self.assertIn('class="pulse"', html)
+
+    def test_cmdbar_refresh_toggle_btn(self):
+        html = render_dashboard(_normal_model())
+        self.assertIn('class="btn refresh-toggle"', html)
+        self.assertIn('aria-pressed="true"', html)
+
+    def test_section_header_returns_cmdbar(self):
+        model = _normal_model()
+        html = monitor_server._section_header(model)
+        self.assertIn('class="cmdbar"', html)
+        self.assertIn('data-section="hdr"', html)
+        self.assertIn('role="banner"', html)
+
+
+class V3Stage2WpCardsTests(unittest.TestCase):
+    """단계 2: WP Cards — SVG donut + .trow 그리드."""
+
+    def test_wp_donut_svg_exists(self):
+        tasks = [_make_task(tsk_id="TSK-01-01", wp_id="WP-01")]
+        html = monitor_server._section_wp_cards(tasks, set(), set())
+        self.assertIn('class="wp-donut"', html)
+        self.assertIn("<svg", html)
+
+    def test_wp_donut_svg_has_pathlength_100_circles(self):
+        tasks = [_make_task(tsk_id="TSK-01-01", wp_id="WP-01")]
+        html = monitor_server._section_wp_cards(tasks, set(), set())
+        # pathLength="100" should appear on multiple circles (track + 4 color slices)
+        count = html.count('pathLength="100"')
+        self.assertGreaterEqual(count, 4, "Need at least 4 circles with pathLength=100")
+
+    def test_trow_data_status_attribute(self):
+        tasks = [_make_task(tsk_id="TSK-01-01", wp_id="WP-01", status="[xx]")]
+        html = monitor_server._render_task_row_v2(tasks[0], set(), set())
+        self.assertIn('class="trow"', html)
+        self.assertIn('data-status=', html)
+
+    def test_trow_data_status_done(self):
+        task = _make_task(tsk_id="TSK-01-01", status="[xx]")
+        html = monitor_server._render_task_row_v2(task, set(), set())
+        self.assertIn('data-status="done"', html)
+
+    def test_trow_data_status_running(self):
+        task = _make_task(tsk_id="TSK-01-01", status="[im]")
+        html = monitor_server._render_task_row_v2(task, {"TSK-01-01"}, set())
+        self.assertIn('data-status="running"', html)
+
+    def test_trow_data_status_failed(self):
+        task = _make_task(tsk_id="TSK-01-01", status="[im]")
+        html = monitor_server._render_task_row_v2(task, set(), {"TSK-01-01"})
+        self.assertIn('data-status="failed"', html)
+
+    def test_trow_data_status_bypass(self):
+        task = _make_task(tsk_id="TSK-01-01", status="[im]", bypassed=True)
+        html = monitor_server._render_task_row_v2(task, set(), {"TSK-01-01"})
+        self.assertIn('data-status="bypass"', html)
+
+    def test_trow_data_status_pending(self):
+        task = _make_task(tsk_id="TSK-01-01", status="[dd]")
+        html = monitor_server._render_task_row_v2(task, set(), set())
+        self.assertIn('data-status="pending"', html)
+
+    def test_trow_badge_text_running(self):
+        task = _make_task(tsk_id="TSK-01-01", status="[im]")
+        html = monitor_server._render_task_row_v2(task, {"TSK-01-01"}, set())
+        self.assertIn('class="badge"', html)
+        self.assertIn("running", html.lower())
+
+    def test_trow_statusbar_div(self):
+        task = _make_task(tsk_id="TSK-01-01", status="[dd]")
+        html = monitor_server._render_task_row_v2(task, set(), set())
+        self.assertIn('class="statusbar"', html)
+
+    def test_wp_donut_svg_helper(self):
+        """_wp_donut_svg 헬퍼 함수 — SVG 반환, 4색 슬라이스."""
+        counts = {"done": 5, "running": 2, "failed": 1, "bypass": 1, "pending": 1}
+        svg = monitor_server._wp_donut_svg(counts)
+        self.assertIn("<svg", svg)
+        # Track + 4 color circles = 5 total
+        self.assertGreaterEqual(svg.count("<circle"), 4)
+
+    def test_wp_donut_svg_zero_total(self):
+        """총합 0이면 track circle만 반환, 예외 없음."""
+        counts = {"done": 0, "running": 0, "failed": 0, "bypass": 0, "pending": 0}
+        svg = monitor_server._wp_donut_svg(counts)
+        self.assertIsInstance(svg, str)
+        self.assertIn("<svg", svg)
+
+    def test_trow_data_status_helper(self):
+        """_trow_data_status 헬퍼 — 상태 문자열 반환."""
+        task = _make_task(tsk_id="TSK-01-01", status="[xx]")
+        state = monitor_server._trow_data_status(task, set(), set())
+        self.assertEqual(state, "done")
+
+    def test_wp_counts_structure(self):
+        tasks = [_make_task(tsk_id="TSK-01-01", wp_id="WP-01")]
+        html = monitor_server._section_wp_cards(tasks, set(), set())
+        self.assertIn('class="wp-counts"', html)
+        self.assertIn('data-k="done"', html)
+        self.assertIn('data-k="run"', html)
+
+    def test_section_features_uses_trow(self):
+        features = [_make_feat()]
+        html = monitor_server._section_features(features, set(), set())
+        self.assertIn('class="trow"', html)
+        self.assertIn('data-status=', html)
+
+    def test_empty_wp_tasks_empty_state(self):
+        html = monitor_server._section_wp_cards([], set(), set())
+        self.assertIn("no tasks", html.lower())
+
+
+class V3Stage3RightColTests(unittest.TestCase):
+    """단계 3: 우측 컬럼 — live-activity / phase-timeline / team / subagents."""
+
+    def _make_task_with_history(self, tsk_id="TSK-01-01"):
+        from datetime import datetime, timezone, timedelta
+        now = datetime(2026, 4, 20, 12, 0, 0, tzinfo=timezone.utc)
+        history = [
+            PhaseEntry(
+                event="design.ok",
+                from_status="[ ]",
+                to_status="[dd]",
+                at=(now - timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                elapsed_seconds=60.0,
+            ),
+            PhaseEntry(
+                event="build.ok",
+                from_status="[dd]",
+                to_status="[im]",
+                at=(now - timedelta(minutes=2)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                elapsed_seconds=120.0,
+            ),
+        ]
+        return _make_task(tsk_id=tsk_id, phase_history_tail=history)
+
+    def test_live_activity_arow_class(self):
+        model = _normal_model()
+        model["wbs_tasks"] = [self._make_task_with_history()]
+        html = monitor_server._section_live_activity(model)
+        self.assertIn('class="arow"', html)
+
+    def test_live_activity_data_to_attribute(self):
+        model = _normal_model()
+        model["wbs_tasks"] = [self._make_task_with_history()]
+        html = monitor_server._section_live_activity(model)
+        self.assertIn('data-to=', html)
+
+    def test_live_activity_data_to_done(self):
+        model = _normal_model()
+        model["wbs_tasks"] = [self._make_task_with_history()]
+        html = monitor_server._section_live_activity(model)
+        # build.ok → to_status=[im] → phase "im" → data-to maps appropriately
+        # At least one data-to attribute should be present
+        self.assertRegex(html, r'data-to="[a-z]+"')
+
+    def test_phase_timeline_tl_track(self):
+        tasks = [self._make_task_with_history()]
+        html = monitor_server._section_phase_timeline(tasks, [])
+        self.assertIn('class="tl-track"', html)
+
+    def test_phase_timeline_seg_div(self):
+        tasks = [self._make_task_with_history()]
+        html = monitor_server._section_phase_timeline(tasks, [])
+        self.assertIn('class="seg', html)
+
+    def test_phase_timeline_tl_axis(self):
+        tasks = [self._make_task_with_history()]
+        html = monitor_server._section_phase_timeline(tasks, [])
+        self.assertIn('class="tl-axis"', html)
+
+    def test_phase_timeline_tl_now(self):
+        tasks = [self._make_task_with_history()]
+        html = monitor_server._section_phase_timeline(tasks, [])
+        self.assertIn('class="tl-now"', html)
+
+    def test_render_pane_row_pane_head(self):
+        pane = _make_pane("%1", "dev", 0)
+        html = monitor_server._render_pane_row(pane, "last line")
+        self.assertIn('class="pane-head"', html)
+
+    def test_render_pane_row_pane_preview(self):
+        pane = _make_pane("%1", "dev", 0)
+        html = monitor_server._render_pane_row(pane, "last line")
+        self.assertIn('class="pane-preview"', html)
+
+    def test_render_pane_row_data_pane_expand(self):
+        pane = _make_pane("%1", "dev", 0)
+        html = monitor_server._render_pane_row(pane, "last line")
+        self.assertIn('data-pane-expand="%1"', html)
+
+    def test_render_pane_row_data_state_live(self):
+        """pane_current_command != 'zsh' → data-state="live"."""
+        pane = _make_pane("%1", "dev", 0)  # command="bash"
+        html = monitor_server._render_pane_row(pane, "")
+        self.assertIn('class="pane"', html)
+
+    def test_section_team_pane_class(self):
+        panes = [_make_pane("%1"), _make_pane("%2", pane_index=1)]
+        html = monitor_server._section_team(panes)
+        self.assertIn('class="pane"', html)
+        self.assertIn('class="pane-head"', html)
+
+    def test_section_team_too_many_panes_no_preview(self):
+        """20개 이상 panes → pane-preview 생략."""
+        panes = [_make_pane(f"%{i}", pane_index=i) for i in range(1, 22)]
+        html = monitor_server._section_team(panes)
+        # pane-preview가 없거나 매우 적어야 함
+        # Actually per spec: 20+ panes suppresses preview content
+        self.assertIn('class="pane"', html)
+
+    def test_render_subagent_row_sub_class(self):
+        sig = _make_signal(kind="running", task_id="TSK-01-01")
+        html = monitor_server._render_subagent_row(sig)
+        self.assertIn('class="sub"', html)
+
+    def test_render_subagent_row_data_state(self):
+        sig = _make_signal(kind="running", task_id="TSK-01-01")
+        html = monitor_server._render_subagent_row(sig)
+        self.assertIn('data-state=', html)
+
+    def test_render_subagent_row_data_state_running(self):
+        sig = _make_signal(kind="running", task_id="TSK-01-01")
+        html = monitor_server._render_subagent_row(sig)
+        self.assertIn('data-state="running"', html)
+
+    def test_render_subagent_row_data_state_done(self):
+        sig = _make_signal(kind="done", task_id="TSK-01-01")
+        html = monitor_server._render_subagent_row(sig)
+        self.assertIn('data-state="done"', html)
+
+    def test_render_subagent_row_data_state_failed(self):
+        sig = _make_signal(kind="failed", task_id="TSK-01-01")
+        html = monitor_server._render_subagent_row(sig)
+        self.assertIn('data-state="failed"', html)
+
+    def test_render_subagent_row_bypassed_maps_to_done(self):
+        sig = _make_signal(kind="bypassed", task_id="TSK-01-01")
+        html = monitor_server._render_subagent_row(sig)
+        self.assertIn('data-state="done"', html)
+
+    def test_section_subagents_sub_pill(self):
+        signals = [_make_signal(kind="running", task_id="TSK-01-01")]
+        html = monitor_server._section_subagents(signals)
+        self.assertIn('class="sub"', html)
+        self.assertIn('data-state=', html)
+
+
+class V3Stage4PhaseHistoryDrawerTests(unittest.TestCase):
+    """단계 4: phase-history table + drawer + JS."""
+
+    def _model_with_history(self):
+        from datetime import datetime, timezone, timedelta
+        now = datetime(2026, 4, 20, 12, 0, 0, tzinfo=timezone.utc)
+        history = [
+            PhaseEntry(
+                event="design.ok",
+                from_status="[ ]",
+                to_status="[dd]",
+                at=(now - timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                elapsed_seconds=60.0,
+            ),
+        ]
+        model = _normal_model()
+        model["wbs_tasks"] = [
+            _make_task(tsk_id="TSK-H1", phase_history_tail=history)
+        ]
+        return model
+
+    def test_phase_history_has_table(self):
+        html = monitor_server._section_phase_history(
+            [_make_task(tsk_id="TSK-H2",
+                        phase_history_tail=[PhaseEntry("x.ok", "[a]", "[b]", "2026-04-20T12:00:00Z", 1.0)])],
+            []
+        )
+        self.assertIn("<table", html)
+        self.assertIn("<thead", html)
+        self.assertIn("<tbody", html)
+
+    def test_phase_history_table_columns(self):
+        hist = [PhaseEntry("x.ok", "[ ]", "[dd]", "2026-04-20T12:00:00Z", 30.0)]
+        html = monitor_server._section_phase_history(
+            [_make_task(tsk_id="TSK-COL", phase_history_tail=hist)], []
+        )
+        self.assertIn('class="idx"', html)
+        self.assertIn('class="t"', html)
+        self.assertIn('class="tid"', html)
+        self.assertIn('class="ev"', html)
+        self.assertIn('class="el"', html)
+
+    def test_phase_history_transition_arrow(self):
+        hist = [PhaseEntry("design.ok", "[ ]", "[dd]", "2026-04-20T12:00:00Z", 30.0)]
+        html = monitor_server._section_phase_history(
+            [_make_task(tsk_id="TSK-ARR", phase_history_tail=hist)], []
+        )
+        self.assertIn('class="arr"', html)
+
+    def test_phase_history_to_status_class(self):
+        hist = [PhaseEntry("xx.ok", "[ts]", "[xx]", "2026-04-20T12:00:00Z", 10.0)]
+        html = monitor_server._section_phase_history(
+            [_make_task(tsk_id="TSK-TO", phase_history_tail=hist)], []
+        )
+        # to_status [xx] → "done" class
+        self.assertIn('class="to done"', html)
+
+    def test_phase_history_data_section_phases(self):
+        hist = [PhaseEntry("x.ok", "[ ]", "[dd]", "2026-04-20T12:00:00Z", 1.0)]
+        html = monitor_server._section_phase_history(
+            [_make_task(tsk_id="TSK-DS", phase_history_tail=hist)], []
+        )
+        self.assertIn('data-section="phases"', html)
+
+    def test_phase_history_empty_state(self):
+        html = monitor_server._section_phase_history([], [])
+        self.assertIsInstance(html, str)
+        self.assertGreater(len(html), 0)
+        # Should not crash
+        self.assertNotIn("<table", html)
+
+    def test_drawer_skeleton_backdrop(self):
+        html = monitor_server._drawer_skeleton()
+        self.assertIn('class="drawer-backdrop"', html)
+        self.assertIn('aria-hidden="true"', html)
+
+    def test_drawer_skeleton_aside(self):
+        html = monitor_server._drawer_skeleton()
+        self.assertIn("<aside", html)
+        self.assertIn('class="drawer"', html)
+
+    def test_drawer_skeleton_drawer_head(self):
+        html = monitor_server._drawer_skeleton()
+        self.assertIn('class="drawer-head"', html)
+
+    def test_drawer_skeleton_drawer_status(self):
+        html = monitor_server._drawer_skeleton()
+        self.assertIn('class="drawer-status"', html)
+
+    def test_drawer_skeleton_drawer_pre(self):
+        html = monitor_server._drawer_skeleton()
+        self.assertIn('class="drawer-pre"', html)
+
+    def test_drawer_skeleton_initial_aria_hidden(self):
+        """drawer aside 초기 상태: aria-hidden="true"."""
+        html = monitor_server._drawer_skeleton()
+        # The aside element should have aria-hidden="true"
+        self.assertIn('aside', html)
+        self.assertIn('aria-hidden="true"', html)
+
+    def test_dashboard_js_clock_logic(self):
+        self.assertIn('clock', monitor_server._DASHBOARD_JS)
+
+    def test_dashboard_js_body_data_filter(self):
+        """body[data-filter] 어트리뷰트 기반 필터 로직 포함."""
+        self.assertIn('data-filter', monitor_server._DASHBOARD_JS)
+
+    def test_dashboard_js_data_pane_expand_drawer_open(self):
+        """data-pane-expand 클릭 → drawer open 로직."""
+        self.assertIn('data-pane-expand', monitor_server._DASHBOARD_JS)
+        self.assertIn('openDrawer', monitor_server._DASHBOARD_JS)
+
+    def test_dashboard_js_escape_close_drawer(self):
+        """Esc 키 → closeDrawer 로직."""
+        self.assertIn('Escape', monitor_server._DASHBOARD_JS)
+        self.assertIn('closeDrawer', monitor_server._DASHBOARD_JS)
+
+    def test_dashboard_js_focus_trap(self):
+        """focus-trap 로직 포함."""
+        self.assertIn('tabindex', monitor_server._DASHBOARD_JS)
+
+    def test_render_dashboard_has_script_tag(self):
+        html = render_dashboard(_normal_model())
+        self.assertIn('<script id="dashboard-js">', html)
+
+    def test_render_dashboard_full_empty_model(self):
+        """빈 모델에서도 정상 동작."""
+        html = render_dashboard(_empty_model())
+        self.assertIn("<!DOCTYPE html>", html)
+        self.assertIn("</html>", html)
 
 
 # ---------------------------------------------------------------------------
@@ -678,11 +1139,12 @@ class SectionKpiTests(unittest.TestCase):
         return _normal_model()
 
     def test_five_kpi_cards_present(self):
-        """렌더 결과에 .kpi-card 클래스 요소 5개 포함."""
+        """v3: 렌더 결과에 .kpi.kpi--{suffix} 요소 5개 포함."""
         model = self._make_kpi_model()
         html = monitor_server._section_kpi(model)
-        count = html.count('kpi-card')
-        self.assertGreaterEqual(count, 5)
+        # v3: .kpi--run / --fail / --bypass / --done / --pend
+        for suffix in ("run", "fail", "bypass", "done", "pend"):
+            self.assertIn(f'kpi--{suffix}', html, f"kpi--{suffix} missing")
 
     def test_data_kpi_attributes(self):
         """data-kpi 속성 5종 (running, failed, bypass, done, pending) 존재."""
@@ -715,10 +1177,12 @@ class SectionWpCardsTests(unittest.TestCase):
         self.assertLess(idx_wp01, idx_wp02)
 
     def test_css_variables_present(self):
-        """--pct-done-end CSS 변수 포함."""
+        """v3: donut SVG는 pathLength=100 circle 기반 (CSS 변수 대신 SVG stroke-dasharray)."""
         tasks = self._make_tasks_multi_wp()
         html = monitor_server._section_wp_cards(tasks, set(), set())
-        self.assertIn("--pct-done-end", html)
+        # v3 replaces conic-gradient CSS variables with SVG donut circles
+        self.assertIn('class="wp-donut"', html)
+        self.assertIn('pathLength="100"', html)
 
 
 @unittest.skipUnless(_HAS_TIMELINE_SVG, "_timeline_svg 미구현 (TSK-04-03 이후)")

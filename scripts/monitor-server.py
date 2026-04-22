@@ -645,15 +645,6 @@ _PHASES_SECTION_LIMIT = 10
 _ERROR_TITLE_CAP = 200
 _SECTION_ANCHORS = ("wp-cards", "features", "team", "subagents", "activity", "timeline", "phases")
 
-# Mapping from agent-pool signal ``kind`` to badge CSS class. Module-level so
-# the ``_section_subagents`` loop does not rebuild the dict per row.
-_SUBAGENT_BADGE_CSS = {
-    "running": "badge-run",
-    "done": "badge-xx",
-    "failed": "badge-fail",
-    "bypassed": "badge-bypass",
-}
-
 # Status → (emoji, label, css_class) for the non-override branch of
 # ``_status_badge``. The bypass/failed/running overrides stay inline in the
 # function because they depend on boolean flags, not ``status``.
@@ -667,294 +658,701 @@ _STATUS_BADGE_DEFAULT = ("⚪", "PENDING", "badge-pending")
 
 
 DASHBOARD_CSS = """
-:root {
-  --bg: #0d1117;
-  --fg: #e6edf3;
-  --muted: #8b949e;
-  --border: #30363d;
-  --panel: #161b22;
-  --accent: #58a6ff;
-  --warn: #f85149;
-  --blue: #388bfd;
-  --purple: #bc8cff;
-  --green: #3fb950;
-  --gray: #8b949e;
-  --orange: #d29922;
-  --red: #f85149;
-  --yellow: #e3b341;
-  --light-gray: #6e7681;
-  --font-mono: "SFMono-Regular", Consolas, monospace;
+/* ---------- v3 design system ---------- */
+/* fonts: fonts.googleapis.com — JetBrains Mono, Space Grotesk (loaded via preconnect) */
+
+/* ---------- tokens ---------- */
+:root{
+  /* surfaces */
+  --bg: #0b0d10;
+  --bg-1: #0f1216;
+  --bg-2: #141820;
+  --bg-3: #1a1f28;
+  --line: #1f2530;
+  --line-2: #2a3140;
+  --line-hi: #3a4456;
+
+  /* text */
+  --ink: #e8ecf1;
+  --ink-2: #aeb5c1;
+  --ink-3: #6b7480;
+  --ink-4: #464e5a;
+
+  /* accents */
+  --accent: #c89b6a;
+  --accent-hi: #e6b884;
+  --accent-dim: #7a5e3f;
+
+  /* phase palette */
+  --run: #4aa3ff;
+  --run-glow: rgba(74,163,255,.18);
+  --done: #4ed08a;
+  --done-glow: rgba(78,208,138,.16);
+  --fail: #ff5d5d;
+  --fail-glow: rgba(255,93,93,.16);
+  --bypass: #d16be0;
+  --bypass-glow: rgba(209,107,224,.16);
+  --pending: #f0c24a;
+  --pending-glow: rgba(240,194,74,.16);
+
+  /* type */
+  --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --sans: "Space Grotesk", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --display: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+
+  --radius: 4px;
+  --radius-lg: 6px;
 }
-* { box-sizing: border-box; }
-body {
+
+/* ---------- reset ---------- */
+*,*::before,*::after{ box-sizing:border-box; }
+html,body{ margin:0; padding:0; }
+body{
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+  letter-spacing: 0.01em;
+  min-height: 100vh;
+}
+button{ font: inherit; color: inherit; background:none; border:0; cursor:pointer; }
+a{ color: inherit; }
+summary{ cursor: pointer; list-style: none; }
+summary::-webkit-details-marker{ display:none; }
+
+/* ---------- layout shell ---------- */
+.shell{
+  position: relative;
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 0 20px 0;
+}
+
+/* ---------- 1. Command Bar ---------- */
+.cmdbar{
+  position: sticky; top:0; z-index: 30;
+  height: 52px;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 24px;
+  padding: 0 20px;
+  margin: 0 -20px;
+  background: rgba(11,13,16,0.88);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--line);
+}
+.brand{
+  display:flex; align-items:center; gap:10px;
+  font-family: var(--display);
+  font-weight: 600; letter-spacing: .04em; text-transform: uppercase; font-size: 12px;
+}
+.brand .logo{
+  width: 22px; height: 22px;
+  display:grid; place-items:center;
+  color: var(--accent);
+}
+.brand .logo svg{ width: 22px; height: 22px; }
+.brand .title{ color: var(--ink); }
+.brand .slash{ color: var(--ink-4); margin: 0 2px; }
+.brand .sub{ color: var(--ink-3); font-weight: 400; text-transform:none; letter-spacing: 0; font-size: 12px; }
+
+.cmdbar .meta{
+  display:flex; align-items:center; gap: 20px;
+  color: var(--ink-3);
+  font-size: 12px;
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
+.cmdbar .meta .k{ color: var(--ink-4); margin-right: 6px; }
+.cmdbar .meta .v{ color: var(--ink-2); }
+.cmdbar .meta .path{ color: var(--accent); }
+.cmdbar .meta .dot{ color: var(--line-hi); margin: 0 8px; }
+
+.cmdbar .actions{ display:flex; align-items:center; gap: 8px; }
+
+.pulse{
+  display:inline-flex; align-items:center; gap:8px;
+  color: var(--done);
+  font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
+  font-weight: 600;
+}
+.pulse .dot{
+  width:8px; height:8px; border-radius: 50%;
+  background: var(--done);
+  animation: pulse 1.6s ease-out infinite;
+}
+@keyframes pulse{
+  0%   { box-shadow: 0 0 0 0 rgba(78,208,138,.55); }
+  70%  { box-shadow: 0 0 0 10px rgba(78,208,138,0);  }
+  100% { box-shadow: 0 0 0 0 rgba(78,208,138,0);   }
+}
+
+.btn{
+  display:inline-flex; align-items:center; gap: 8px;
+  height: 28px; padding: 0 10px;
+  background: var(--bg-2); border: 1px solid var(--line-2);
+  color: var(--ink-2);
+  border-radius: var(--radius);
+  font-size: 11px; letter-spacing: .06em; text-transform: uppercase;
+  font-weight: 600;
+}
+.btn[aria-pressed="true"]{
+  background: rgba(200,155,106,0.08);
+  border-color: var(--accent-dim);
+  color: var(--accent-hi);
+}
+.btn .led{
+  width:6px; height:6px; border-radius:50%;
+  background: var(--ink-4);
+}
+.btn[aria-pressed="true"] .led{
+  background: var(--accent-hi);
+  animation: led-blink 2s ease-in-out infinite;
+}
+@keyframes led-blink{
+  0%,100%{ opacity: 1; }
+  50%{ opacity:.55; }
+}
+
+.kbd{
+  display:inline-block; padding: 1px 5px;
+  font-family: var(--mono); font-size: 10px;
+  background: var(--bg-3); border:1px solid var(--line-2);
+  color: var(--ink-2);
+  border-radius: 3px;
+  vertical-align: middle;
+}
+
+/* ---------- Section chrome ---------- */
+.section-head{
+  display:flex; align-items: baseline; justify-content: space-between;
+  gap: 12px;
+  padding: 22px 0 10px;
+}
+.section-head .eyebrow{
+  font-size: 10px; letter-spacing: .18em; text-transform: uppercase;
+  color: var(--ink-4);
+}
+.section-head h2{
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  background: var(--bg);
-  color: var(--fg);
-  line-height: 1.5;
+  font-family: var(--display);
+  font-size: 15px; font-weight: 600;
+  color: var(--ink);
 }
-h1 { font-size: 1.25rem; margin: 0 0 0.5rem; }
-h2 { font-size: 1.05rem; margin: 0 0 0.75rem; border-bottom: 1px solid var(--border); padding-bottom: 0.25rem; }
-dl.meta { display: grid; grid-template-columns: max-content 1fr; gap: 0.25rem 1rem; margin: 0; }
-dl.meta dt { color: var(--muted); }
-dl.meta dd { margin: 0; }
-.top-nav { margin: 0.5rem 0 1rem; padding: 0.25rem 0; border-bottom: 1px solid var(--border); }
-.top-nav a { color: var(--accent); margin-right: 1rem; text-decoration: none; }
-.top-nav a:hover { text-decoration: underline; }
-section { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 1rem; margin-bottom: 1rem; }
-details { margin-bottom: 0.5rem; }
-details summary { cursor: pointer; color: var(--accent); font-weight: 600; padding: 0.25rem 0; }
-.badge { display: inline-block; padding: 0.1rem 0.5rem; border-radius: 10px; font-size: 0.78rem; font-weight: 600; letter-spacing: 0.02em; }
-.badge-dd { background: rgba(56,139,253,0.15); color: var(--blue); border: 1px solid var(--blue); }
-.badge-im { background: rgba(188,140,255,0.15); color: var(--purple); border: 1px solid var(--purple); }
-.badge-ts { background: rgba(63,185,80,0.15); color: var(--green); border: 1px solid var(--green); }
-.badge-xx { background: rgba(139,148,158,0.15); color: var(--gray); border: 1px solid var(--gray); }
-.badge-run { background: rgba(210,153,34,0.15); color: var(--orange); border: 1px solid var(--orange); animation: pulse 1.5s ease-in-out infinite; }
-.badge-fail { background: rgba(248,81,73,0.15); color: var(--red); border: 1px solid var(--red); }
-.badge-bypass { background: rgba(227,179,65,0.15); color: var(--yellow); border: 1px solid var(--yellow); }
-.badge-pending { background: rgba(110,118,129,0.15); color: var(--light-gray); border: 1px solid var(--light-gray); }
-.badge-warn { background: rgba(210,153,34,0.2); color: var(--orange); border: 1px solid var(--warn); }
-@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.55; } }
-.warn { color: var(--warn); font-weight: 600; }
-.empty { color: var(--muted); font-style: italic; }
-.info { color: var(--muted); font-size: 0.9rem; }
-.pane-link { color: var(--accent); text-decoration: none; margin-left: 0.5rem; }
-.pane-link:hover { text-decoration: underline; }
-.pane-row { padding: 0.25rem 0.5rem; border-bottom: 1px dashed var(--border); font-size: 0.9rem; }
-.pane-row:last-child { border-bottom: none; }
-ol.phase-list { margin: 0; padding-left: 1.25rem; }
-ol.phase-list li { margin-bottom: 0.25rem; font-size: 0.88rem; font-family: var(--font-mono); }
+.section-head h2::before{
+  content:"\\25AE"; color: var(--accent); margin-right: 6px; opacity:.8;
+}
+.section-head .ct{ color: var(--ink-3); font-size: 11px; }
+
+/* ---------- 2. KPI Strip ---------- */
+.kpi-strip{
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 1px;
+  background: var(--line);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  margin-top: 16px;
+}
+.kpi{
+  background: var(--bg-1);
+  padding: 14px 18px 12px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-rows: auto auto auto;
+  gap: 2px 10px;
+  position: relative;
+  overflow: hidden;
+}
+.kpi .label{
+  grid-column: 1 / -1;
+  font-size: 10px; letter-spacing: .2em; text-transform: uppercase;
+  color: var(--ink-3); font-weight: 600;
+  display:flex; align-items:center; gap: 8px;
+}
+.kpi .label .sw{ width: 8px; height: 8px; border-radius: 2px; }
+.kpi .num{
+  font-family: var(--mono);
+  font-size: 38px; font-weight: 600; line-height: 1;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+  align-self: end;
+}
+.kpi .spark{ grid-column: 1 / -1; height: 28px; margin-top: 6px; }
+.kpi--run   .label .sw{ background: var(--run); }
+.kpi--fail  .label .sw{ background: var(--fail); }
+.kpi--bypass .label .sw{ background: var(--bypass); }
+.kpi--done  .label .sw{ background: var(--done); }
+.kpi--pend  .label .sw{ background: var(--pending); }
+.kpi--run  .num{ color: var(--run); }
+.kpi--fail .num{ color: var(--fail); }
+.kpi--bypass .num{ color: var(--bypass); }
+.kpi--done .num{ color: var(--done); }
+.kpi--pend .num{ color: var(--pending); }
+
+/* ---------- 3. Filter chips ---------- */
+.chips{
+  display:flex; gap: 8px;
+  padding: 14px 0 6px;
+  flex-wrap: wrap;
+}
+.chip{
+  display:inline-flex; align-items:center; gap:8px;
+  height: 28px; padding: 0 12px;
+  background: transparent; border: 1px solid var(--line-2);
+  color: var(--ink-2);
+  border-radius: 999px;
+  font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
+  font-weight: 600;
+  cursor: pointer;
+}
+.chip .sw{ width:8px; height:8px; border-radius:50%; background: var(--ink-4); }
+.chip[data-filter="running"] .sw{ background: var(--run); }
+.chip[data-filter="failed"]  .sw{ background: var(--fail); }
+.chip[data-filter="bypass"]  .sw{ background: var(--bypass); }
+.chip[aria-pressed="true"]{
+  background: var(--bg-2);
+  border-color: var(--line-hi);
+  color: var(--ink);
+}
+
+/* ---------- main 2-col grid ---------- */
+.grid{
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: 28px;
+  padding-top: 8px;
+}
+.col{ min-width: 0; display:flex; flex-direction:column; gap: 0; }
+
+/* ---------- 4. WP Cards ---------- */
+.wp-stack{ display:flex; flex-direction:column; gap: 14px; }
+.wp{
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+.wp-head{
+  display: grid;
+  grid-template-columns: 72px 1fr auto;
+  gap: 16px;
+  padding: 16px 18px 14px;
+  align-items: start;
+}
+.wp-donut{ position:relative; width: 72px; height: 72px; }
+.wp-donut svg{ width:100%; height:100%; transform: rotate(-90deg); }
+.wp-donut .pct{
+  position:absolute; inset:0;
+  display:grid; place-items:center;
+  font-family: var(--mono);
+  font-size: 15px; font-weight: 600;
+  color: var(--ink);
+}
+.wp-donut .pct small{ font-size: 9px; color: var(--ink-4); font-weight: 400; display:block; }
+
+.wp-title{
+  min-width: 0;
+  display:flex; flex-direction:column; gap: 8px;
+}
+.wp-title .row1{
+  display:flex; align-items: baseline; gap: 10px; min-width:0;
+}
+.wp-title .id{
+  font-family: var(--mono);
+  font-size: 11px; font-weight: 600;
+  color: var(--accent);
+  background: rgba(200,155,106,0.08);
+  border: 1px solid var(--accent-dim);
+  padding: 2px 7px; border-radius: 3px;
+  white-space: nowrap;
+}
+.wp-title h3{
+  margin: 0; font-weight: 500; font-size: 15px;
+  color: var(--ink);
+  font-family: var(--display);
+  white-space: nowrap; overflow:hidden; text-overflow: ellipsis;
+  min-width: 0;
+}
+.wp-title .bar{
+  height: 4px; width: 100%;
+  background: var(--bg-3);
+  border-radius: 999px;
+  overflow: hidden;
+  display:flex;
+}
+.wp-title .bar > *{ height:100%; }
+.wp-title .bar .b-done{ background: var(--done); }
+.wp-title .bar .b-run { background: var(--run); }
+.wp-title .bar .b-fail{ background: var(--fail); }
+.wp-title .bar .b-byp { background: var(--bypass); }
+.wp-title .bar .b-pnd { background: var(--pending); }
+
+.wp-counts{
+  display:flex; gap: 16px;
+  color: var(--ink-3);
+  font-size: 11px;
+  flex-wrap: wrap;
+}
+.wp-counts .c{ display:inline-flex; align-items:center; gap:6px; white-space: nowrap; }
+.wp-counts .c .sw{ width: 7px; height: 7px; border-radius: 50%; background: var(--ink-4); }
+.wp-counts .c[data-k="done"] .sw  { background: var(--done); }
+.wp-counts .c[data-k="run"]  .sw  { background: var(--run); }
+.wp-counts .c[data-k="fail"] .sw  { background: var(--fail); }
+.wp-counts .c[data-k="byp"]  .sw  { background: var(--bypass); }
+.wp-counts .c[data-k="pnd"]  .sw  { background: var(--pending); }
+.wp-counts .c b{ color: var(--ink); font-weight: 600; }
+
+.wp-meta{
+  text-align: right;
+  font-size: 10px; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--ink-4);
+  white-space: nowrap;
+}
+.wp-meta .big{ color: var(--ink-2); font-size: 11px; display:block; }
+
+.wp-tasks{ border-top: 1px solid var(--line); background: rgba(0,0,0,0.15); }
+.wp-tasks > summary{
+  padding: 10px 18px;
+  font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--ink-3);
+  display:flex; align-items:center; gap: 8px;
+}
+.wp-tasks > summary .ct{ color: var(--ink-4); }
+.task-list{ border-top: 1px solid var(--line); }
+
+/* ---------- Task row ---------- */
+.trow{
+  display: grid;
+  grid-template-columns: 4px 92px 74px 1fr auto auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 18px 8px 0;
+  border-bottom: 1px solid var(--line);
+  position: relative;
+  min-height: 38px;
+}
+.trow:last-child{ border-bottom: 0; }
+
+.trow .statusbar{
+  align-self: stretch;
+  width: 4px;
+  background: var(--ink-4);
+}
+.trow[data-status="done"]    .statusbar{ background: var(--done); }
+.trow[data-status="running"] .statusbar{ background: var(--run); }
+.trow[data-status="failed"]  .statusbar{ background: var(--fail); }
+.trow[data-status="bypass"]  .statusbar{ background: var(--bypass); }
+.trow[data-status="pending"] .statusbar{ background: var(--pending); }
+
+.trow .tid{
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+.trow .badge{
+  display:inline-flex; align-items:center; gap:5px;
+  height: 20px; padding: 0 7px;
+  border-radius: 3px;
+  font-size: 10px; font-weight: 600;
+  letter-spacing: .1em; text-transform: uppercase;
+  background: var(--bg-2); color: var(--ink-3);
+  border: 1px solid var(--line-2);
+  justify-self: start;
+}
+.trow[data-status="done"] .badge{ color: var(--done); }
+.trow[data-status="running"] .badge{ color: var(--run); }
+.trow[data-status="failed"] .badge{ color: var(--fail); }
+.trow[data-status="bypass"] .badge{ color: var(--bypass); }
+.trow[data-status="pending"] .badge{ color: var(--pending); }
+@keyframes breathe{ 0%,100%{ opacity:1; transform: scale(1);} 50%{ opacity: .55; transform: scale(.85);} }
+
+.trow .ttitle{
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 13px;
+  white-space: nowrap; overflow:hidden; text-overflow: ellipsis;
+  min-width: 0;
+}
+.trow .ttitle .path{ color: var(--ink-4); font-family: var(--mono); font-size: 11px; margin-right: 6px;}
+
+.trow .elapsed{ color: var(--ink-3); font-size: 11px; white-space: nowrap; }
+.trow .retry{ color: var(--ink-4); font-size: 11px; white-space: nowrap; }
+.trow .retry.hot{ color: var(--pending); }
+.trow .flags{ display:flex; gap: 4px; padding-right: 4px; }
+.trow .flag{
+  font-size: 10px; font-weight: 600;
+  padding: 1px 5px; border-radius: 2px;
+  background: var(--bg-3); color: var(--ink-3);
+  border: 1px solid var(--line-2);
+}
+.trow .flag.f-crit{ color: var(--fail); }
+.trow .flag.f-new { color: var(--accent); }
+
+/* filter hide */
+body[data-filter="running"] .trow:not([data-status="running"]),
+body[data-filter="failed"]  .trow:not([data-status="failed"]),
+body[data-filter="bypass"]  .trow:not([data-status="bypass"]) { display: none; }
+
+/* legacy badge classes for non-.trow contexts */
+.badge-dd { background: rgba(56,139,253,0.15); color: #4aa3ff; border: 1px solid #4aa3ff; }
+.badge-im { background: rgba(188,140,255,0.15); color: #bc8cff; border: 1px solid #bc8cff; }
+.badge-ts { background: rgba(63,185,80,0.15); color: var(--done); border: 1px solid var(--done); }
+.badge-xx { background: rgba(139,148,158,0.15); color: var(--ink-3); border: 1px solid var(--ink-3); }
+.badge-run { background: rgba(74,163,255,0.15); color: var(--run); border: 1px solid var(--run); animation: pulse 1.5s ease-in-out infinite; }
+.badge-fail { background: rgba(255,93,93,0.15); color: var(--fail); border: 1px solid var(--fail); }
+.badge-bypass { background: rgba(209,107,224,0.15); color: var(--bypass); border: 1px solid var(--bypass); }
+.badge-pending { background: rgba(110,118,129,0.15); color: var(--ink-3); border: 1px solid var(--ink-3); }
+.badge-warn { background: rgba(255,93,93,0.2); color: var(--fail); border: 1px solid var(--fail); }
+.badge { display: inline-block; padding: 0.1rem 0.5rem; border-radius: 10px; font-size: 0.78rem; font-weight: 600; }
+
+/* ---------- 5. Features ---------- */
+.features-wrap{ border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--bg-1); overflow:hidden;}
+
+/* ---------- 6. Live Activity ---------- */
+.panel{
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--bg-1);
+  overflow: hidden;
+}
+.activity{ max-height: 420px; overflow-y: auto; padding: 4px 0; }
+
+.arow{
+  display: grid;
+  grid-template-columns: auto auto 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 14px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--ink-2);
+  border-bottom: 1px dashed transparent;
+}
+.arow .t{ color: var(--ink-4); font-size: 11px; }
+.arow .tid{ color: var(--ink); font-weight: 600; font-size: 11px; }
+.arow .evt{ color: var(--ink-3); font-size: 11px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis;}
+.arow .evt .arrow{ color: var(--ink-4); margin: 0 4px; }
+.arow .evt .from{ color: var(--ink-3); }
+.arow .evt .to{ font-weight: 600; }
+.arow[data-to="done"] .to{ color: var(--done); }
+.arow[data-to="running"] .to{ color: var(--run); }
+.arow[data-to="failed"] .to{ color: var(--fail); }
+.arow[data-to="bypass"] .to{ color: var(--bypass); }
+.arow[data-to="pending"] .to{ color: var(--pending); }
+.arow .el{ color: var(--ink-4); font-size: 11px; }
+
+/* ---------- 7. Phase Timeline ---------- */
+.timeline{ padding: 8px 14px 14px; }
+.timeline-head{
+  display:flex; justify-content: space-between;
+  font-size: 10px; color: var(--ink-4);
+  letter-spacing: .1em; text-transform: uppercase;
+  padding: 0 4px 8px;
+}
+.tl-row{
+  display:grid;
+  grid-template-columns: 82px 1fr;
+  align-items: center;
+  gap: 10px; padding: 3px 0; font-size: 11px;
+}
+.tl-row .lbl{ color: var(--ink-3); font-family: var(--mono); font-size: 10.5px; white-space:nowrap; }
+.tl-track{
+  position: relative; height: 14px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 2px; overflow: hidden;
+}
+.tl-track .seg{ position: absolute; top:0; bottom:0; }
+.tl-track .seg-done   { background: var(--done); }
+.tl-track .seg-running{ background: var(--run); }
+.tl-track .seg-failed { background: var(--fail); }
+.tl-track .seg-bypass { background: var(--bypass); }
+.tl-track .seg-pending{ background: var(--pending); }
+.tl-track .seg-idle   { background: transparent; }
+
+.tl-axis{ position: relative; height: 18px; margin-top: 6px; border-top: 1px solid var(--line); }
+.tl-axis .tick{ position: absolute; top: 0; bottom: 10px; width: 1px; background: var(--line-2); }
+.tl-axis .tick.major{ background: var(--line-hi); bottom: 6px;}
+.tl-axis .tlabel{
+  position:absolute; top: 4px; transform: translateX(-50%);
+  font-family: var(--mono); font-size: 9.5px;
+  color: var(--ink-4); white-space: nowrap;
+}
+.tl-now{ position:absolute; top:-2px; bottom:0; width: 1px; background: var(--accent); }
+
+/* ---------- 8. Team Agents ---------- */
+.team{ padding: 0; }
+.pane{ border-bottom: 1px solid var(--line); }
+.pane:last-child{ border-bottom: 0; }
+.pane-head{
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  gap: 10px; align-items: center;
+  padding: 10px 14px 8px;
+}
+.pane-head .name{
+  font-family: var(--mono);
+  font-size: 12px; font-weight: 600;
+  color: var(--ink);
+}
+.pane-head .meta{ color: var(--ink-3); font-size: 11px; white-space: nowrap; overflow:hidden; text-overflow: ellipsis; }
+.pane-head .cmd{
+  color: var(--ink-2); font-family: var(--mono); font-size: 11px;
+  background: var(--bg-2); border: 1px solid var(--line-2);
+  padding: 1px 6px; border-radius: 3px;
+}
+.mini-btn{
+  display:inline-flex; align-items:center; gap:5px;
+  height: 22px; padding: 0 8px;
+  font-size: 10px; letter-spacing: .08em; text-transform: uppercase;
+  font-weight: 600;
+  background: transparent; border: 1px solid var(--line-2);
+  color: var(--ink-3); border-radius: 3px;
+}
+.mini-btn.primary{ border-color: var(--accent-dim); color: var(--accent-hi); }
+
+.pane-preview{
+  margin: 0 14px 12px;
+  padding: 8px 10px;
+  background: #07090c;
+  border: 1px solid var(--line); border-radius: var(--radius);
+  font-family: var(--mono); font-size: 11px; line-height: 1.5;
+  color: var(--ink-2); white-space: pre-wrap; overflow-x: auto;
+}
+
+/* ---------- 9. Subagents ---------- */
+.subs{
+  padding: 12px 14px;
+  display:flex; flex-wrap: wrap; gap: 8px;
+}
+.sub{
+  display:inline-flex; align-items:center; gap: 8px;
+  padding: 4px 10px 4px 8px;
+  background: var(--bg-2); border: 1px solid var(--line-2);
+  border-radius: 999px; font-size: 11px; color: var(--ink-2);
+  font-family: var(--mono);
+}
+.sub .sw{ width: 7px; height: 7px; border-radius: 50%; background: var(--ink-4); }
+.sub[data-state="running"] .sw{ background: var(--run); animation: breathe 1.4s infinite;}
+.sub[data-state="done"] .sw{ background: var(--done); }
+.sub[data-state="failed"] .sw{ background: var(--fail); }
+.sub .n{ color: var(--ink-4); font-size: 10px;}
+
+/* ---------- 10. Phase history ---------- */
+.history{
+  margin-top: 28px; border: 1px solid var(--line);
+  border-radius: var(--radius-lg); background: var(--bg-1); overflow: hidden;
+}
+.history table{ width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 11.5px; }
+.history th, .history td{
+  padding: 8px 14px; text-align: left;
+  border-bottom: 1px solid var(--line); white-space: nowrap; color: var(--ink-2);
+}
+.history tbody tr:last-child td{ border-bottom: 0; }
+.history th{ font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-4); font-weight: 600; background: var(--bg-2); }
+.history td.idx{ color: var(--ink-4); width: 36px; text-align: right; }
+.history td.t{ color: var(--ink-3); }
+.history td.tid{ color: var(--ink); font-weight: 600;}
+.history td.ev{ color: var(--ink-3);}
+.history td .arr{ color: var(--ink-4); margin: 0 4px;}
+.history td .to.done{ color: var(--done); font-weight: 600;}
+.history td .to.running{ color: var(--run); font-weight: 600;}
+.history td .to.failed{ color: var(--fail); font-weight: 600;}
+.history td .to.bypass{ color: var(--bypass); font-weight: 600;}
+.history td.el{ color: var(--ink-4); }
+
+/* ---------- 11. Drawer ---------- */
+.drawer-backdrop{
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.55);
+  backdrop-filter: blur(3px);
+  z-index: 80;
+  opacity: 0; pointer-events: none;
+  transition: opacity .2s;
+}
+.drawer-backdrop[aria-hidden="false"]{ opacity:1; pointer-events: auto; }
+
+.drawer{
+  position: fixed; top: 0; right: 0; bottom: 0;
+  width: 640px; max-width: 100vw;
+  background: var(--bg-1);
+  border-left: 1px solid var(--line-2);
+  z-index: 90;
+  transform: translateX(100%);
+  transition: transform .24s cubic-bezier(.3,.7,.2,1);
+  display: flex; flex-direction: column;
+}
+.drawer[aria-hidden="false"]{ transform: translateX(0); }
+.drawer-head{
+  display: grid; grid-template-columns: 1fr auto;
+  align-items: start; gap: 14px;
+  padding: 18px 22px 14px; border-bottom: 1px solid var(--line);
+}
+.drawer-head h3{ margin: 0; font-family: var(--display); font-size: 16px; font-weight: 600; color: var(--ink); }
+.drawer-head .meta{ color: var(--ink-3); font-size: 11px; margin-top: 4px; font-family: var(--mono); }
+.drawer-close{
+  width: 30px; height: 30px; border:1px solid var(--line-2);
+  border-radius: 4px; display:grid; place-items:center; color: var(--ink-3);
+}
+.drawer-close:hover{ color: var(--fail); }
+
+.drawer-status{
+  display:flex; align-items:center; gap: 10px;
+  padding: 10px 22px;
+  font-size: 10px; letter-spacing: .12em; text-transform: uppercase;
+  color: var(--ink-4); border-bottom: 1px solid var(--line); background: var(--bg);
+}
+.drawer-status .poll{ color: var(--done); display:inline-flex; align-items:center; gap: 6px;}
+
+.drawer-pre{
+  flex: 1; overflow: auto; margin: 0; padding: 16px 22px 22px;
+  font-family: var(--mono); font-size: 12px; line-height: 1.55;
+  color: var(--ink-2); background: #07090c; white-space: pre;
+}
+
+/* legacy compatibility — empty-state helpers used by _empty_section */
+.info { color: var(--ink-3); font-size: 0.9rem; }
+.empty { color: var(--ink-3); font-style: italic; }
+/* sticky-hdr: used by _section_sticky_header (backward-compat) */
 .sticky-hdr {
-  position: sticky;
-  top: 0;
-  z-index: 100;
-  background: var(--bg);
-  border-bottom: 1px solid var(--border);
+  position: sticky; top: 0; z-index: 20;
+  background: var(--bg); border-bottom: 1px solid var(--line);
   padding: 0.75rem 1.5rem 0.5rem;
 }
-.kpi-row {
-  display: flex;
-  gap: 0.75rem;
-  flex-wrap: wrap;
-  margin-top: 0.5rem;
-}
-.kpi-card {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 0.5rem 0.75rem;
-  min-width: 7rem;
-  font-size: 0.85rem;
-}
-.kpi-card .kpi-val { font-size: 1.4rem; font-weight: 700; line-height: 1.2; }
-.kpi-card .kpi-lbl { color: var(--muted); font-size: 0.78rem; }
-.kpi-card.running { border-left: 4px solid var(--orange); }
-.kpi-card.failed  { border-left: 4px solid var(--red); }
-.kpi-card.bypass  { border-left: 4px solid var(--yellow); }
-.kpi-card.done    { border-left: 4px solid var(--green); }
-.kpi-card.pending { border-left: 4px solid var(--light-gray); }
-.kpi-label { font-size: 0.75rem; font-weight: 600; letter-spacing: 0.05em; color: var(--muted); text-transform: uppercase; display: block; }
+.logo-dot { color: var(--done); font-size: 1.2rem; }
+.hdr-title { font-weight: 700; font-size: 1rem; }
+.hdr-project { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); font-size: 0.9rem; max-width: 30ch; }
+.hdr-refresh { font-family: var(--mono); color: var(--ink-3); font-size: 0.85rem; }
+/* kpi-section: used by _section_kpi */
+.kpi-row { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-top: 0.5rem; }
+.kpi-card { background: var(--bg-1); border: 1px solid var(--line); border-radius: 6px; padding: 0.5rem 0.75rem; min-width: 7rem; font-size: 0.85rem; }
+.kpi-card.running { border-left: 4px solid var(--run); }
+.kpi-card.failed  { border-left: 4px solid var(--fail); }
+.kpi-card.bypass  { border-left: 4px solid var(--bypass); }
+.kpi-card.done    { border-left: 4px solid var(--done); }
+.kpi-card.pending { border-left: 4px solid var(--pending); }
+.kpi-label { font-size: 0.75rem; font-weight: 600; letter-spacing: 0.05em; color: var(--ink-3); text-transform: uppercase; display: block; }
 .kpi-num { font-size: 1.8rem; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.1; display: block; }
 .kpi-sparkline { display: block; width: 100%; height: 24px; margin-top: 0.25rem; }
 .kpi-section { padding: 0.75rem 0; margin-bottom: 0.5rem; }
-.chip-group { display: flex; gap: 0.5rem; align-items: center; margin-top: 0.5rem; flex-wrap: wrap; }
-.logo-dot { color: var(--green); font-size: 1.2rem; }
-.hdr-title { font-weight: 700; font-size: 1rem; }
-.hdr-project { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 0.9rem; max-width: 30ch; }
-.hdr-refresh { font-family: var(--font-mono); color: var(--muted); font-size: 0.85rem; }
-.chip {
-  display: inline-block;
-  padding: 0.2rem 0.75rem;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  background: var(--panel);
-  color: var(--fg);
-  font-size: 0.82rem;
-  cursor: pointer;
-  user-select: none;
+
+/* ---------- responsive ---------- */
+@media (max-width: 1280px){
+  .grid{ grid-template-columns: 1fr; }
 }
-.chip[aria-pressed="true"] {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--bg);
-  font-weight: 600;
-}
-.page {
-  display: grid;
-  grid-template-columns: 3fr 2fr;
-  gap: 1.25rem;
-  padding: 1.25rem 1.5rem;
-  align-items: start;
-}
-.page-col-left, .page-col-right { display: flex; flex-direction: column; gap: 1rem; }
-.wp-donut {
-  width: 80px;
-  height: 80px;
-  border-radius: 50%;
-  background: conic-gradient(
-    var(--green) 0deg calc(var(--pct-done-end, 0) * 3.6deg),
-    var(--orange) calc(var(--pct-done-end, 0) * 3.6deg) calc((var(--pct-done-end, 0) + var(--pct-run-end, 0)) * 3.6deg),
-    var(--border) calc((var(--pct-done-end, 0) + var(--pct-run-end, 0)) * 3.6deg) 360deg
-  );
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  position: relative;
-}
-.wp-donut::after {
-  content: attr(data-pct);
-  position: absolute;
-  width: 52px;
-  height: 52px;
-  background: var(--panel);
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.82rem;
-  font-weight: 600;
-}
-@supports not (background: conic-gradient(#000 0deg, #fff 360deg)) {
-  .wp-donut { background: var(--panel); border: 3px solid var(--border); }
-}
-.wp-progress { height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; margin-top: 0.25rem; }
-.wp-progress-bar { height: 100%; background: var(--green); border-radius: 2px; }
-.task-row {
-  display: grid;
-  grid-template-columns: 9rem 8rem 1fr 6rem 4rem 1.5rem;
-  gap: 0.5rem;
-  align-items: center;
-  padding: 0.25rem 0.5rem 0.25rem 0.75rem;
-  border-bottom: 1px dashed var(--border);
-  font-size: 0.92rem;
-  position: relative;
-  overflow: hidden;
-}
-.task-row:last-child { border-bottom: none; }
-.task-row .id { color: var(--muted); font-family: var(--font-mono); }
-.task-row .title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.task-row .elapsed, .task-row .retry { color: var(--muted); font-size: 0.85rem; font-family: var(--font-mono); }
-.task-row::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: 4px;
-  background: transparent;
-}
-.task-row.done::before    { background: var(--green); }
-.task-row.running::before { background: var(--orange); }
-.task-row.failed::before  { background: var(--red); }
-.task-row.bypass::before  { background: var(--yellow); }
-.task-row.pending::before { background: var(--light-gray); }
-.run-line {
-  display: none;
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  height: 2px;
-  width: 40%;
-  background: var(--orange);
-  border-radius: 1px;
-}
-.task-row.running .run-line {
-  display: block;
-  animation: slide 1.8s ease-in-out infinite;
-}
-@keyframes slide {
-  0%   { left: -40%; }
-  100% { left: 100%; }
-}
-.activity-row {
-  padding: 0.2rem 0.5rem;
-  border-bottom: 1px dashed var(--border);
-  font-size: 0.88rem;
-  animation: fade-in 0.4s ease-out;
-}
-.activity-row:last-child { border-bottom: none; }
-@keyframes fade-in {
-  from { opacity: 0; transform: translateY(-4px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
-.timeline-svg { width: 100%; overflow: visible; }
-.timeline-svg .tl-dd   { fill: var(--blue); }
-.timeline-svg .tl-im   { fill: var(--purple); }
-.timeline-svg .tl-ts   { fill: var(--green); }
-.timeline-svg .tl-xx   { fill: var(--gray); }
-.timeline-svg .tl-fail { fill: url(#hatch); }
-.pane-preview {
-  font-family: var(--font-mono);
-  font-size: 0.78rem;
-  color: var(--muted);
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 0.25rem 0.5rem;
-  max-height: 4.5em;
-  overflow: hidden;
-  white-space: pre;
-  margin: 0.25rem 0 0;
-  word-break: break-all;
-}
-.pane-preview.empty {
-  font-style: italic;
-}
-.drawer-backdrop {
-  display: none;
-  position: fixed;
-  inset: 0;
-  background: rgba(0,0,0,0.55);
-  z-index: 200;
-}
-.drawer-backdrop.open { display: block; }
-.drawer {
-  display: none;
-  position: fixed;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  width: 640px;
-  background: var(--panel);
-  border-left: 1px solid var(--border);
-  flex-direction: column;
-  z-index: 201;
-  transform: translateX(100%);
-  transition: transform 0.25s ease;
-  overflow-y: auto;
-  padding: 1.25rem;
-}
-.drawer.open {
-  display: flex;
-  transform: translateX(0);
-}
-.drawer-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.75rem; }
-.drawer-title { font-weight: 700; font-size: 1rem; font-family: "SFMono-Regular", Consolas, monospace; }
-.drawer-meta { color: var(--muted); font-size: 0.8rem; font-family: "SFMono-Regular", Consolas, monospace; margin-right: 0.5rem; }
-.drawer-close { background: none; border: none; color: var(--muted); font-size: 1.2rem; cursor: pointer; padding: 0.2rem 0.5rem; border-radius: 4px; }
-.drawer-close:hover { color: var(--fg); background: rgba(255,255,255,0.08); }
-.drawer-body pre { background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 0.75rem; margin: 0; white-space: pre-wrap; word-break: break-all; font-family: "SFMono-Regular", Consolas, monospace; font-size: 0.82rem; min-height: 4rem; }
-@media (max-width: 1279px) {
-  .page { grid-template-columns: 1fr; }
-}
-@media (max-width: 767px) {
-  .sticky-hdr { padding: 0.5rem 1rem; }
-  .kpi-row { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 0.25rem; scroll-snap-type: x mandatory; -webkit-overflow-scrolling: touch; }
-  .kpi-row > * { scroll-snap-align: start; flex-shrink: 0; }
-  .kpi-card { min-width: 6rem; flex-shrink: 0; }
-  .page { padding: 0.75rem 1rem; }
-  .drawer { width: 100vw; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .badge-run,
-  .run-line,
-  .activity-row { animation: none !important; }
-  .drawer { transition: none !important; }
-  * {
-    transition-duration: 0.01ms !important;
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-  }
+@media (max-width: 768px){
+  .shell{ padding: 0 12px; }
+  .cmdbar{ margin: 0 -12px; padding: 0 12px; grid-template-columns: 1fr auto; }
+  .cmdbar .meta{ display:none; }
+  .trow{ grid-template-columns: 4px auto 1fr auto; }
+  .trow .badge, .trow .retry, .trow .flags{ display:none; }
+  .drawer{ width: 100vw; }
 }
 """
 
@@ -1052,10 +1450,33 @@ def _group_preserving_order(
     return groups, order
 
 
+# v3 per-section eyebrow + aside metadata. Keys match section anchors.
+_SECTION_EYEBROWS = {
+    "wp-cards":   ("planning",    ""),
+    "features":   ("unassigned",  ""),
+    "activity":   ("stream",      'last 20 events · <b style="color:var(--done)">tailing</b>'),
+    "timeline":   ("last 60 min", "tick: 15m"),
+    "team":       ("tmux",        ""),
+    "subagents":  ("agent-pool",  "fan-out / fan-in signals"),
+    "phases":     ("audit",       "last 10 transitions"),
+}
+
+
 def _section_wrap(anchor: str, heading: str, body: str) -> str:
-    """Return a standard ``<section id="{anchor}">`` block with <h2> and body."""
+    """Render a v3 ``<section>`` block with ``.section-head`` (eyebrow + h2 + aside).
+
+    The eyebrow/aside pair is looked up from ``_SECTION_EYEBROWS`` by anchor; unknown
+    anchors fall back to an empty eyebrow (no eyebrow shown). ``id`` is preserved
+    for backward-compat with in-page anchors (``/#wbs`` etc.).
+    """
+    eyebrow, aside = _SECTION_EYEBROWS.get(anchor, ("", ""))
+    eyebrow_html = f'<div class="eyebrow">{eyebrow}</div>\n      ' if eyebrow else ""
+    aside_html = f'\n    <div class="aside">{aside}</div>' if aside else ""
     return (
-        f'<section id="{anchor}">\n  <h2>{heading}</h2>\n'
+        f'<section id="{anchor}" data-section="{anchor}">\n'
+        '  <div class="section-head">\n'
+        f'    <div>{eyebrow_html}<h2>{heading}</h2></div>{aside_html}\n'
+        '  </div>\n'
         f'{body}\n'
         '</section>'
     )
@@ -1067,25 +1488,48 @@ def _empty_section(anchor: str, heading: str, message: str, css: str = "empty") 
 
 
 def _section_header(model: dict) -> str:
-    """Header section: project meta + top navigation (orphan-endpoint guard)."""
-    generated_at = _esc(model.get("generated_at"))
-    project_root = _esc(model.get("project_root"))
-    docs_dir = _esc(model.get("docs_dir"))
-    nav_links = "\n    ".join(
-        f'<a href="#{anchor}">{anchor.title()}</a>' for anchor in _SECTION_ANCHORS
-    )
+    """v3 cmdbar header: brand + meta + actions (replaces old section#header)."""
+    generated_at = _esc(model.get("generated_at", ""))
+    project_root = _esc(model.get("project_root", ""))
+    docs_dir = _esc(model.get("docs_dir", ""))
+    refresh_s = _refresh_seconds(model)
     return (
-        '<section id="header">\n'
-        '  <h1>dev-plugin Monitor</h1>\n'
-        '  <dl class="meta">\n'
-        f'    <dt>generated_at</dt><dd>{generated_at}</dd>\n'
-        f'    <dt>project_root</dt><dd>{project_root}</dd>\n'
-        f'    <dt>docs_dir</dt><dd>{docs_dir}</dd>\n'
-        '  </dl>\n'
-        '  <nav class="top-nav">\n'
-        f'    {nav_links}\n'
-        '  </nav>\n'
-        '</section>'
+        '<header class="cmdbar" data-section="hdr" role="banner" aria-label="Command bar">\n'
+        '  <div class="brand">\n'
+        '    <span class="logo" aria-hidden="true">\n'
+        '      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"'
+        ' stroke-linecap="round" stroke-linejoin="round">\n'
+        '        <path d="M4 7 L10 12 L4 17"/>\n'
+        '        <path d="M13 17 L20 17"/>\n'
+        '      </svg>\n'
+        '    </span>\n'
+        '    <span class="title">dev-plugin</span>\n'
+        '    <span class="slash">/</span>\n'
+        '    <span class="sub">monitor</span>\n'
+        '  </div>\n'
+        '  <div class="meta" role="group" aria-label="Session info">\n'
+        f'    <span><span class="k">project</span>'
+        f'<span class="v path">{project_root}</span></span>\n'
+        '    <span class="dot">&middot;</span>\n'
+        f'    <span><span class="k">docs</span><span class="v">{docs_dir}</span></span>\n'
+        '    <span class="dot">&middot;</span>\n'
+        f'    <span><span class="k">now</span>'
+        f'<span class="v" id="clock">{generated_at}</span></span>\n'
+        '    <span class="dot">&middot;</span>\n'
+        f'    <span><span class="k">interval</span>'
+        f'<span class="v">{refresh_s}s</span></span>\n'
+        '  </div>\n'
+        '  <div class="actions">\n'
+        '    <span class="pulse" aria-live="polite">'
+        '<span class="dot" aria-hidden="true"></span> live</span>\n'
+        '    <button class="btn refresh-toggle" type="button"'
+        ' aria-pressed="true" aria-label="Auto-refresh">\n'
+        '      <span class="led" aria-hidden="true"></span>\n'
+        '      <span>auto</span>\n'
+        '      <span class="kbd" aria-hidden="true">R</span>\n'
+        '    </button>\n'
+        '  </div>\n'
+        '</header>'
     )
 
 
@@ -1094,11 +1538,11 @@ def _section_header(model: dict) -> str:
 # ---------------------------------------------------------------------------
 
 _SPARK_COLORS = {
-    "running": "var(--orange)",
-    "failed": "var(--red)",
-    "bypass": "var(--yellow)",
-    "done": "var(--green)",
-    "pending": "var(--light-gray)",
+    "running": "var(--run)",
+    "failed": "var(--fail)",
+    "bypass": "var(--bypass)",
+    "done": "var(--done)",
+    "pending": "var(--pending)",
 }
 
 # Display labels for each KPI kind (CSS handles text-transform: uppercase)
@@ -1113,22 +1557,6 @@ _KPI_LABELS = {
 # Ordered KPI kinds for rendering
 _KPI_ORDER = ["running", "failed", "bypass", "done", "pending"]
 
-
-def _parse_iso(s: Optional[str]) -> Optional[datetime]:
-    """Parse ISO-8601 string to UTC-aware datetime. Returns None on failure.
-
-    Handles both timezone-aware ('Z' / '+HH:MM') and naive timestamps.
-    Naive timestamps are assumed to be UTC per TRD §5.2 convention.
-    """
-    if not s or not isinstance(s, str):
-        return None
-    try:
-        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        return dt
-    except (ValueError, TypeError):
-        return None
 
 
 def _kpi_counts(tasks, features, signals) -> dict:
@@ -1215,7 +1643,7 @@ def _spark_buckets(items, kind: str, now: datetime, span_min: int = 10) -> List[
             event = getattr(entry, "event", None)
             if not event or not _matches(event):
                 continue
-            at_dt = _parse_iso(getattr(entry, "at", None))
+            at_dt = _parse_iso_utc(getattr(entry, "at", None))
             if at_dt is None or at_dt < start or at_dt > now:
                 continue
             # Bucket index: minutes elapsed from start
@@ -1227,11 +1655,11 @@ def _spark_buckets(items, kind: str, now: datetime, span_min: int = 10) -> List[
 
 
 def _kpi_spark_svg(buckets: List[int], color: str) -> str:
-    """Render a sparkline SVG <polyline> from a list of bucket counts.
+    """Render a v3 sparkline <svg class="spark"> from bucket counts.
 
-    viewBox: '0 0 {N-1} 24'. Y-axis: 0=top (24-norm), 24=bottom (flat line).
-    When max_val==0 or len(buckets)<2, renders a flat baseline.
-    Includes <title> for screen reader accessibility.
+    viewBox: '0 0 100 28' (reference design). When max_val==0 or len(buckets)<2
+    renders a flat baseline. Includes <title> for screen reader accessibility.
+    Emits both stroke polyline and a faint fill polygon to match reference.
     """
     n = len(buckets)
     if n == 0:
@@ -1242,20 +1670,24 @@ def _kpi_spark_svg(buckets: List[int], color: str) -> str:
     total = sum(buckets)
     title_text = f"sparkline: {total} events in last {n} minutes"
 
-    vb_right = max(n - 1, 1)
-    viewbox = f"0 0 {vb_right} 24"
-
     if n < 2 or max_val == 0:
-        # Flat baseline
-        points = f"0,24 {vb_right},24"
+        points = "0,26 100,26"
+        fill_points = ""
     else:
-        pts = [f"{i},{24 - int(24 * val / max_val)}" for i, val in enumerate(buckets)]
+        step = 100.0 / max(n - 1, 1)
+        pts = [f"{i*step:.1f},{28 - (24 * val / max_val):.1f}" for i, val in enumerate(buckets)]
         points = " ".join(pts)
+        fill_points = points + " 100,28 0,28"
 
+    fill_poly = (
+        f'<polyline points="{fill_points}" fill="{color}" opacity="0.15" stroke="none"/>'
+        if fill_points else ""
+    )
     return (
-        f'<svg class="kpi-sparkline" viewBox="{viewbox}">'
+        f'<svg class="spark" viewBox="0 0 100 28" preserveAspectRatio="none" aria-hidden="true">'
         f'<title>{_esc(title_text)}</title>'
-        f'<polyline points="{points}" stroke="{color}" fill="none" stroke-width="1.5"/>'
+        f'{fill_poly}'
+        f'<polyline points="{points}" stroke="{color}" fill="none" stroke-width="1.4"/>'
         f'</svg>'
     )
 
@@ -1277,12 +1709,36 @@ def _section_sticky_header(model: dict) -> str:
     )
 
 
-def _section_kpi(model: dict) -> str:
-    """Render KPI section: 5 cards (Running/Failed/Bypass/Done/Pending) + filter chips.
+# v3 CSS-suffix for each KPI kind (matches reference stylesheet .kpi--run etc.)
+_KPI_V3_SUFFIX = {
+    "running": "run",
+    "failed": "fail",
+    "bypass": "bypass",
+    "done": "done",
+    "pending": "pend",
+}
 
-    Each card has a sparkline SVG from phase_history, color-coded borders,
-    and data-kpi="{kind}" attribute for unit-test DOM assertion.
-    Filter chips (All/Running/Failed/Bypass) are placed in the section header area.
+
+def _section_kpi(model: dict) -> str:
+    """Render KPI section (v3): section-head + .kpi-strip + filter chips.
+
+    Markup (reference /dev-plugin Monitor.html):
+      <section data-section="kpi">
+        <div class="section-head">
+          <div><div class="eyebrow">overview</div><h2>Task states · …</h2></div>
+          <div class="aside">…</div>
+        </div>
+        <div class="kpi-strip">
+          <div class="kpi kpi--run" data-kpi="running">
+            <div class="label"><span class="sw"></span>Running</div>
+            <div class="num">4</div>
+            <div class="delta">+2 / 10m</div>
+            <svg class="spark">…</svg>
+          </div>
+          … ×5 …
+        </div>
+        <div class="chips">…</div>
+      </section>
     """
     tasks = model.get("wbs_tasks") or []
     features = model.get("features") or []
@@ -1291,6 +1747,7 @@ def _section_kpi(model: dict) -> str:
     counts = _kpi_counts(tasks, features, shared_signals)
     all_items = list(tasks) + list(features)
     now = datetime.now(timezone.utc)
+    total_items = len(all_items)
 
     cards_html = []
     for kind in _KPI_ORDER:
@@ -1299,98 +1756,59 @@ def _section_kpi(model: dict) -> str:
         svg = _kpi_spark_svg(buckets, color)
         n = counts[kind]
         label = _KPI_LABELS[kind]
+        suffix = _KPI_V3_SUFFIX[kind]
+        delta_n = sum(buckets)
+        if delta_n > 0:
+            delta_html = f'<span class="up">+{delta_n}</span> / 10m'
+        else:
+            delta_html = '<span>±0</span> / 10m'
         cards_html.append(
-            f'<div class="kpi-card {kind}" data-kpi="{kind}">\n'
-            f'  <span class="kpi-label">{label}</span>\n'
-            f'  <span class="kpi-num" aria-label="{label}: {n}">{n}</span>\n'
+            f'<div class="kpi kpi--{suffix}" data-kpi="{kind}">\n'
+            f'  <div class="label"><span class="sw"></span>{label}</div>\n'
+            f'  <div class="num" aria-label="{label}: {n}">{n}</div>\n'
+            f'  <div class="delta">{delta_html}</div>\n'
             f'  {svg}\n'
             f'</div>'
         )
 
-    # Filter chips — placed after cards in the same section
+    # Filter chips with per-status counts (matches reference ·count badge).
     chip_filters = [
-        ("all", "All", "true"),
-        ("running", "Running", "false"),
-        ("failed", "Failed", "false"),
-        ("bypass", "Bypass", "false"),
+        ("all", "All", "true", total_items),
+        ("running", "Running", "false", counts["running"]),
+        ("failed", "Failed", "false", counts["failed"]),
+        ("bypass", "Bypass", "false", counts["bypass"]),
     ]
-    chips_html = "\n  ".join(
-        f'<button class="chip" data-filter="{f}" aria-pressed="{pressed}" tabindex="0">{label}</button>'
-        for f, label, pressed in chip_filters
-    )
+    chip_htmls = []
+    for f, label, pressed, count in chip_filters:
+        sw = '<span class="sw"></span>' if f != "all" else ""
+        chip_htmls.append(
+            f'<button class="chip" data-filter="{f}" aria-pressed="{pressed}" type="button">'
+            f'{sw}{label} <span class="ct">{count}</span></button>'
+        )
+    chips_html = "\n  ".join(chip_htmls)
 
     cards_block = "\n".join(cards_html)
+    eyebrow = "overview"
+    heading = "Task states"
+    aside = (
+        f'<b style="color:var(--ink-2)">{total_items} items</b>'
+        f' · {counts["done"]} done'
+    )
+
     return (
-        '<section class="kpi-section">\n'
-        '  <div class="kpi-row">\n'
+        '<section data-section="kpi" aria-label="Key performance indicators">\n'
+        '  <div class="section-head">\n'
+        f'    <div><div class="eyebrow">{eyebrow}</div><h2>{heading}</h2></div>\n'
+        f'    <div class="aside">{aside}</div>\n'
+        '  </div>\n'
+        '  <div class="kpi-strip">\n'
         f'{cards_block}\n'
         '  </div>\n'
-        '  <div class="chip-group">\n'
+        '  <div class="chips" data-section="kpi-chips" role="toolbar" aria-label="Task filter">\n'
         f'  {chips_html}\n'
         '  </div>\n'
         '</section>'
     )
-
-
-def _render_task_row(item, running_ids: set, failed_ids: set) -> str:
-    """Render a single <div class="task-row"> for a WorkItem.
-
-    The row always has 6 cells (id, status|warn, title, elapsed, retry, flag).
-    When ``error`` is present the status cell becomes a ⚠ badge-warn span; all
-    other cells stay identical between the two branches.
-    """
-    item_id = getattr(item, "id", None)
-    is_running = item_id in running_ids if item_id else False
-    is_failed = item_id in failed_ids if item_id else False
-    bypassed = bool(getattr(item, "bypassed", False))
-    status = getattr(item, "status", None)
-    error = getattr(item, "error", None)
-    title = getattr(item, "title", None)
-
-    id_html = f'<span class="id">{_esc(item_id)}</span>'
-    title_html = f'<span class="title">{_esc(title) if title else ""}</span>'
-    elapsed_html = f'<span class="elapsed">{_esc(_format_elapsed(item))}</span>'
-    retry_html = f'<span class="retry">×{_retry_count(item)}</span>'
-    flag_html = '<span title="bypassed">🟡</span>' if bypassed else '<span></span>'
-
-    if error:
-        error_preview = _esc(str(error)[:_ERROR_TITLE_CAP])
-        status_cell = (
-            f'<span class="badge badge-warn" title="{error_preview}">⚠ state error</span>'
-        )
-    else:
-        status_cell = _status_badge(status, bypassed, is_running, is_failed)
-
-    return (
-        '<div class="task-row">\n'
-        f'  {id_html}\n  {status_cell}\n  {title_html}\n'
-        f'  {elapsed_html}\n  {retry_html}\n  {flag_html}\n'
-        '</div>'
-    )
-
-
-def _section_wbs(tasks, running_ids: set, failed_ids: set) -> str:
-    """WBS section: tasks grouped by WP (<details> per WP)."""
-    if not tasks:
-        return _empty_section("wbs", "WBS Tasks", "no tasks found — docs/tasks/ is empty")
-
-    groups, order = _group_preserving_order(
-        tasks, lambda item: getattr(item, "wp_id", None) or "WP-unknown"
-    )
-
-    blocks: List[str] = []
-    for wp in order:
-        rows = "\n".join(
-            _render_task_row(item, running_ids, failed_ids) for item in groups[wp]
-        )
-        blocks.append(
-            '<details open>\n'
-            f'  <summary>{_esc(wp)} ({len(groups[wp])} tasks)</summary>\n'
-            f'{rows}\n'
-            '</details>'
-        )
-
-    return _section_wrap("wbs", "WBS Tasks", "\n".join(blocks))
 
 
 def _wp_donut_style(counts: dict) -> str:
@@ -1407,6 +1825,82 @@ def _wp_donut_style(counts: dict) -> str:
     pct_done_end = round(done / total * 360, 1)
     pct_run_end = round((done + running) / total * 360, 1)
     return f"--pct-done-end:{pct_done_end}deg; --pct-run-end:{pct_run_end}deg;"
+
+
+def _wp_donut_svg(counts: dict) -> str:
+    """Return SVG donut chart with stroke-dasharray circles using pathLength=100.
+
+    Renders a track circle + 4 color-slice circles (done/run/fail/bypass).
+    pending fills the remainder. Uses stroke-dasharray offset pattern on a
+    circle with pathLength="100" for percentage-based drawing.
+    Total 0 → returns track-only SVG (no division by zero).
+    """
+    done = counts.get("done", 0)
+    running = counts.get("running", 0)
+    failed = counts.get("failed", 0)
+    bypass = counts.get("bypass", 0)
+    pending = counts.get("pending", 0)
+    total = done + running + failed + bypass + pending
+
+    cx, cy, r = 20, 20, 16
+    stroke_w = 6
+
+    # Track circle (background)
+    track = (
+        f'<circle cx="{cx}" cy="{cy}" r="{r}" pathLength="100"'
+        f' stroke="var(--line-2)" stroke-width="{stroke_w}"'
+        ' fill="none" stroke-dasharray="100 0"/>'
+    )
+
+    if total == 0:
+        return (
+            '<svg viewBox="0 0 40 40" class="donut-svg">\n'
+            f'  {track}\n'
+            '</svg>'
+        )
+
+    def _pct(n):
+        return round(n / total * 100, 2)
+
+    slices = [
+        (_pct(done), "var(--done)"),
+        (_pct(running), "var(--run)"),
+        (_pct(failed), "var(--fail)"),
+        (_pct(bypass), "var(--bypass)"),
+    ]
+
+    circles = [track]
+    offset = 0.0
+    for pct, color in slices:
+        # Always render the circle even if pct=0 (dasharray "0 100" = invisible)
+        # so pathLength="100" count is always track+4 = 5
+        safe_pct = max(0, pct)
+        dash = f"{safe_pct} {100 - safe_pct}"
+        circles.append(
+            f'<circle cx="{cx}" cy="{cy}" r="{r}" pathLength="100"'
+            f' stroke="{color}" stroke-width="{stroke_w}"'
+            f' fill="none" stroke-dasharray="{dash}"'
+            f' stroke-dashoffset="{-offset:.2f}"'
+            ' transform="rotate(-90 20 20)"/>'
+        )
+        offset += safe_pct
+
+    inner_html = "\n  ".join(circles)
+    return (
+        '<svg viewBox="0 0 40 40" class="donut-svg">\n'
+        f'  {inner_html}\n'
+        '</svg>'
+    )
+
+
+def _trow_data_status(item, running_ids: set, failed_ids: set) -> str:
+    """Return the data-status attribute value for a .trow element.
+
+    Priority: bypass > failed > running > done > pending
+    Maps _row_state_class output (which uses 'bypass'/'failed'/'running'/'done'/'pending')
+    to the same strings used in data-status.
+    """
+    return _row_state_class(item, running_ids, failed_ids)
 
 
 def _wp_card_counts(items, running_ids: set, failed_ids: set) -> dict:
@@ -1442,52 +1936,77 @@ def _row_state_class(item, running_ids: set, failed_ids: set) -> str:
     return "pending"
 
 
-def _render_task_row_v2(item, running_ids: set, failed_ids: set) -> str:
-    """Render a <div class="task-row {state_class}"> with state CSS class.
+def _clean_title(title) -> str:
+    """Strip markdown header prefix and limit length for display.
 
-    Extends ``_render_task_row`` by adding the state CSS class to the div.
-    v1 ``_render_task_row`` is preserved for backward compatibility with
-    existing tests; this function is used by TSK-01-03 onwards.
+    Features often get their spec.md first line ("# Feature: foo") assigned as
+    title — strip the leading '#' chars + "Feature:" marker so the dashboard
+    shows a clean human-readable name.
+    """
+    if not title:
+        return ""
+    t = str(title).strip()
+    while t.startswith("#"):
+        t = t[1:].lstrip()
+    if t.lower().startswith("feature:"):
+        t = t[len("feature:"):].lstrip()
+    return t
+
+
+def _render_task_row_v2(item, running_ids: set, failed_ids: set) -> str:
+    """Render a v3 ``<div class="trow" data-status="{state}">`` row.
+
+    Matches reference markup exactly — 7 ``<div>`` children:
+    ``statusbar / tid / badge / ttitle / elapsed / retry / flags``.
+    Badge text is lowercase (``running``/``done``/``failed``/``bypass``/``pending``)
+    — reference design uses CSS to colour the pill.
     """
     item_id = getattr(item, "id", None)
-    is_running = item_id in running_ids if item_id else False
-    is_failed = item_id in failed_ids if item_id else False
     bypassed = bool(getattr(item, "bypassed", False))
-    status = getattr(item, "status", None)
     error = getattr(item, "error", None)
     title = getattr(item, "title", None)
-    state_class = _row_state_class(item, running_ids, failed_ids)
+    data_status = _trow_data_status(item, running_ids, failed_ids)
 
-    id_html = f'<span class="id">{_esc(item_id)}</span>'
-    title_html = f'<span class="title">{_esc(title) if title else ""}</span>'
-    elapsed_html = f'<span class="elapsed">{_esc(_format_elapsed(item))}</span>'
-    retry_html = f'<span class="retry">×{_retry_count(item)}</span>'
-    flag_html = '<span title="bypassed">🟡</span>' if bypassed else '<span></span>'
-    run_line_html = '<div class="run-line"></div>'
-
+    badge_text = "error" if error else data_status
+    badge_title_attr = ""
     if error:
-        error_preview = _esc(str(error)[:_ERROR_TITLE_CAP])
-        status_cell = (
-            f'<span class="badge badge-warn" title="{error_preview}">⚠ state error</span>'
-        )
+        badge_title_attr = f' title="{_esc(str(error)[:_ERROR_TITLE_CAP])}"'
+
+    # elapsed '00:00:00' and '-' are both unreadable in dense rows — show '—'
+    elapsed_raw = _format_elapsed(item)
+    if elapsed_raw in ("-", "00:00:00"):
+        elapsed_display = "—"
     else:
-        status_cell = _status_badge(status, bypassed, is_running, is_failed)
+        elapsed_display = elapsed_raw
+
+    flags_inner = ""
+    if bypassed:
+        flags_inner = '<span class="flag f-crit">bypass</span>'
+
+    clean_title = _esc(_clean_title(title))
 
     return (
-        f'<div class="task-row {state_class}">\n'
-        f'  {id_html}\n  {status_cell}\n  {title_html}\n'
-        f'  {elapsed_html}\n  {retry_html}\n  {flag_html}\n'
-        f'  {run_line_html}\n'
+        f'<div class="trow" data-status="{data_status}">\n'
+        '  <div class="statusbar"></div>\n'
+        f'  <div class="tid">{_esc(item_id)}</div>\n'
+        f'  <div class="badge"{badge_title_attr}>{_esc(badge_text)}</div>\n'
+        f'  <div class="ttitle">{clean_title}</div>\n'
+        f'  <div class="elapsed">{_esc(elapsed_display)}</div>\n'
+        f'  <div class="retry">×{_retry_count(item)}</div>\n'
+        f'  <div class="flags">{flags_inner}</div>\n'
         '</div>'
     )
 
 
 def _section_wp_cards(tasks, running_ids: set, failed_ids: set) -> str:
-    """WP card section: tasks grouped by wp_id, each WP as a card with donut.
+    """WP card section: tasks grouped by wp_id, each WP as a v3 .wp card.
 
-    Replaces the old ``_section_wbs`` function. Structure per card:
-    - Header: WP-ID + donut (conic-gradient) + progress bar + counts
-    - Body: <details> with task rows (v2 CSS classes)
+    v3 structure per card:
+    - <details class="wp"> with <summary><div class="wp-head">:
+      - .wp-donut: SVG stroke-dasharray donut + .pct overlay
+      - .wp-title: .id badge + h3 + .bar + .wp-counts
+      - .wp-meta: total tasks count
+    - <details class="wp-tasks"> body with .trow rows
 
     Empty tasks list → empty-state. Individual empty WP → empty-state per card.
     WP name XSS is escaped via ``_esc``.
@@ -1503,70 +2022,89 @@ def _section_wp_cards(tasks, running_ids: set, failed_ids: set) -> str:
     for wp in order:
         wp_tasks = groups[wp]
         counts = _wp_card_counts(wp_tasks, running_ids, failed_ids)
-        donut_style = _wp_donut_style(counts)
         total = len(wp_tasks)
         done_count = counts["done"]
         pct_done = round(done_count / total * 100) if total > 0 else 0
 
-        # Header: donut + info (title, progress bar, counts)
+        # v3 donut SVG
+        svg_html = _wp_donut_svg(counts)
         donut_html = (
-            f'<div class="wp-donut" style="{donut_style}" data-pct="{pct_done}%">'
+            f'<div class="wp-donut" aria-label="{pct_done}% complete">\n'
+            f'  {svg_html}\n'
+            f'  <div class="pct">{pct_done}<small>%</small></div>\n'
             '</div>'
         )
-        progress_html = (
-            '<div class="wp-progress">'
-            f'<div class="wp-progress-bar" style="width:{pct_done}%"></div>'
+
+        # progress bar (5-segment flex)
+        bar_html = (
+            '<div class="bar" aria-hidden="true">'
+            f'<div class="b-done" style="flex:{counts["done"]}"></div>'
+            f'<div class="b-run"  style="flex:{counts["running"]}"></div>'
+            f'<div class="b-fail" style="flex:{counts["failed"]}"></div>'
+            f'<div class="b-byp"  style="flex:{counts["bypass"]}"></div>'
+            f'<div class="b-pnd"  style="flex:{counts["pending"]}"></div>'
             '</div>'
         )
+
+        # counts row
         counts_html = (
             '<div class="wp-counts">'
-            f'<span>● {counts["done"]} done</span>'
-            f' <span>○ {counts["running"]} running</span>'
-            f' <span>◐ {counts["pending"]} pending</span>'
-            f' <span>× {counts["failed"]} failed</span>'
-            f' <span>🟡 {counts["bypass"]} bypass</span>'
+            f'<span class="c" data-k="done"><span class="sw"></span><b>{counts["done"]}</b> done</span>'
+            f'<span class="c" data-k="run"><span class="sw"></span><b>{counts["running"]}</b> running</span>'
+            f'<span class="c" data-k="pnd"><span class="sw"></span><b>{counts["pending"]}</b> pending</span>'
+            f'<span class="c" data-k="fail"><span class="sw"></span><b>{counts["failed"]}</b> failed</span>'
+            f'<span class="c" data-k="byp"><span class="sw"></span><b>{counts["bypass"]}</b> bypass</span>'
             '</div>'
         )
-        card_info_html = (
-            '<div class="wp-card-info">'
-            f'<div class="wp-card-title">{_esc(wp)}</div>'
-            f'{progress_html}'
-            f'{counts_html}'
+
+        wp_title_html = (
+            '<div class="wp-title">\n'
+            '  <div class="row1">\n'
+            f'    <span class="id">{_esc(wp)}</span>\n'
+            f'    <h3>{_esc(wp)}</h3>\n'
+            '  </div>\n'
+            f'  {bar_html}\n'
+            f'  {counts_html}\n'
             '</div>'
         )
-        card_header_html = (
-            '<div class="wp-card-header">'
-            f'{donut_html}'
-            f'{card_info_html}'
+
+        wp_meta_html = f'<div class="wp-meta"><span class="big">{total} tasks</span></div>'
+
+        wp_head_html = (
+            '<div class="wp-head">\n'
+            f'  {donut_html}\n'
+            f'  {wp_title_html}\n'
+            f'  {wp_meta_html}\n'
             '</div>'
         )
 
         if not wp_tasks:
-            # Individual empty WP card (only possible if wp_tasks is empty)
             card_body_html = '<p class="empty">no tasks</p>'
         else:
             task_rows = "\n".join(
                 _render_task_row_v2(item, running_ids, failed_ids) for item in wp_tasks
             )
             card_body_html = (
-                '<details>\n'
-                f'  <summary>Tasks ({total})</summary>\n'
-                f'{task_rows}\n'
+                '<details class="wp-tasks">\n'
+                f'  <summary><span>Tasks</span> <span class="ct">({total})</span></summary>\n'
+                f'  <div class="task-list">\n{task_rows}\n  </div>\n'
                 '</details>'
             )
 
         blocks.append(
-            f'<div class="wp-card" data-wp="{_esc(wp)}">\n'
-            f'{card_header_html}\n'
+            f'<details class="wp" open data-wp="{_esc(wp)}">\n'
+            '  <summary style="list-style:none; display:block;">\n'
+            f'{wp_head_html}\n'
+            '  </summary>\n'
             f'{card_body_html}\n'
-            '</div>'
+            '</details>'
         )
 
     return _section_wrap("wp-cards", "Work Packages", "\n".join(blocks))
 
 
 def _section_features(features, running_ids: set, failed_ids: set) -> str:
-    """Feature section: flat list with v2 task-row CSS classes (no WP grouping)."""
+    """Feature section: flat .trow list inside .features-wrap panel (no WP grouping)."""
     if not features:
         return _empty_section(
             "features", "Features", "no features found — docs/features/ is empty"
@@ -1574,7 +2112,7 @@ def _section_features(features, running_ids: set, failed_ids: set) -> str:
     rows = "\n".join(
         _render_task_row_v2(item, running_ids, failed_ids) for item in features
     )
-    return _section_wrap("features", "Features", rows)
+    return _section_wrap("features", "Features", f'<div class="features-wrap">\n{rows}\n</div>')
 
 
 def _pane_attr(pane, key: str, default=""):
@@ -1609,7 +2147,10 @@ def _pane_last_n_lines(pane_id: str, n: int = 3) -> str:
 
 
 def _render_pane_row(pane, preview_lines: "Optional[str]" = "") -> str:
-    """Render a single ``<div class="pane-row">`` for a tmux pane.
+    """Render a single ``<div class="pane">`` for a tmux pane (v3 structure).
+
+    v3: .pane > .pane-head (4-col grid) + .pane-preview.
+    Still emits data-pane-expand for JS drawer + pane-row class for backward compat.
 
     Args:
         pane: PaneInfo dataclass or its dict form.
@@ -1624,6 +2165,10 @@ def _render_pane_row(pane, preview_lines: "Optional[str]" = "") -> str:
     pane_idx = _esc(_pane_attr(pane, "pane_index", ""))
     cmd = _esc(_pane_attr(pane, "pane_current_command", ""))
     pid = _esc(_pane_attr(pane, "pane_pid", ""))
+    window_name = _esc(_pane_attr(pane, "window_name", ""))
+
+    # data-state: "live" for active panes, "idle" for shell-only
+    data_state = "idle" if cmd in ("zsh", "bash", "sh") else "live"
 
     if preview_lines is None:
         preview_html = '<pre class="pane-preview empty">no preview (too many panes)</pre>'
@@ -1631,12 +2176,15 @@ def _render_pane_row(pane, preview_lines: "Optional[str]" = "") -> str:
         preview_html = f'<pre class="pane-preview">{_esc(preview_lines)}</pre>'
 
     return (
-        '<div class="pane-row">\n'
-        f'  <span class="id">{pane_id_esc}</span>'
-        f' <span class="elapsed">#{pane_idx} {cmd} (pid {pid})</span>'
-        f' <a class="pane-link" href="/pane/{pane_id_esc}">[show output]</a>'
-        f' <button class="expand-btn" data-pane-expand="{pane_id_esc}"'
-        f' aria-label="Expand pane {pane_id_esc}">[expand ↗]</button>\n'
+        f'<div class="pane" data-state="{data_state}">\n'
+        f'  <div class="pane-head">\n'
+        f'    <div class="name">{window_name}</div>\n'
+        f'    <div class="meta">{pane_id_esc} · <span class="cmd">{cmd}</span> · pid {pid}</div>\n'
+        f'    <a class="mini-btn" href="/pane/{pane_id_esc}">show output</a>\n'
+        f'    <button class="mini-btn primary" type="button"'
+        f' data-pane-expand="{pane_id_esc}"'
+        f' aria-label="Expand pane {pane_id_esc}">expand <span class="kbd">&#x21B5;</span></button>\n'
+        f'  </div>\n'
         f'{preview_html}\n'
         '</div>'
     )
@@ -1691,7 +2239,8 @@ def _section_team(panes) -> str:
             '</details>'
         )
 
-    return _section_wrap("team", "Team Agents (tmux)", "\n".join(blocks))
+    team_body = '<div class="panel team">\n' + "\n".join(blocks) + '\n</div>'
+    return _section_wrap("team", "Team Agents (tmux)", team_body)
 
 
 _SUBAGENT_INFO = (
@@ -1701,17 +2250,26 @@ _SUBAGENT_INFO = (
 
 
 def _render_subagent_row(sig) -> str:
-    """Render a single agent-pool slot row."""
+    """Render a single agent-pool slot as a v3 .sub pill with data-state."""
     kind = getattr(sig, "kind", "")
     task_id = getattr(sig, "task_id", "")
-    mtime = getattr(sig, "mtime", "")
-    css = _SUBAGENT_BADGE_CSS.get(kind, "badge-pending")
+
+    # Map signal kind to data-state value.
+    # bypassed signals are semantically "done" (bypassed = completed with bypass)
+    state_map = {
+        "running": "running",
+        "done": "done",
+        "failed": "failed",
+        "bypassed": "done",
+    }
+    data_state = state_map.get(kind, "pending")
+
     return (
-        '<div class="pane-row">\n'
-        f'  <span class="id">{_esc(task_id)}</span>'
-        f' <span class="badge {css}">{_esc(kind if kind else "?")}</span>'
-        f' <span class="elapsed">{_esc(mtime)}</span>\n'
-        '</div>'
+        f'<span class="sub" data-state="{data_state}">'
+        f'<span class="sw"></span>'
+        f'{_esc(task_id)}'
+        f'<span class="n">{_esc(kind if kind else "?")}</span>'
+        f'</span>'
     )
 
 
@@ -1724,29 +2282,35 @@ def _section_subagents(signals) -> str:
             f'  {_SUBAGENT_INFO}\n  <p class="empty">no agent-pool signals</p>',
         )
 
-    groups, order = _group_preserving_order(
-        signals, lambda sig: getattr(sig, "scope", None) or "agent-pool:unknown"
+    pills = "\n".join(_render_subagent_row(sig) for sig in signals)
+    subs_body = (
+        f'  {_SUBAGENT_INFO}\n'
+        f'  <div class="panel"><div class="subs">\n{pills}\n  </div></div>'
     )
+    return _section_wrap("subagents", "Subagents (agent-pool)", subs_body)
 
-    blocks: List[str] = []
-    for scope in order:
-        rows = "\n".join(_render_subagent_row(sig) for sig in groups[scope])
-        blocks.append(
-            '<details open>\n'
-            f'  <summary>{_esc(scope)} ({len(groups[scope])} slots)</summary>\n'
-            f'{rows}\n'
-            '</details>'
-        )
 
-    return _section_wrap(
-        "subagents",
-        "Subagents (agent-pool)",
-        f'  {_SUBAGENT_INFO}\n{chr(10).join(blocks)}',
-    )
+def _status_class_for_phase(status_str: str) -> str:
+    """Map '[xx]'/'[im]' etc. to CSS class name for the history table."""
+    _map = {
+        "[ ]": "init",
+        "[dd]": "dd",
+        "[im]": "im",
+        "[ts]": "ts",
+        "[xx]": "done",
+    }
+    if not status_str:
+        return ""
+    return _map.get(status_str.strip(), "")
 
 
 def _section_phase_history(tasks, features) -> str:
-    """Phase-history section: most recent events across tasks+features (cap 10)."""
+    """Phase-history section: most recent events as v3 <table> (cap 10).
+
+    v3: <div class="history" data-section="phases"> wraps a <table> with
+    columns: #, time, task-id, event, from→to, elapsed.
+    Empty → old-style empty section (no table).
+    """
     collected: list = []
     for item in list(tasks or []) + list(features or []):
         tail = getattr(item, "phase_history_tail", None) or []
@@ -1759,23 +2323,51 @@ def _section_phase_history(tasks, features) -> str:
     if not top:
         return _empty_section("phases", "Recent Phase History", "no phase history yet")
 
-    items = []
-    for item_id, entry in top:
+    rows = []
+    for idx, (item_id, entry) in enumerate(top, 1):
         at = _esc(getattr(entry, "at", ""))
         event = _esc(getattr(entry, "event", ""))
-        from_s = _esc(getattr(entry, "from_status", ""))
-        to_s = _esc(getattr(entry, "to_status", ""))
+        from_s_raw = getattr(entry, "from_status", "") or ""
+        to_s_raw = getattr(entry, "to_status", "") or ""
+        from_s = _esc(from_s_raw)
+        to_s = _esc(to_s_raw)
         elapsed = getattr(entry, "elapsed_seconds", None)
-        elapsed_str = _esc(elapsed if elapsed is not None else "-")
-        items.append(
-            f'  <li>{at} · {_esc(item_id)} · {event} · {from_s} → {to_s}'
-            f' · {elapsed_str}s</li>'
+        elapsed_str = _esc(str(elapsed) + "s" if elapsed is not None else "-")
+        to_cls = _status_class_for_phase(to_s_raw)
+        to_cell = f'<span class="to {to_cls}">{to_s}</span>' if to_cls else f'<span class="to">{to_s}</span>'
+
+        rows.append(
+            f'<tr>'
+            f'<td class="idx">{idx}</td>'
+            f'<td class="t">{at}</td>'
+            f'<td class="tid">{_esc(item_id)}</td>'
+            f'<td class="ev">{event}</td>'
+            f'<td class="arr">{from_s} → {to_cell}</td>'
+            f'<td class="el">{elapsed_str}</td>'
+            f'</tr>'
         )
 
-    return _section_wrap(
-        "phases",
-        "Recent Phase History",
-        '  <ol class="phase-list">\n' + "\n".join(items) + "\n  </ol>",
+    table_html = (
+        '<table>\n'
+        '  <thead><tr>'
+        '<th class="idx">#</th>'
+        '<th class="t">time</th>'
+        '<th class="tid">id</th>'
+        '<th class="ev">event</th>'
+        '<th class="arr">transition</th>'
+        '<th class="el">elapsed</th>'
+        '</tr></thead>\n'
+        '  <tbody>\n'
+        + "\n".join(f'  {r}' for r in rows)
+        + '\n  </tbody>\n'
+        '</table>'
+    )
+
+    return (
+        '<div class="history" data-section="phases" id="phases">\n'
+        '  <h2>Recent Phase History</h2>\n'
+        + table_html
+        + '\n</div>'
     )
 
 
@@ -1876,34 +2468,59 @@ def _section_live_activity(model):
         to_s = getattr(entry, "to_status", None)
         elapsed_s = getattr(entry, "elapsed_seconds", None)
 
-        if event and event.endswith(".fail"):
-            ev_cls = "a-event-fail"
-            warn = " ⚠"
+        # Map to_status to a data-to value matching v3 CSS [data-to="..."] selectors.
+        to_phase = _phase_of(to_s) if to_s else None
+        if to_phase in ("dd", "im", "ts"):
+            data_to = "running"
+        elif to_phase == "xx":
+            data_to = "done"
+        elif event and event.endswith(".fail"):
+            data_to = "failed"
         elif event == "bypass":
-            ev_cls = "a-event-bypass"
-            warn = ""
+            data_to = "bypass"
         else:
-            ev_cls = "a-event-ok"
-            warn = ""
+            data_to = "pending"
 
         time_str = _fmt_hms(dt)
         elapsed_str = _fmt_elapsed_short(elapsed_s)
-        detail_str = _esc(from_s) + " → " + _esc(to_s)
-        event_esc = _esc(event or "")
+        event_label = _esc(event or "")
+        # Strip the bracket decoration for the from→to labels so the reference
+        # design's '.from/.to' spans stay compact ("running"/"done" not "[im]"/"[xx]").
+        from_label = _esc(_phase_label(from_s) or "")
+        to_label = _esc(_phase_label(to_s) or "")
 
+        evt_detail = (
+            f'{event_label} <span class="arrow">&#x2192;</span>'
+            f'<span class="from">{from_label}</span>'
+            f'<span class="arrow">&#x2192;</span>'
+            f'<span class="to">{to_label}</span>'
+        )
         row_html = (
-            '<div class="activity-row" data-event="' + event_esc + '">\n'
-            '  <span class="a-time">' + _esc(time_str) + '</span>\n'
-            '  <span class="a-id">' + _esc(item_id) + '</span>\n'
-            '  <span class="a-event ' + ev_cls + '">' + event_esc + '</span>\n'
-            '  <span class="a-detail">' + detail_str + '</span>\n'
-            '  <span class="a-elapsed">' + _esc(elapsed_str) + warn + '</span>\n'
+            f'<div class="arow" data-to="{data_to}">\n'
+            f'  <span class="t">{_esc(time_str)}</span>\n'
+            f'  <span class="tid">{_esc(item_id)}</span>\n'
+            f'  <span class="evt">{evt_detail}</span>\n'
+            f'  <span class="el">{_esc(elapsed_str)}</span>\n'
             '</div>'
         )
         row_htmls.append(row_html)
 
-    body = "\n".join(row_htmls)
+    body = '<div class="panel"><div class="activity" aria-live="polite">\n' + "\n".join(row_htmls) + '\n</div></div>'
     return _section_wrap("activity", "Live Activity", body)
+
+
+def _phase_label(status_str):
+    """Map '[dd]'/'[im]'/'[ts]'/'[xx]' to human-readable phase labels."""
+    if not status_str:
+        return ""
+    _map = {
+        "[ ]": "pending",
+        "[dd]": "design",
+        "[im]": "build",
+        "[ts]": "test",
+        "[xx]": "done",
+    }
+    return _map.get(str(status_str).strip(), str(status_str))
 
 
 def _phase_of(to_status):
@@ -2061,10 +2678,11 @@ def _timeline_svg(rows, span_minutes, now, max_rows=_TIMELINE_MAX_ROWS, W=600):
 
 
 def _section_phase_timeline(tasks, features):
-    """Phase Timeline 섹션을 렌더링한다.
+    """Phase Timeline 섹션을 렌더링한다 (v3: CSS positional .tl-track/.seg divs).
 
-    시간축: 현재 - 60분 = x=0, 현재 = x=600, 5분 간격 tick.
+    시간축: 현재 - 60분 = left:0%, 현재 = left:100%.
     Task 수 50 초과 시 상위 50건만 렌더 후 +N more 링크 표시.
+    SVG 사용 안 함 — CSS left%/width% 배치.
     """
     now = datetime.now(timezone.utc)
     rows = _timeline_rows(tasks, features, now)
@@ -2072,17 +2690,104 @@ def _section_phase_timeline(tasks, features):
     total = len(rows)
     visible = rows[:_TIMELINE_MAX_ROWS]
 
-    svg = _timeline_svg(visible, _TIMELINE_SPAN_MINUTES, now)
+    if not visible:
+        body = '<p class="tl-empty">no phase history</p>'
+        return _section_wrap("timeline", "Phase Timeline", body)
+
+    span_sec = _TIMELINE_SPAN_MINUTES * 60
+    origin = now - timedelta(minutes=_TIMELINE_SPAN_MINUTES)
+
+    def _left_pct(t):
+        delta = (t - origin).total_seconds()
+        return max(0.0, min(100.0, delta / span_sec * 100))
+
+    def _width_pct(start_t, end_t):
+        l = _left_pct(start_t)
+        r = _left_pct(end_t)
+        return max(0.1, r - l)
+
+    # v3 segment class mapping: phase + fail → semantic colour
+    # (matches .tl-track .seg-done/.seg-running/.seg-failed/.seg-bypass in CSS)
+    _PHASE_TO_SEG = {"dd": "running", "im": "running", "ts": "running", "xx": "done"}
+
+    track_rows = []
+    for row in visible:
+        item_id = _esc(row.get("id", ""))
+        bypassed = row.get("bypassed", False)
+        segs = row.get("segments", [])
+        seg_divs = []
+        total_segs = len(segs)
+        for i, (start_dt, end_dt, phase, fail) in enumerate(segs):
+            l = _left_pct(start_dt)
+            w = _width_pct(start_dt, end_dt)
+            if fail:
+                cls = "failed"
+            elif bypassed and i == total_segs - 1:
+                cls = "bypass"
+            else:
+                cls = _PHASE_TO_SEG.get(phase, "running")
+            seg_divs.append(
+                f'<div class="seg seg-{cls}"'
+                f' style="left:{l:.2f}%;width:{w:.2f}%"></div>'
+            )
+        segs_html = "\n    ".join(seg_divs) if seg_divs else ""
+        track_rows.append(
+            f'<div class="tl-row" data-id="{item_id}">\n'
+            f'  <span class="lbl">{item_id}</span>\n'
+            f'  <div class="tl-track">\n'
+            f'    {segs_html}\n'
+            f'  </div>\n'
+            f'</div>'
+        )
+
+    # X-axis labels (tl-axis) — 5 major ticks at 0/25/50/75/100%
+    axis_ticks = []
+    for i in range(5):
+        pct = i * 25
+        mins_ago = _TIMELINE_SPAN_MINUTES - i * (_TIMELINE_SPAN_MINUTES // 4)
+        label = "now" if mins_ago == 0 else f"−{mins_ago}m"
+        axis_ticks.append(
+            f'<div class="tick major" style="left:{pct}%"></div>'
+            f'<div class="tlabel" style="left:{pct}%">{_esc(label)}</div>'
+        )
+
+    # Current-time indicator at right edge
+    tl_now_html = '<div class="tl-now" style="left:100%"></div>'
 
     more_html = ""
     if total > _TIMELINE_MAX_ROWS:
         extra = total - _TIMELINE_MAX_ROWS
         more_html = (
-            '\n<p class="timeline-more">'
-            '<a href="#timeline-full">+' + str(extra) + ' more</a></p>'
+            f'\n<p class="timeline-more">'
+            f'<a href="#timeline-full">+{extra} more</a></p>'
         )
 
-    body = svg + more_html
+    header_html = (
+        '<div class="timeline-head">\n'
+        f'  <span>−{_TIMELINE_SPAN_MINUTES}m</span>\n'
+        '  <span>now</span>\n'
+        '</div>'
+    )
+
+    axis_row_html = (
+        '<div class="tl-row" style="margin-top:8px;">\n'
+        '  <span class="lbl"></span>\n'
+        '  <div class="tl-axis" aria-hidden="true">\n'
+        + "\n".join(axis_ticks)
+        + f'\n    {tl_now_html}\n'
+        + '  </div>\n'
+        '</div>'
+    )
+
+    body = (
+        '<div class="panel timeline">\n'
+        + header_html + '\n'
+        + "\n".join(track_rows)
+        + '\n'
+        + axis_row_html
+        + '\n</div>'
+        + more_html
+    )
     return _section_wrap("timeline", "Phase Timeline", body)
 
 # Compiled once at module load; used by _wrap_with_data_section.
@@ -2098,25 +2803,33 @@ _DASHBOARD_JS = """\
   /* shared state — dashboard poll + drawer poll are fully independent */
   var state={
     autoRefresh:true,activeFilter:'all',mainPollId:null,mainAbort:null,
-    drawerPaneId:null,drawerPollId:null
+    drawerPaneId:null,drawerPollId:null,clockId:null
   };
+  /* ---- clock (v3) ---- */
+  function startClock(){
+    var clock=document.getElementById('clock');
+    if(!clock)return;
+    state.clockId=setInterval(function(){
+      var now=new Date();
+      clock.textContent=now.toISOString().slice(0,19).replace('T',' ')+'Z';
+    },1000);
+  }
+  /* ---- body[data-filter] CSS-driven filter (v3) ---- */
+  function applyFilter(){
+    var f=state.activeFilter;
+    document.body.setAttribute('data-filter',f);
+    /* legacy: also patch chip aria-pressed */
+    document.querySelectorAll('.chip[data-filter]').forEach(function(c){
+      c.setAttribute('aria-pressed',c.dataset.filter===f?'true':'false');
+    });
+  }
   /* ---- filter chips (TSK-02-02) — event delegation survives DOM replacement ---- */
   document.addEventListener('click',function(e){
     var chip=e.target.closest?e.target.closest('.chip'):null;
     if(!chip)return;
     state.activeFilter=chip.dataset.filter||'all';
-    document.querySelectorAll('.chip').forEach(function(c){
-      c.setAttribute('aria-pressed',c===chip?'true':'false');
-    });
     applyFilter();
   });
-  function applyFilter(){
-    var f=state.activeFilter;
-    document.querySelectorAll('.task-row').forEach(function(row){
-      var hide=f!=='all'&&!row.classList.contains(f);
-      row.style.display=hide?'none':'';
-    });
-  }
   /* ---- auto-refresh toggle (TSK-02-02) ---- */
   document.addEventListener('click',function(e){
     var tog=e.target.closest?e.target.closest('.refresh-toggle'):null;
@@ -2188,14 +2901,22 @@ _DASHBOARD_JS = """\
     }
     if(current.innerHTML!==newHtml){current.innerHTML=newHtml;}
   }
-  /* ---- drawer control (TSK-02-03) ---- */
+  /* ---- drawer control (v3: aria-hidden="false" + focus trap) ---- */
   function _setDrawerOpen(open){
-    var els=[document.querySelector('[data-drawer-backdrop]'),document.querySelector('[data-drawer]')];
-    els.forEach(function(el){
-      if(!el)return;
-      if(open){el.classList.add('open');el.removeAttribute('aria-hidden');}
-      else{el.classList.remove('open');el.setAttribute('aria-hidden','true');}
-    });
+    var backdrop=document.querySelector('[data-drawer-backdrop]');
+    var panel=document.querySelector('[data-drawer]');
+    if(backdrop){backdrop.setAttribute('aria-hidden',open?'false':'true');}
+    if(panel){
+      panel.setAttribute('aria-hidden',open?'false':'true');
+      /* focus-trap: set tabindex=-1 on focusables when closed */
+      panel.querySelectorAll('[tabindex]').forEach(function(el){
+        el.setAttribute('tabindex',open?'0':'-1');
+      });
+      if(open){
+        var first=panel.querySelector('[tabindex="0"]');
+        if(first){first.focus();}
+      }
+    }
   }
   function openDrawer(paneId){
     state.drawerPaneId=paneId;
@@ -2245,6 +2966,10 @@ _DASHBOARD_JS = """\
   });
   /* ---- init ---- */
   function init(){
+    /* v3: start clock */
+    startClock();
+    /* v3: apply initial body[data-filter] */
+    applyFilter();
     /* TSK-02-02: refresh-toggle 버튼 초기 상태 동기화 */
     var tog=document.querySelector('.refresh-toggle');
     if(tog){
@@ -2262,42 +2987,52 @@ _DASHBOARD_JS = """\
 
 
 def _drawer_skeleton() -> str:
-    """Return the empty drawer scaffold HTML string (TSK-01-06).
+    """Return the v3 drawer scaffold HTML string.
 
-    Structure: drawer-backdrop + aside.drawer with header/body slots.
-    Initial state: both elements are hidden (CSS ``.drawer:not(.open)``).
+    Structure:
+      - div.drawer-backdrop[aria-hidden="true"] — click-outside close
+      - aside.drawer[aria-hidden="true"] — slide-in panel with:
+        - div.drawer-head — title + meta + close button
+        - div.drawer-status — status indicator
+        - pre.drawer-pre[tabindex="0"] — pane output content
+
+    JS opens drawer via aria-hidden="false". Focus trap uses tabindex.
     """
     return (
         '<div class="drawer-backdrop" aria-hidden="true" data-drawer-backdrop></div>\n'
         '<aside class="drawer" role="dialog" aria-modal="true" aria-hidden="true"'
         ' aria-labelledby="drawer-title" data-drawer>\n'
-        '  <div class="drawer-header" data-drawer-header>\n'
+        '  <div class="drawer-head" data-drawer-header>\n'
         '    <span class="drawer-title" id="drawer-title" data-drawer-title>Pane output</span>\n'
-        '    <div>\n'
-        '      <span class="drawer-meta" data-drawer-meta></span>\n'
-        '      <button class="drawer-close" data-drawer-close aria-label="Close drawer">&#x2715;</button>\n'
-        '    </div>\n'
+        '    <span class="drawer-meta" data-drawer-meta></span>\n'
+        '    <button class="drawer-close" data-drawer-close'
+        ' aria-label="Close drawer" tabindex="0">&#x2715;</button>\n'
         '  </div>\n'
-        '  <div class="drawer-body" data-drawer-body>\n'
-        '    <pre data-drawer-pre></pre>\n'
-        '  </div>\n'
+        '  <div class="drawer-status" data-drawer-status></div>\n'
+        '  <pre class="drawer-pre" data-drawer-pre tabindex="0"></pre>\n'
         '</aside>'
     )
+
+
+_ANY_DATA_SECTION_RE = re.compile(r'<\w+[^>]*\bdata-section=', re.IGNORECASE)
 
 
 def _wrap_with_data_section(section_html: str, key: str) -> str:
     """Inject ``data-section="{key}"`` into the outermost tag of *section_html*.
 
     Strategy:
-    1. If the outermost tag already has the attribute → return unchanged.
-    2. Try regex-based in-place injection on the first ``<section`` or
-       ``<header`` tag (one substitution only).
+    1. If the outermost section/header/aside tag already carries any
+       ``data-section="..."`` attribute → return unchanged (``_section_wrap``
+       already emits it).
+    2. Try regex-based in-place injection on the first ``<section``/``<header``
+       tag (one substitution only).
     3. Fallback: wrap with ``<div data-section="{key}">…</div>``.
     """
-    attr = f'data-section="{key}"'
-    # Already present — no-op to avoid duplication.
-    if attr in section_html:
+    # Skip if the outermost tag already declares any data-section attribute.
+    if _ANY_DATA_SECTION_RE.search(section_html):
         return section_html
+
+    attr = f'data-section="{key}"'
 
     # Attempt in-place injection into first <section or <header opening tag.
     match = _DATA_SECTION_TAG_RE.search(section_html)
@@ -2315,36 +3050,37 @@ def _wrap_with_data_section(section_html: str, key: str) -> str:
 
 
 def _build_dashboard_body(s: dict) -> str:
-    """Assemble section HTMLs into the ``<body>`` inner content string.
+    """Assemble section HTMLs into the ``<body>`` inner content string (v3 layout).
 
-    Separated from ``render_dashboard`` so the page-grid layout logic can be
-    read and tested independently.  *s* must contain all keys listed below.
-    The ``header`` value is rendered without a ``data-section`` attribute
-    (nav metadata, not a JS partial-update target).
+    v3 layout mirrors the reference ``dev-plugin Monitor.html``:
+      shell > cmdbar → kpi → grid[ col-left: wp-cards + features,
+                                    col-right: activity + timeline + team + subagents ]
+             → phase-history
+
+    The entire page is wrapped in ``<div class="shell">`` so the cmdbar's
+    sticky/backdrop effect aligns with the KPI strip and grid columns.
     """
-    # Backward-compat landing pad: external links like /#wbs still scroll to
-    # the wp-cards section.  Placed immediately before the section so the
-    # browser lands at the correct position.
     wbs_landing_pad = '<a id="wbs" aria-hidden="true" tabindex="-1"></a>\n'
 
     return "".join([
+        '<div class="shell">\n',
         s["header"], "\n",
-        s["sticky-header"], "\n",
         s["kpi"], "\n",
-        '<div class="page">\n',
-        '  <div class="page-col-left">\n',
+        '  <div class="grid">\n',
+        '    <div class="col">\n',
         wbs_landing_pad,
         s["wp-cards"], "\n",
         s["features"], "\n",
-        '  </div>\n',
-        '  <div class="page-col-right">\n',
+        '    </div>\n',
+        '    <div class="col">\n',
         s["live-activity"], "\n",
         s["phase-timeline"], "\n",
         s["team"], "\n",
         s["subagents"], "\n",
+        '    </div>\n',
         '  </div>\n',
-        '</div>\n',
         s["phase-history"], "\n",
+        '</div>\n',
     ])
 
 
@@ -2384,7 +3120,6 @@ def render_dashboard(model: dict) -> str:
     # injection (it is nav metadata, not a JS partial-update target).
     header_html = _section_header(model)
     sections: dict = {
-        "sticky-header":  _section_sticky_header(model),
         "kpi":            _section_kpi(model),
         "wp-cards":       _section_wp_cards(tasks, running_ids, failed_ids),
         "features":       _section_features(features, running_ids, failed_ids),
