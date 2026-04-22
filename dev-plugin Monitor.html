@@ -1,0 +1,2099 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>dev-plugin Monitor</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* ---------- tokens ---------- */
+:root{
+  /* surfaces */
+  --bg:         #0b0d10;
+  --bg-1:       #0f1216;
+  --bg-2:       #141820;
+  --bg-3:       #1a1f28;
+  --line:       #1f2530;
+  --line-2:     #2a3140;
+  --line-hi:    #3a4456;
+
+  /* text */
+  --ink:        #e8ecf1;
+  --ink-2:      #aeb5c1;
+  --ink-3:      #6b7480;
+  --ink-4:      #464e5a;
+
+  /* accents */
+  --accent:     #c89b6a;     /* warm amber - brand */
+  --accent-hi:  #e6b884;
+  --accent-dim: #7a5e3f;
+
+  /* phase palette */
+  --run:        #4aa3ff;     /* running - blue */
+  --run-glow:   rgba(74,163,255,.18);
+  --done:       #4ed08a;     /* done - phosphor green */
+  --done-glow:  rgba(78,208,138,.16);
+  --fail:       #ff5d5d;     /* failed - red */
+  --fail-glow:  rgba(255,93,93,.16);
+  --bypass:     #d16be0;     /* bypass - magenta */
+  --bypass-glow:rgba(209,107,224,.16);
+  --pending:    #f0c24a;     /* pending - yellow */
+  --pending-glow:rgba(240,194,74,.16);
+
+  /* type */
+  --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --sans: "Space Grotesk", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --display: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+
+  --radius: 4px;
+  --radius-lg: 6px;
+}
+
+/* ---------- reset ---------- */
+*,*::before,*::after{ box-sizing:border-box; }
+html,body{ margin:0; padding:0; }
+body{
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+  letter-spacing: 0.01em;
+  min-height: 100vh;
+  background-image:
+    radial-gradient(1200px 600px at 80% -200px, rgba(200,155,106,0.06), transparent 60%),
+    radial-gradient(900px 500px at -10% 10%, rgba(74,163,255,0.04), transparent 60%);
+  background-attachment: fixed;
+}
+body::before{
+  /* faint CRT scanlines */
+  content:"";
+  position: fixed; inset:0;
+  background-image: repeating-linear-gradient(
+    to bottom, rgba(255,255,255,0.012) 0 1px, transparent 1px 3px
+  );
+  pointer-events:none;
+  z-index: 1;
+  mix-blend-mode: overlay;
+}
+button{ font: inherit; color: inherit; background:none; border:0; cursor:pointer; }
+a{ color: inherit; }
+summary{ cursor: pointer; list-style: none; }
+summary::-webkit-details-marker{ display:none; }
+
+/* focus */
+:where(button,summary,[tabindex]):focus-visible{
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* ---------- layout shell ---------- */
+.shell{
+  position: relative;
+  z-index: 2;
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 0 20px 0;
+}
+
+/* ---------- 1. Command Bar ---------- */
+.cmdbar{
+  position: sticky; top:0; z-index: 30;
+  height: 52px;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 24px;
+  padding: 0 20px;
+  margin: 0 -20px;
+  background: rgba(11,13,16,0.88);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--line);
+}
+.cmdbar::after{
+  content:""; position:absolute; inset:auto 0 -1px 0; height:1px;
+  background: linear-gradient(90deg, transparent, var(--accent-dim) 40%, var(--accent-dim) 60%, transparent);
+  opacity:.5;
+}
+.brand{
+  display:flex; align-items:center; gap:10px;
+  font-family: var(--display);
+  font-weight: 600; letter-spacing: .04em; text-transform: uppercase; font-size: 12px;
+}
+.brand .logo{
+  width: 22px; height: 22px; position: relative;
+  display:grid; place-items:center;
+  color: var(--accent);
+}
+.brand .logo svg{ width: 22px; height: 22px; }
+.brand .title{ color: var(--ink); }
+.brand .slash{ color: var(--ink-4); margin: 0 2px; }
+.brand .sub{ color: var(--ink-3); font-weight: 400; text-transform:none; letter-spacing: 0; font-size: 12px; }
+
+.cmdbar .meta{
+  display:flex; align-items:center; gap: 20px;
+  color: var(--ink-3);
+  font-size: 12px;
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
+.cmdbar .meta .k{ color: var(--ink-4); margin-right: 6px; }
+.cmdbar .meta .v{ color: var(--ink-2); }
+.cmdbar .meta .path{ color: var(--accent); }
+.cmdbar .meta .dot{ color: var(--line-hi); margin: 0 8px; }
+
+.cmdbar .actions{ display:flex; align-items:center; gap: 8px; }
+
+.pulse{
+  display:inline-flex; align-items:center; gap:8px;
+  color: var(--done);
+  font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
+  font-weight: 600;
+}
+.pulse .dot{
+  width:8px; height:8px; border-radius: 50%;
+  background: var(--done);
+  box-shadow: 0 0 0 0 var(--done-glow);
+  animation: pulse 1.6s ease-out infinite;
+}
+@keyframes pulse{
+  0%   { box-shadow: 0 0 0 0 rgba(78,208,138,.55); }
+  70%  { box-shadow: 0 0 0 10px rgba(78,208,138,0);  }
+  100% { box-shadow: 0 0 0 0 rgba(78,208,138,0);   }
+}
+
+.btn{
+  display:inline-flex; align-items:center; gap: 8px;
+  height: 28px; padding: 0 10px;
+  background: var(--bg-2); border: 1px solid var(--line-2);
+  color: var(--ink-2);
+  border-radius: var(--radius);
+  font-size: 11px; letter-spacing: .06em; text-transform: uppercase;
+  font-weight: 600;
+  transition: background .15s, border-color .15s, color .15s;
+}
+.btn:hover{ background: var(--bg-3); border-color: var(--line-hi); color: var(--ink); }
+.btn[aria-pressed="true"]{
+  background: rgba(200,155,106,0.08);
+  border-color: var(--accent-dim);
+  color: var(--accent-hi);
+}
+.btn .led{
+  width:6px; height:6px; border-radius:50%;
+  background: var(--ink-4);
+  box-shadow: none;
+}
+.btn[aria-pressed="true"] .led{
+  background: var(--accent-hi);
+  box-shadow: 0 0 6px var(--accent);
+  animation: led-blink 2s ease-in-out infinite;
+}
+@keyframes led-blink{
+  0%,100%{ opacity: 1; }
+  50%{ opacity:.55; }
+}
+
+.kbd{
+  display:inline-block; padding: 1px 5px;
+  font-family: var(--mono); font-size: 10px;
+  background: var(--bg-3); border:1px solid var(--line-2);
+  border-bottom-width: 2px;
+  color: var(--ink-2);
+  border-radius: 3px;
+  vertical-align: middle;
+}
+
+/* ---------- Section chrome ---------- */
+.section-head{
+  display:flex; align-items: baseline; justify-content: space-between;
+  gap: 12px;
+  padding: 22px 0 10px;
+}
+.section-head .eyebrow{
+  font-size: 10px; letter-spacing: .18em; text-transform: uppercase;
+  color: var(--ink-4);
+}
+.section-head h2{
+  margin: 0;
+  font-family: var(--display);
+  font-size: 15px; font-weight: 600;
+  color: var(--ink);
+  letter-spacing: -0.005em;
+}
+.section-head h2::before{
+  content:"▍"; color: var(--accent); margin-right: 6px; opacity:.8;
+}
+.section-head .ct{ color: var(--ink-3); font-size: 11px; }
+.section-head .aside{ color: var(--ink-3); font-size: 11px; display:flex; gap:12px; align-items:center;}
+
+/* ---------- 2. KPI Strip ---------- */
+.kpi-strip{
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 1px;
+  background: var(--line);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  margin-top: 16px;
+}
+.kpi{
+  background: var(--bg-1);
+  padding: 14px 18px 12px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-rows: auto auto auto;
+  gap: 2px 10px;
+  position: relative;
+  overflow: hidden;
+}
+.kpi .label{
+  grid-column: 1 / -1;
+  font-size: 10px; letter-spacing: .2em; text-transform: uppercase;
+  color: var(--ink-3); font-weight: 600;
+  display:flex; align-items:center; gap: 8px;
+}
+.kpi .label .sw{
+  width: 8px; height: 8px; border-radius: 2px;
+}
+.kpi .num{
+  font-family: var(--mono);
+  font-size: 38px; font-weight: 600; line-height: 1;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+  align-self: end;
+}
+.kpi .delta{
+  grid-column: 2; grid-row: 2;
+  align-self: end;
+  font-size: 11px; color: var(--ink-3);
+  text-align: right;
+}
+.kpi .delta .up{ color: var(--done); }
+.kpi .delta .dn{ color: var(--fail); }
+.kpi .spark{
+  grid-column: 1 / -1;
+  height: 28px;
+  margin-top: 6px;
+}
+.kpi--run   .label .sw{ background: var(--run); box-shadow: 0 0 6px var(--run-glow); }
+.kpi--fail  .label .sw{ background: var(--fail); box-shadow: 0 0 6px var(--fail-glow); }
+.kpi--bypass .label .sw{ background: var(--bypass); box-shadow: 0 0 6px var(--bypass-glow); }
+.kpi--done  .label .sw{ background: var(--done); box-shadow: 0 0 6px var(--done-glow); }
+.kpi--pend  .label .sw{ background: var(--pending); box-shadow: 0 0 6px var(--pending-glow); }
+
+.kpi--run  .num{ color: var(--run); }
+.kpi--fail .num{ color: var(--fail); }
+.kpi--bypass .num{ color: var(--bypass); }
+.kpi--done .num{ color: var(--done); }
+.kpi--pend .num{ color: var(--pending); }
+
+/* ---------- 3. Filter chips ---------- */
+.chips{
+  display:flex; gap: 8px;
+  padding: 14px 0 6px;
+  flex-wrap: wrap;
+}
+.chip{
+  display:inline-flex; align-items:center; gap:8px;
+  height: 28px; padding: 0 12px;
+  background: transparent; border: 1px solid var(--line-2);
+  color: var(--ink-2);
+  border-radius: 999px;
+  font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
+  font-weight: 600;
+  transition: all .15s;
+}
+.chip:hover{ color: var(--ink); border-color: var(--line-hi); }
+.chip .sw{ width:8px; height:8px; border-radius:50%; background: var(--ink-4); }
+.chip[data-filter="running"] .sw{ background: var(--run); }
+.chip[data-filter="failed"]  .sw{ background: var(--fail); }
+.chip[data-filter="bypass"]  .sw{ background: var(--bypass); }
+.chip .ct{
+  color: var(--ink-4); font-size: 10px; margin-left: 2px;
+  background: var(--bg-2); border: 1px solid var(--line-2);
+  padding: 0 6px; height: 16px; border-radius: 999px;
+  display:inline-flex; align-items:center;
+}
+.chip[aria-pressed="true"]{
+  background: var(--bg-2);
+  border-color: var(--line-hi);
+  color: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--line-hi);
+}
+.chip[aria-pressed="true"][data-filter="running"]{ border-color: var(--run); color: var(--run); box-shadow: inset 0 0 0 1px rgba(74,163,255,.3), 0 0 0 3px var(--run-glow); }
+.chip[aria-pressed="true"][data-filter="failed"]{  border-color: var(--fail); color: var(--fail); box-shadow: inset 0 0 0 1px rgba(255,93,93,.3), 0 0 0 3px var(--fail-glow); }
+.chip[aria-pressed="true"][data-filter="bypass"]{  border-color: var(--bypass); color: var(--bypass); box-shadow: inset 0 0 0 1px rgba(209,107,224,.3), 0 0 0 3px var(--bypass-glow); }
+
+/* ---------- main 2-col grid ---------- */
+.grid{
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: 28px;
+  padding-top: 8px;
+}
+.col{ min-width: 0; display:flex; flex-direction:column; gap: 0; }
+
+/* ---------- 4. WP Cards ---------- */
+.wp-stack{ display:flex; flex-direction:column; gap: 14px; }
+.wp{
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  transition: border-color .2s;
+}
+.wp:hover{ border-color: var(--line-2); }
+.wp-head{
+  display: grid;
+  grid-template-columns: 72px 1fr auto;
+  gap: 16px;
+  padding: 16px 18px 14px;
+  align-items: start;
+}
+.wp-donut{ position:relative; width: 72px; height: 72px; }
+.wp-donut svg{ width:100%; height:100%; transform: rotate(-90deg); }
+.wp-donut .pct{
+  position:absolute; inset:0;
+  display:grid; place-items:center;
+  font-family: var(--mono);
+  font-size: 15px; font-weight: 600;
+  color: var(--ink);
+  letter-spacing: -0.02em;
+}
+.wp-donut .pct small{ font-size: 9px; color: var(--ink-4); font-weight: 400; display:block; margin-top:-1px; letter-spacing: .12em;}
+
+.wp-title{
+  min-width: 0;
+  display:flex; flex-direction:column; gap: 8px;
+}
+.wp-title .row1{
+  display:flex; align-items: baseline; gap: 10px; min-width:0;
+}
+.wp-title .id{
+  font-family: var(--mono);
+  font-size: 11px; font-weight: 600;
+  color: var(--accent);
+  background: rgba(200,155,106,0.08);
+  border: 1px solid var(--accent-dim);
+  padding: 2px 7px; border-radius: 3px;
+  letter-spacing: .04em;
+  white-space: nowrap;
+}
+.wp-title h3{
+  margin: 0; font-weight: 500; font-size: 15px;
+  color: var(--ink);
+  font-family: var(--display);
+  letter-spacing: -0.005em;
+  white-space: nowrap; overflow:hidden; text-overflow: ellipsis;
+  min-width: 0;
+}
+.wp-title .bar{
+  height: 4px; width: 100%;
+  background: var(--bg-3);
+  border-radius: 999px;
+  overflow: hidden;
+  display:flex;
+}
+.wp-title .bar > *{ height:100%; }
+.wp-title .bar .b-done{ background: var(--done); }
+.wp-title .bar .b-run { background: var(--run); }
+.wp-title .bar .b-fail{ background: var(--fail); }
+.wp-title .bar .b-byp { background: var(--bypass); }
+.wp-title .bar .b-pnd { background: var(--pending); }
+
+.wp-counts{
+  display:flex; gap: 16px;
+  color: var(--ink-3);
+  font-size: 11px;
+  flex-wrap: wrap;
+}
+.wp-counts .c{ display:inline-flex; align-items:center; gap:6px; white-space: nowrap; }
+.wp-counts .c .sw{ width: 7px; height: 7px; border-radius: 50%; background: var(--ink-4); }
+.wp-counts .c[data-k="done"] .sw  { background: var(--done); }
+.wp-counts .c[data-k="run"]  .sw  { background: var(--run); box-shadow: 0 0 6px var(--run-glow); }
+.wp-counts .c[data-k="fail"] .sw  { background: var(--fail); }
+.wp-counts .c[data-k="byp"]  .sw  { background: var(--bypass); }
+.wp-counts .c[data-k="pnd"]  .sw  { background: var(--pending); }
+.wp-counts .c b{ color: var(--ink); font-weight: 600; }
+.wp-counts .c[data-k="run"] b{ color: var(--run); }
+.wp-counts .c[data-k="fail"] b{ color: var(--fail); }
+.wp-counts .c[data-k="byp"] b{ color: var(--bypass); }
+.wp-counts .c[data-k="pnd"] b{ color: var(--pending); }
+
+.wp-meta{
+  text-align: right;
+  font-size: 10px; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--ink-4);
+  white-space: nowrap;
+}
+.wp-meta .big{ color: var(--ink-2); font-size: 11px; display:block; margin-bottom: 2px; letter-spacing: 0;}
+
+.wp-tasks{
+  border-top: 1px solid var(--line);
+  background: rgba(0,0,0,0.15);
+}
+.wp-tasks > summary{
+  padding: 10px 18px;
+  font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--ink-3);
+  display:flex; align-items:center; gap: 8px;
+  user-select: none;
+}
+.wp-tasks > summary:hover{ color: var(--ink); }
+.wp-tasks > summary::before{
+  content: "▸"; color: var(--ink-4); transition: transform .2s;
+  display:inline-block;
+  width: 10px;
+}
+.wp-tasks[open] > summary::before{ transform: rotate(90deg); color: var(--accent); }
+.wp-tasks > summary .ct{ color: var(--ink-4); }
+
+.task-list{ border-top: 1px solid var(--line); }
+
+/* ---------- Task row ---------- */
+.trow{
+  display: grid;
+  grid-template-columns: 4px 92px 74px 1fr auto auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 18px 8px 0;
+  border-bottom: 1px solid var(--line);
+  position: relative;
+  transition: background .12s;
+  min-height: 38px;
+}
+.trow:last-child{ border-bottom: 0; }
+.trow:hover{ background: rgba(255,255,255,0.02); }
+
+.trow .statusbar{
+  align-self: stretch;
+  width: 4px;
+  background: var(--ink-4);
+}
+.trow[data-status="done"]    .statusbar{ background: var(--done); }
+.trow[data-status="running"] .statusbar{ background: var(--run); box-shadow: 0 0 8px var(--run-glow); }
+.trow[data-status="failed"]  .statusbar{ background: var(--fail); }
+.trow[data-status="bypass"]  .statusbar{ background: var(--bypass); }
+.trow[data-status="pending"] .statusbar{ background: var(--pending); }
+
+.trow .tid{
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-2);
+  letter-spacing: .02em;
+  white-space: nowrap;
+}
+.trow .badge{
+  display:inline-flex; align-items:center; gap:5px;
+  height: 20px; padding: 0 7px;
+  border-radius: 3px;
+  font-size: 10px; font-weight: 600;
+  letter-spacing: .1em; text-transform: uppercase;
+  background: var(--bg-2); color: var(--ink-3);
+  border: 1px solid var(--line-2);
+  justify-self: start;
+}
+.trow .badge::before{
+  content:""; width:6px; height:6px; border-radius:50%;
+  background: var(--ink-4);
+}
+.trow[data-status="done"] .badge{ color: var(--done); border-color: rgba(78,208,138,.25); background: rgba(78,208,138,.06); }
+.trow[data-status="done"] .badge::before{ background: var(--done); }
+.trow[data-status="running"] .badge{ color: var(--run); border-color: rgba(74,163,255,.25); background: rgba(74,163,255,.06); }
+.trow[data-status="running"] .badge::before{ background: var(--run); animation: breathe 1.4s ease-in-out infinite; }
+@keyframes breathe{ 0%,100%{ opacity:1; transform: scale(1);} 50%{ opacity: .55; transform: scale(.85);} }
+.trow[data-status="failed"] .badge{ color: var(--fail); border-color: rgba(255,93,93,.25); background: rgba(255,93,93,.06); }
+.trow[data-status="failed"] .badge::before{ background: var(--fail); }
+.trow[data-status="bypass"] .badge{ color: var(--bypass); border-color: rgba(209,107,224,.25); background: rgba(209,107,224,.06); }
+.trow[data-status="bypass"] .badge::before{ background: var(--bypass); }
+.trow[data-status="pending"] .badge{ color: var(--pending); border-color: rgba(240,194,74,.2); background: rgba(240,194,74,.04); }
+.trow[data-status="pending"] .badge::before{ background: var(--pending); }
+
+.trow .ttitle{
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 13px;
+  white-space: nowrap; overflow:hidden; text-overflow: ellipsis;
+  min-width: 0;
+}
+.trow .ttitle .path{ color: var(--ink-4); font-family: var(--mono); font-size: 11px; margin-right: 6px;}
+
+.trow .elapsed{
+  color: var(--ink-3); font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.trow .retry{
+  color: var(--ink-4); font-size: 11px;
+  white-space: nowrap;
+}
+.trow .retry.hot{ color: var(--pending); }
+.trow .flags{
+  display:flex; gap: 4px;
+  padding-right: 4px;
+}
+.trow .flag{
+  font-size: 10px; font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 2px;
+  background: var(--bg-3); color: var(--ink-3);
+  border: 1px solid var(--line-2);
+  letter-spacing: .05em;
+}
+.trow .flag.f-crit{ color: var(--fail); border-color: rgba(255,93,93,.3); background: rgba(255,93,93,.05);}
+.trow .flag.f-new { color: var(--accent); border-color: var(--accent-dim); background: rgba(200,155,106,.06);}
+
+/* filter hide */
+body[data-filter="running"] .trow:not([data-status="running"]),
+body[data-filter="failed"]  .trow:not([data-status="failed"]),
+body[data-filter="bypass"]  .trow:not([data-status="bypass"]) { display: none; }
+
+/* ---------- 5. Features ---------- */
+.features-wrap{ border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--bg-1); overflow:hidden;}
+.features-wrap .trow{ padding-left: 0; }
+
+/* ---------- 6. Live Activity ---------- */
+.panel{
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--bg-1);
+  overflow: hidden;
+}
+.activity{
+  max-height: 420px;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+.activity::-webkit-scrollbar{ width: 6px; }
+.activity::-webkit-scrollbar-thumb{ background: var(--line-2); border-radius: 3px; }
+.activity::-webkit-scrollbar-track{ background: transparent; }
+
+.arow{
+  display: grid;
+  grid-template-columns: auto auto 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 14px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--ink-2);
+  border-bottom: 1px dashed transparent;
+}
+.arow:hover{ background: rgba(255,255,255,.02); }
+.arow .t{ color: var(--ink-4); font-size: 11px; letter-spacing: 0; }
+.arow .tid{ color: var(--ink); font-weight: 600; font-size: 11px; }
+.arow .evt{ color: var(--ink-3); font-size: 11px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis;}
+.arow .evt .arrow{ color: var(--ink-4); margin: 0 4px; }
+.arow .evt .from{ color: var(--ink-3); }
+.arow .evt .to{ font-weight: 600; }
+.arow[data-to="done"] .to{ color: var(--done); }
+.arow[data-to="running"] .to{ color: var(--run); }
+.arow[data-to="failed"] .to{ color: var(--fail); }
+.arow[data-to="bypass"] .to{ color: var(--bypass); }
+.arow[data-to="pending"] .to{ color: var(--pending); }
+.arow .el{ color: var(--ink-4); font-size: 11px; font-variant-numeric: tabular-nums;}
+
+/* ---------- 7. Phase Timeline ---------- */
+.timeline{
+  padding: 8px 14px 14px;
+}
+.timeline-head{
+  display:flex; justify-content: space-between;
+  font-size: 10px; color: var(--ink-4);
+  letter-spacing: .1em; text-transform: uppercase;
+  padding: 0 4px 8px;
+}
+.tl-row{
+  display:grid;
+  grid-template-columns: 82px 1fr;
+  align-items: center;
+  gap: 10px;
+  padding: 3px 0;
+  font-size: 11px;
+}
+.tl-row .lbl{
+  color: var(--ink-3); font-family: var(--mono); font-size: 10.5px;
+  white-space:nowrap;
+}
+.tl-track{
+  position: relative;
+  height: 14px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.tl-track .seg{
+  position: absolute; top:0; bottom:0;
+}
+.tl-track .seg-done   { background: var(--done); }
+.tl-track .seg-running{ background: linear-gradient(90deg, var(--run) 0%, var(--run) 70%, rgba(74,163,255,.2)); }
+.tl-track .seg-failed { background: var(--fail); }
+.tl-track .seg-bypass { background: var(--bypass); }
+.tl-track .seg-pending{ background: repeating-linear-gradient(45deg, rgba(240,194,74,.2) 0 4px, rgba(240,194,74,.35) 4px 8px); }
+.tl-track .seg-idle   { background: transparent; }
+
+/* ticks overlay */
+.tl-axis{
+  position: relative; height: 18px; margin-top: 6px;
+  border-top: 1px solid var(--line);
+}
+.tl-axis .tick{
+  position: absolute; top: 0; bottom: 10px; width: 1px;
+  background: var(--line-2);
+}
+.tl-axis .tick.major{ background: var(--line-hi); bottom: 6px;}
+.tl-axis .tlabel{
+  position:absolute; top: 4px; transform: translateX(-50%);
+  font-family: var(--mono); font-size: 9.5px;
+  color: var(--ink-4); letter-spacing: .05em;
+  white-space: nowrap;
+}
+.tl-now{
+  position:absolute; top:-2px; bottom:0; width: 1px;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent-dim);
+}
+.tl-now::before{
+  content:""; position:absolute; top:-3px; left:-3px;
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--accent); box-shadow: 0 0 8px var(--accent);
+}
+
+/* ---------- 8. Team Agents ---------- */
+.team{
+  padding: 0;
+}
+.pane{
+  border-bottom: 1px solid var(--line);
+}
+.pane:last-child{ border-bottom: 0; }
+.pane-head{
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  gap: 10px; align-items: center;
+  padding: 10px 14px 8px;
+}
+.pane-head .name{
+  font-family: var(--mono);
+  font-size: 12px; font-weight: 600;
+  color: var(--ink);
+  display:inline-flex; align-items:center; gap: 6px;
+}
+.pane-head .name::before{
+  content: "●"; color: var(--done); font-size: 10px;
+}
+.pane[data-state="idle"] .pane-head .name::before{ color: var(--ink-4); }
+.pane-head .meta{
+  color: var(--ink-3); font-size: 11px;
+  white-space: nowrap; overflow:hidden; text-overflow: ellipsis;
+}
+.pane-head .cmd{
+  color: var(--ink-2); font-family: var(--mono); font-size: 11px;
+  background: var(--bg-2); border: 1px solid var(--line-2);
+  padding: 1px 6px; border-radius: 3px;
+}
+.mini-btn{
+  display:inline-flex; align-items:center; gap:5px;
+  height: 22px; padding: 0 8px;
+  font-size: 10px; letter-spacing: .08em; text-transform: uppercase;
+  font-weight: 600;
+  background: transparent; border: 1px solid var(--line-2);
+  color: var(--ink-3);
+  border-radius: 3px;
+  transition: all .12s;
+}
+.mini-btn:hover{ background: var(--bg-2); color: var(--ink); border-color: var(--line-hi); }
+.mini-btn.primary{ border-color: var(--accent-dim); color: var(--accent-hi); }
+.mini-btn.primary:hover{ background: rgba(200,155,106,.08); }
+
+.pane-preview{
+  margin: 0 14px 12px;
+  padding: 8px 10px;
+  background: #07090c;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--ink-2);
+  white-space: pre-wrap;
+  overflow-x: auto;
+  position: relative;
+}
+.pane-preview::before{
+  content: "▸ last 3 lines"; position: absolute; top: -8px; left: 10px;
+  font-size: 9px; letter-spacing: .1em; text-transform: uppercase;
+  background: var(--bg-1); padding: 0 5px;
+  color: var(--ink-4);
+}
+.pane-preview .prompt{ color: var(--done); }
+.pane-preview .dim{ color: var(--ink-4); }
+.pane-preview .err{ color: var(--fail); }
+.pane-preview .warn{ color: var(--pending); }
+.pane-preview .info{ color: var(--run); }
+
+/* ---------- 9. Subagents ---------- */
+.subs{
+  padding: 12px 14px;
+  display:flex; flex-wrap: wrap; gap: 8px;
+}
+.sub{
+  display:inline-flex; align-items:center; gap: 8px;
+  padding: 4px 10px 4px 8px;
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  font-size: 11px;
+  color: var(--ink-2);
+  font-family: var(--mono);
+}
+.sub .sw{ width: 7px; height: 7px; border-radius: 50%; background: var(--ink-4); }
+.sub[data-state="running"] .sw{ background: var(--run); box-shadow: 0 0 6px var(--run-glow); animation: breathe 1.4s infinite;}
+.sub[data-state="done"] .sw{ background: var(--done); }
+.sub[data-state="failed"] .sw{ background: var(--fail); }
+.sub .n{ color: var(--ink-4); font-size: 10px;}
+.sub .empty-note{ color: var(--ink-4); font-size: 11px; }
+
+/* ---------- 10. Phase history ---------- */
+.history{
+  margin-top: 28px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--bg-1);
+  overflow: hidden;
+}
+.history table{
+  width: 100%; border-collapse: collapse;
+  font-family: var(--mono); font-size: 11.5px;
+}
+.history th, .history td{
+  padding: 8px 14px;
+  text-align: left;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+  color: var(--ink-2);
+}
+.history tbody tr:last-child td{ border-bottom: 0; }
+.history tbody tr:hover{ background: rgba(255,255,255,.02);}
+.history th{
+  font-size: 10px; letter-spacing: .12em; text-transform: uppercase;
+  color: var(--ink-4); font-weight: 600;
+  background: var(--bg-2);
+}
+.history td.idx{ color: var(--ink-4); width: 36px; text-align: right; }
+.history td.t{ color: var(--ink-3); }
+.history td.tid{ color: var(--ink); font-weight: 600;}
+.history td.ev{ color: var(--ink-3);}
+.history td .arr{ color: var(--ink-4); margin: 0 4px;}
+.history td .to.done{ color: var(--done); font-weight: 600;}
+.history td .to.running{ color: var(--run); font-weight: 600;}
+.history td .to.failed{ color: var(--fail); font-weight: 600;}
+.history td .to.bypass{ color: var(--bypass); font-weight: 600;}
+.history td.el{ color: var(--ink-4); font-variant-numeric: tabular-nums;}
+
+/* ---------- 11. Drawer ---------- */
+.drawer-backdrop{
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.55);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+  z-index: 80;
+  opacity: 0; pointer-events: none;
+  transition: opacity .2s;
+}
+.drawer-backdrop[aria-hidden="false"]{ opacity:1; pointer-events: auto; }
+
+.drawer{
+  position: fixed; top: 0; right: 0; bottom: 0;
+  width: 640px; max-width: 100vw;
+  background: var(--bg-1);
+  border-left: 1px solid var(--line-2);
+  box-shadow: -20px 0 50px rgba(0,0,0,.4);
+  z-index: 90;
+  transform: translateX(100%);
+  transition: transform .24s cubic-bezier(.3,.7,.2,1);
+  display: flex; flex-direction: column;
+}
+.drawer[aria-hidden="false"]{ transform: translateX(0); }
+.drawer-head{
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: start;
+  gap: 14px;
+  padding: 18px 22px 14px;
+  border-bottom: 1px solid var(--line);
+}
+.drawer-head h3{
+  margin: 0;
+  font-family: var(--display);
+  font-size: 16px; font-weight: 600;
+  color: var(--ink);
+  letter-spacing: -0.01em;
+  display:flex; align-items:center; gap: 8px;
+}
+.drawer-head h3::before{
+  content:""; width: 8px; height: 8px; border-radius: 50%;
+  background: var(--done); box-shadow: 0 0 6px var(--done-glow);
+}
+.drawer-head .meta{
+  color: var(--ink-3); font-size: 11px;
+  margin-top: 4px;
+  font-family: var(--mono);
+  display:flex; gap: 14px; flex-wrap: wrap;
+}
+.drawer-head .meta b{ color: var(--ink-2); font-weight: 500; }
+.drawer-close{
+  width: 30px; height: 30px;
+  border:1px solid var(--line-2);
+  border-radius: 4px;
+  display:grid; place-items:center;
+  color: var(--ink-3);
+  transition: all .12s;
+}
+.drawer-close:hover{ color: var(--fail); border-color: var(--fail); background: rgba(255,93,93,.06); }
+
+.drawer-status{
+  display:flex; align-items:center; gap: 10px;
+  padding: 10px 22px;
+  font-size: 10px; letter-spacing: .12em; text-transform: uppercase;
+  color: var(--ink-4);
+  border-bottom: 1px solid var(--line);
+  background: var(--bg);
+}
+.drawer-status .poll{ color: var(--done); display:inline-flex; align-items:center; gap: 6px;}
+.drawer-status .poll::before{
+  content:""; width: 6px; height: 6px; border-radius: 50%; background: var(--done);
+  animation: pulse 1.6s infinite;
+}
+
+.drawer-pre{
+  flex: 1; overflow: auto;
+  margin: 0; padding: 16px 22px 22px;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--ink-2);
+  background: #07090c;
+  white-space: pre;
+}
+.drawer-pre .prompt{ color: var(--done); }
+.drawer-pre .dim{ color: var(--ink-4); }
+.drawer-pre .err{ color: var(--fail); }
+.drawer-pre .warn{ color: var(--pending); }
+.drawer-pre .info{ color: var(--run); }
+.drawer-pre .hi{ color: var(--accent); }
+
+.empty{
+  padding: 20px 18px;
+  color: var(--ink-4);
+  font-size: 12px;
+  font-style: italic;
+  font-family: var(--mono);
+}
+
+/* ---------- responsive ---------- */
+@media (max-width: 1280px){
+  .grid{ grid-template-columns: 1fr; }
+}
+@media (max-width: 768px){
+  .shell{ padding: 0 12px; }
+  .cmdbar{ margin: 0 -12px; padding: 0 12px; grid-template-columns: 1fr auto; }
+  .cmdbar .meta{ display:none; }
+  .kpi-strip{
+    grid-template-columns: repeat(5, 220px);
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+  }
+  .kpi{ scroll-snap-align: start; }
+  .wp-head{ grid-template-columns: 56px 1fr; }
+  .wp-meta{ display:none; }
+  .trow{ grid-template-columns: 4px auto 1fr auto; }
+  .trow .badge, .trow .retry, .trow .flags{ display:none; }
+  .drawer{ width: 100vw; }
+  .timeline-default-hidden{ display: none; }
+}
+</style>
+</head>
+<body data-filter="all">
+
+<div class="shell">
+
+<!-- 1. Command Bar -->
+<header class="cmdbar" data-section="hdr" role="banner" aria-label="Command bar">
+  <div class="brand">
+    <span class="logo" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 7 L10 12 L4 17"/>
+        <path d="M13 17 L20 17"/>
+      </svg>
+    </span>
+    <span class="title">dev-plugin</span>
+    <span class="slash">/</span>
+    <span class="sub">monitor</span>
+  </div>
+  <div class="meta" role="group" aria-label="Session info">
+    <span><span class="k">project</span><span class="v path">~/src/dev-plugin</span></span>
+    <span class="dot">·</span>
+    <span><span class="k">docs</span><span class="v">docs/monitor-v3</span></span>
+    <span class="dot">·</span>
+    <span><span class="k">now</span><span class="v" id="clock">2026-04-21T14:15.28Z</span></span>
+    <span class="dot">·</span>
+    <span><span class="k">interval</span><span class="v">5s</span></span>
+  </div>
+  <div class="actions">
+    <span class="pulse" aria-live="polite"><span class="dot" aria-hidden="true"></span> live</span>
+    <button class="btn refresh-toggle" type="button" aria-pressed="true" aria-label="Auto-refresh">
+      <span class="led" aria-hidden="true"></span>
+      <span>auto</span>
+      <span class="kbd" aria-hidden="true">R</span>
+    </button>
+  </div>
+</header>
+
+<!-- 2. KPI Strip -->
+<section data-section="kpi" aria-label="Key performance indicators">
+  <div class="section-head">
+    <div>
+      <div class="eyebrow">overview</div>
+      <h2>Task states · last refresh +3s ago</h2>
+    </div>
+    <div class="aside">window: <b style="color:var(--ink-2)">last 10 min</b> · 20 samples</div>
+  </div>
+  <div class="kpi-strip">
+    <div class="kpi kpi--run">
+      <div class="label"><span class="sw"></span>Running</div>
+      <div class="num">4</div>
+      <div class="delta"><span class="up">+2</span> / 10m</div>
+      <svg class="spark" viewBox="0 0 100 28" preserveAspectRatio="none" aria-hidden="true">
+        <polyline points="0,20 8,22 16,18 24,19 32,15 40,16 48,12 56,14 64,10 72,12 80,8 88,10 100,6"
+                  fill="none" stroke="var(--run)" stroke-width="1.4"/>
+        <polyline points="0,20 8,22 16,18 24,19 32,15 40,16 48,12 56,14 64,10 72,12 80,8 88,10 100,6 100,28 0,28"
+                  fill="var(--run-glow)" stroke="none"/>
+      </svg>
+    </div>
+    <div class="kpi kpi--fail">
+      <div class="label"><span class="sw"></span>Failed</div>
+      <div class="num">1</div>
+      <div class="delta"><span class="up">+1</span> / 10m</div>
+      <svg class="spark" viewBox="0 0 100 28" preserveAspectRatio="none" aria-hidden="true">
+        <polyline points="0,26 10,25 20,26 30,24 40,23 50,24 60,22 70,21 80,18 90,12 100,8"
+                  fill="none" stroke="var(--fail)" stroke-width="1.4"/>
+      </svg>
+    </div>
+    <div class="kpi kpi--bypass">
+      <div class="label"><span class="sw"></span>Bypass</div>
+      <div class="num">2</div>
+      <div class="delta"><span>±0</span> / 10m</div>
+      <svg class="spark" viewBox="0 0 100 28" preserveAspectRatio="none" aria-hidden="true">
+        <polyline points="0,18 12,18 24,18 36,16 48,18 60,18 72,14 84,14 100,12"
+                  fill="none" stroke="var(--bypass)" stroke-width="1.4"/>
+      </svg>
+    </div>
+    <div class="kpi kpi--done">
+      <div class="label"><span class="sw"></span>Done</div>
+      <div class="num">18</div>
+      <div class="delta"><span class="up">+6</span> / 10m</div>
+      <svg class="spark" viewBox="0 0 100 28" preserveAspectRatio="none" aria-hidden="true">
+        <polyline points="0,22 10,20 20,18 30,15 40,13 50,11 60,9 70,8 80,6 90,4 100,2"
+                  fill="none" stroke="var(--done)" stroke-width="1.4"/>
+        <polyline points="0,22 10,20 20,18 30,15 40,13 50,11 60,9 70,8 80,6 90,4 100,2 100,28 0,28"
+                  fill="var(--done-glow)" stroke="none"/>
+      </svg>
+    </div>
+    <div class="kpi kpi--pend">
+      <div class="label"><span class="sw"></span>Pending</div>
+      <div class="num">13</div>
+      <div class="delta"><span class="dn">−4</span> / 10m</div>
+      <svg class="spark" viewBox="0 0 100 28" preserveAspectRatio="none" aria-hidden="true">
+        <polyline points="0,4 10,4 20,6 30,7 40,8 50,11 60,13 70,14 80,16 90,18 100,19"
+                  fill="none" stroke="var(--pending)" stroke-width="1.4"/>
+      </svg>
+    </div>
+  </div>
+
+  <!-- 3. Filter chips -->
+  <div class="chips" data-section="kpi-chips" role="toolbar" aria-label="Task filter">
+    <button class="chip" data-filter="all"     aria-pressed="true"  type="button">All <span class="ct">38</span></button>
+    <button class="chip" data-filter="running" aria-pressed="false" type="button"><span class="sw"></span>Running <span class="ct">4</span></button>
+    <button class="chip" data-filter="failed"  aria-pressed="false" type="button"><span class="sw"></span>Failed <span class="ct">1</span></button>
+    <button class="chip" data-filter="bypass"  aria-pressed="false" type="button"><span class="sw"></span>Bypass <span class="ct">2</span></button>
+  </div>
+</section>
+
+<!-- ============ main 2-col grid ============ -->
+<div class="grid">
+
+<!-- LEFT COL -->
+<div class="col">
+
+<!-- 4. WP cards -->
+<section data-section="wp-cards" aria-label="Work packages">
+  <div class="section-head">
+    <div>
+      <div class="eyebrow">planning</div>
+      <h2>Work Packages</h2>
+    </div>
+    <div class="aside">5 active · <b style="color:var(--ink-2)">38 tasks</b></div>
+  </div>
+  <div class="wp-stack">
+
+    <!-- WP-00 -->
+    <details class="wp" open>
+      <summary style="list-style:none; display:block;">
+        <div class="wp-head">
+          <div class="wp-donut" aria-label="75% complete">
+            <svg viewBox="0 0 36 36">
+              <circle cx="18" cy="18" r="15.9" fill="none" stroke="var(--bg-3)" stroke-width="3"/>
+              <circle cx="18" cy="18" r="15.9" fill="none" stroke="var(--done)" stroke-width="3"
+                      stroke-dasharray="75 100" stroke-linecap="butt" pathLength="100"/>
+              <circle cx="18" cy="18" r="15.9" fill="none" stroke="var(--run)"  stroke-width="3"
+                      stroke-dasharray="13 100" stroke-dashoffset="-75" pathLength="100"/>
+              <circle cx="18" cy="18" r="15.9" fill="none" stroke="var(--fail)" stroke-width="3"
+                      stroke-dasharray="0 100"  stroke-dashoffset="-88" pathLength="100"/>
+              <circle cx="18" cy="18" r="15.9" fill="none" stroke="var(--bypass)" stroke-width="3"
+                      stroke-dasharray="12 100" stroke-dashoffset="-88" pathLength="100"/>
+            </svg>
+            <div class="pct">75<small>PCT</small></div>
+          </div>
+          <div class="wp-title">
+            <div class="row1">
+              <span class="id">WP-00</span>
+              <h3>Monitor scaffolding · baseline telemetry</h3>
+            </div>
+            <div class="bar" aria-hidden="true">
+              <div class="b-done" style="flex:6"></div>
+              <div class="b-run"  style="flex:1"></div>
+              <div class="b-byp"  style="flex:1"></div>
+              <div style="flex:0"></div>
+            </div>
+            <div class="wp-counts">
+              <span class="c" data-k="done"><span class="sw"></span><b>6</b> done</span>
+              <span class="c" data-k="run"><span class="sw"></span><b>1</b> running</span>
+              <span class="c" data-k="pnd"><span class="sw"></span><b>0</b> pending</span>
+              <span class="c" data-k="fail"><span class="sw"></span><b>0</b> failed</span>
+              <span class="c" data-k="byp"><span class="sw"></span><b>1</b> bypass</span>
+            </div>
+          </div>
+          <div class="wp-meta">
+            <span class="big">8 tasks</span>
+            started<br>13:01:12
+          </div>
+        </div>
+      </summary>
+      <details class="wp-tasks" open>
+        <summary><span>Tasks</span> <span class="ct">(8)</span></summary>
+        <div class="task-list">
+          <div class="trow" data-status="done">
+            <div class="statusbar"></div>
+            <div class="tid">TSK-00-01</div>
+            <div class="badge">done</div>
+            <div class="ttitle"><span class="path">scaffold/</span>initialize tmux orchestrator config</div>
+            <div class="elapsed">3m 12s</div>
+            <div class="retry">×0</div>
+            <div class="flags"></div>
+          </div>
+          <div class="trow" data-status="done">
+            <div class="statusbar"></div>
+            <div class="tid">TSK-00-02</div>
+            <div class="badge">done</div>
+            <div class="ttitle"><span class="path">scaffold/</span>worktree bootstrap + git hooks</div>
+            <div class="elapsed">1m 48s</div>
+            <div class="retry">×0</div>
+            <div class="flags"></div>
+          </div>
+          <div class="trow" data-status="done">
+            <div class="statusbar"></div>
+            <div class="tid">TSK-00-03</div>
+            <div class="badge">done</div>
+            <div class="ttitle"><span class="path">telemetry/</span>event stream schema v1</div>
+            <div class="elapsed">4m 22s</div>
+            <div class="retry">×1</div>
+            <div class="flags"><span class="flag f-new">new</span></div>
+          </div>
+          <div class="trow" data-status="done">
+            <div class="statusbar"></div>
+            <div class="tid">TSK-00-04</div>
+            <div class="badge">done</div>
+            <div class="ttitle"><span class="path">telemetry/</span>pane scrollback poll</div>
+            <div class="elapsed">2m 55s</div>
+            <div class="retry">×0</div>
+            <div class="flags"></div>
+          </div>
+          <div class="trow" data-status="done">
+            <div class="statusbar"></div>
+            <div class="tid">TSK-00-05</div>
+            <div class="badge">done</div>
+            <div class="ttitle"><span class="path">telemetry/</span>phase history writer</div>
+            <div class="elapsed">1m 07s</div>
+            <div class="retry">×0</div>
+            <div class="flags"></div>
+          </div>
+          <div class="trow" data-status="done">
+            <div class="statusbar"></div>
+            <div class="tid">TSK-00-06</div>
+            <div class="badge">done</div>
+            <div class="ttitle"><span class="path">render/</span>server-side fragment swap</div>
+            <div class="elapsed">6m 40s</div>
+            <div class="retry">×0</div>
+            <div class="flags"></div>
+          </div>
+          <div class="trow" data-status="running">
+            <div class="statusbar"></div>
+            <div class="tid">TSK-00-07</div>
+            <div class="badge">running</div>
+            <div class="ttitle"><span class="path">render/</span>live-activity ticker throttle</div>
+            <div class="elapsed">0m 42s</div>
+            <div class="retry">×0</div>
+            <div class="flags"></div>
+          </div>
+          <div class="trow" data-status="bypass">
+            <div class="statusbar"></div>
+            <div class="tid">TSK-00-08</div>
+            <div class="badge">bypass</div>
+            <div class="ttitle"><span class="path">render/</span>phase timeline — manual skip</div>
+            <div class="elapsed">—</div>
+            <div class="retry">×0</div>
+            <div class="flags"></div>
+          </div>
+        </div>
+      </details>
+    </details>
+
+    <!-- WP-01 -->
+    <details class="wp" open>
+      <summary style="list-style:none; display:block;">
+        <div class="wp-head">
+          <div class="wp-donut" aria-label="42% complete">
+            <svg viewBox="0 0 36 36">
+              <circle cx="18" cy="18" r="15.9" fill="none" stroke="var(--bg-3)" stroke-width="3"/>
+              <circle cx="18" cy="18" r="15.9" fill="none" stroke="var(--done)" stroke-width="3"
+                      stroke-dasharray="42 100" pathLength="100"/>
+              <circle cx="18" cy="18" r="15.9" fill="none" stroke="var(--run)"  stroke-width="3"
+                      stroke-dasharray="16 100" stroke-dashoffset="-42" pathLength="100"/>
+              <circle cx="18" cy="18" r="15.9" fill="none" stroke="var(--fail)" stroke-width="3"
+                      stroke-dasharray="8 100"  stroke-dashoffset="-58" pathLength="100"/>
+              <circle cx="18" cy="18" r="15.9" fill="none" stroke="var(--pending)" stroke-width="3"
+                      stroke-dasharray="34 100" stroke-dashoffset="-66" pathLength="100"/>
+            </svg>
+            <div class="pct">42<small>PCT</small></div>
+          </div>
+          <div class="wp-title">
+            <div class="row1">
+              <span class="id">WP-01</span>
+              <h3>WBS ingestion · parse + persist planning docs</h3>
+            </div>
+            <div class="bar" aria-hidden="true">
+              <div class="b-done" style="flex:5"></div>
+              <div class="b-run"  style="flex:2"></div>
+              <div class="b-fail" style="flex:1"></div>
+              <div class="b-pnd"  style="flex:4"></div>
+            </div>
+            <div class="wp-counts">
+              <span class="c" data-k="done"><span class="sw"></span><b>5</b> done</span>
+              <span class="c" data-k="run"><span class="sw"></span><b>2</b> running</span>
+              <span class="c" data-k="pnd"><span class="sw"></span><b>4</b> pending</span>
+              <span class="c" data-k="fail"><span class="sw"></span><b>1</b> failed</span>
+              <span class="c" data-k="byp"><span class="sw"></span><b>0</b> bypass</span>
+            </div>
+          </div>
+          <div class="wp-meta">
+            <span class="big">12 tasks</span>
+            started<br>13:48:04
+          </div>
+        </div>
+      </summary>
+      <details class="wp-tasks" open>
+        <summary><span>Tasks</span> <span class="ct">(12)</span></summary>
+        <div class="task-list">
+          <div class="trow" data-status="done">
+            <div class="statusbar"></div>
+            <div class="tid">TSK-01-01</div>
+            <div class="badge">done</div>
+            <div class="ttitle"><span class="path">wbs/</span>markdown frontmatter parser</div>
+            <div class="elapsed">2m 14s</div>
+            <div class="retry">×0</div>
+            <div class="flags"></div>
+          </div>
+          <div class="trow" data-status="done">
+            <div class="statusbar"></div>
+            <div class="tid">TSK-01-02</div>
+            <div class="badge">done</div>
+            <div class="ttitle"><span class="path">wbs/</span>task graph builder</div>
+            <div class="elapsed">3m 01s</div>
+            <div class="retry">×0</div>
+            <div class="flags"></div>
+          </div>
+          <div class="trow" data-status="done">
+            <div class="statusbar"></div>
+            <div class="tid">TSK-01-03</div>
+            <div class="badge">done</div>
+            <div class="ttitle"><span class="path">wbs/</span>dependency validator</div>
+            <div class="elapsed">1m 47s</div>
+            <div class="retry">×0</div>
+            <div class="flags"></div>
+          </div>
+          <div class="trow" data-status="done">
+            <div class="statusbar"></div>
+            <div class="tid">TSK-01-04</div>
+            <div class="badge">done</div>
+            <div class="ttitle"><span class="path">persist/</span>sqlite schema migration</div>
+            <div class="elapsed">0m 48s</div>
+            <div class="retry">×0</div>
+            <div class="flags"></div>
+          </div>
+          <div class="trow" data-status="done">
+            <div class="statusbar"></div>
+            <div class="tid">TSK-01-05</div>
+            <div class="badge">done</div>
+            <div class="ttitle"><span class="path">persist/</span>writer + tx wrapper</div>
+            <div class="elapsed">4m 12s</div>
+            <div class="retry">×1</div>
+            <div class="flags"></div>
+          </div>
+          <div class="trow" data-status="running">
+            <div class="statusbar"></div>
+            <div class="tid">TSK-01-06</div>
+            <div class="badge">running</div>
+            <div class="ttitle"><span class="path">wbs/</span>wp-cards renderer</div>
+            <div class="elapsed">1m 22s</div>
+            <div class="retry">×0</div>
+            <div class="flags"></div>
+          </div>
+          <div class="trow" data-status="running">
+            <div class="statusbar"></div>
+            <div class="tid">TSK-01-07</div>
+            <div class="badge">running</div>
+            <div class="ttitle"><span class="path">wbs/</span>feature lane renderer</div>
+            <div class="elapsed">3m 06s</div>
+            <div class="retry">×0</div>
+            <div class="flags"></div>
+          </div>
+          <div class="trow" data-status="failed">
+            <div class="statusbar"></div>
+            <div class="tid">TSK-01-08</div>
+            <div class="badge">failed</div>
+            <div class="ttitle"><span class="path">wbs/</span>cycle detection on disjoint graphs</div>
+            <div class="elapsed">0m 19s</div>
+            <div class="retry hot">×3</div>
+            <div class="flags"><span class="flag f-crit">crit</span></div>
+          </div>
+          <div class="trow" data-status="pending">
+            <div class="statusbar"></div>
+            <div class="tid">TSK-01-09</div>
+            <div class="badge">pending</div>
+            <div class="ttitle"><span class="path">wbs/</span>incremental reparse on file change</div>
+            <div class="elapsed">—</div>
+            <div class="retry">×0</div>
+            <div class="flags"></div>
+          </div>
+          <div class="trow" data-status="pending">
+            <div class="statusbar"></div>
+            <div class="tid">TSK-01-10</div>
+            <div class="badge">pending</div>
+            <div class="ttitle"><span class="path">wbs/</span>tombstone policy for removed tasks</div>
+            <div class="elapsed">—</div>
+            <div class="retry">×0</div>
+            <div class="flags"></div>
+          </div>
+          <div class="trow" data-status="pending">
+            <div class="statusbar"></div>
+            <div class="tid">TSK-01-11</div>
+            <div class="badge">pending</div>
+            <div class="ttitle"><span class="path">persist/</span>retention window (7d)</div>
+            <div class="elapsed">—</div>
+            <div class="retry">×0</div>
+            <div class="flags"></div>
+          </div>
+          <div class="trow" data-status="pending">
+            <div class="statusbar"></div>
+            <div class="tid">TSK-01-12</div>
+            <div class="badge">pending</div>
+            <div class="ttitle"><span class="path">persist/</span>vacuum cron</div>
+            <div class="elapsed">—</div>
+            <div class="retry">×0</div>
+            <div class="flags"></div>
+          </div>
+        </div>
+      </details>
+    </details>
+
+    <!-- WP-02 -->
+    <details class="wp">
+      <summary style="list-style:none; display:block;">
+        <div class="wp-head">
+          <div class="wp-donut" aria-label="58% complete">
+            <svg viewBox="0 0 36 36">
+              <circle cx="18" cy="18" r="15.9" fill="none" stroke="var(--bg-3)" stroke-width="3"/>
+              <circle cx="18" cy="18" r="15.9" fill="none" stroke="var(--done)" stroke-width="3"
+                      stroke-dasharray="58 100" pathLength="100"/>
+              <circle cx="18" cy="18" r="15.9" fill="none" stroke="var(--run)"  stroke-width="3"
+                      stroke-dasharray="14 100" stroke-dashoffset="-58" pathLength="100"/>
+              <circle cx="18" cy="18" r="15.9" fill="none" stroke="var(--pending)" stroke-width="3"
+                      stroke-dasharray="28 100" stroke-dashoffset="-72" pathLength="100"/>
+            </svg>
+            <div class="pct">58<small>PCT</small></div>
+          </div>
+          <div class="wp-title">
+            <div class="row1">
+              <span class="id">WP-02</span>
+              <h3>Agent pool orchestration · subagent lifecycle</h3>
+            </div>
+            <div class="bar" aria-hidden="true">
+              <div class="b-done" style="flex:4"></div>
+              <div class="b-run"  style="flex:1"></div>
+              <div class="b-pnd"  style="flex:2"></div>
+            </div>
+            <div class="wp-counts">
+              <span class="c" data-k="done"><span class="sw"></span><b>4</b> done</span>
+              <span class="c" data-k="run"><span class="sw"></span><b>1</b> running</span>
+              <span class="c" data-k="pnd"><span class="sw"></span><b>2</b> pending</span>
+              <span class="c" data-k="fail"><span class="sw"></span><b>0</b> failed</span>
+              <span class="c" data-k="byp"><span class="sw"></span><b>0</b> bypass</span>
+            </div>
+          </div>
+          <div class="wp-meta">
+            <span class="big">7 tasks</span>
+            started<br>12:22:51
+          </div>
+        </div>
+      </summary>
+      <details class="wp-tasks">
+        <summary><span>Tasks</span> <span class="ct">(7)</span></summary>
+        <div class="task-list">
+          <div class="trow" data-status="done">
+            <div class="statusbar"></div><div class="tid">TSK-02-01</div><div class="badge">done</div>
+            <div class="ttitle"><span class="path">pool/</span>spawn policy · concurrency=4</div>
+            <div class="elapsed">2m 02s</div><div class="retry">×0</div><div class="flags"></div>
+          </div>
+          <div class="trow" data-status="done">
+            <div class="statusbar"></div><div class="tid">TSK-02-02</div><div class="badge">done</div>
+            <div class="ttitle"><span class="path">pool/</span>prompt packer w/ context budget</div>
+            <div class="elapsed">4m 19s</div><div class="retry">×0</div><div class="flags"></div>
+          </div>
+          <div class="trow" data-status="done">
+            <div class="statusbar"></div><div class="tid">TSK-02-03</div><div class="badge">done</div>
+            <div class="ttitle"><span class="path">pool/</span>result merge + dedup</div>
+            <div class="elapsed">1m 38s</div><div class="retry">×0</div><div class="flags"></div>
+          </div>
+          <div class="trow" data-status="done">
+            <div class="statusbar"></div><div class="tid">TSK-02-04</div><div class="badge">done</div>
+            <div class="ttitle"><span class="path">pool/</span>timeout + retry policy</div>
+            <div class="elapsed">0m 54s</div><div class="retry">×0</div><div class="flags"></div>
+          </div>
+          <div class="trow" data-status="running">
+            <div class="statusbar"></div><div class="tid">TSK-02-05</div><div class="badge">running</div>
+            <div class="ttitle"><span class="path">pool/</span>capture subagent stderr tails</div>
+            <div class="elapsed">5m 11s</div><div class="retry">×0</div><div class="flags"></div>
+          </div>
+          <div class="trow" data-status="pending">
+            <div class="statusbar"></div><div class="tid">TSK-02-06</div><div class="badge">pending</div>
+            <div class="ttitle"><span class="path">pool/</span>cost ledger per invocation</div>
+            <div class="elapsed">—</div><div class="retry">×0</div><div class="flags"></div>
+          </div>
+          <div class="trow" data-status="pending">
+            <div class="statusbar"></div><div class="tid">TSK-02-07</div><div class="badge">pending</div>
+            <div class="ttitle"><span class="path">pool/</span>lease expiration sweeper</div>
+            <div class="elapsed">—</div><div class="retry">×0</div><div class="flags"></div>
+          </div>
+        </div>
+      </details>
+    </details>
+
+    <!-- WP-03 -->
+    <details class="wp">
+      <summary style="list-style:none; display:block;">
+        <div class="wp-head">
+          <div class="wp-donut" aria-label="28% complete">
+            <svg viewBox="0 0 36 36">
+              <circle cx="18" cy="18" r="15.9" fill="none" stroke="var(--bg-3)" stroke-width="3"/>
+              <circle cx="18" cy="18" r="15.9" fill="none" stroke="var(--done)" stroke-width="3"
+                      stroke-dasharray="28 100" pathLength="100"/>
+              <circle cx="18" cy="18" r="15.9" fill="none" stroke="var(--bypass)" stroke-width="3"
+                      stroke-dasharray="14 100" stroke-dashoffset="-28" pathLength="100"/>
+              <circle cx="18" cy="18" r="15.9" fill="none" stroke="var(--pending)" stroke-width="3"
+                      stroke-dasharray="58 100" stroke-dashoffset="-42" pathLength="100"/>
+            </svg>
+            <div class="pct">28<small>PCT</small></div>
+          </div>
+          <div class="wp-title">
+            <div class="row1">
+              <span class="id">WP-03</span>
+              <h3>UI polish · a11y pass &amp; drawer focus trap</h3>
+            </div>
+            <div class="bar" aria-hidden="true">
+              <div class="b-done" style="flex:2"></div>
+              <div class="b-byp"  style="flex:1"></div>
+              <div class="b-pnd"  style="flex:4"></div>
+            </div>
+            <div class="wp-counts">
+              <span class="c" data-k="done"><span class="sw"></span><b>2</b> done</span>
+              <span class="c" data-k="run"><span class="sw"></span><b>0</b> running</span>
+              <span class="c" data-k="pnd"><span class="sw"></span><b>4</b> pending</span>
+              <span class="c" data-k="fail"><span class="sw"></span><b>0</b> failed</span>
+              <span class="c" data-k="byp"><span class="sw"></span><b>1</b> bypass</span>
+            </div>
+          </div>
+          <div class="wp-meta">
+            <span class="big">7 tasks</span>
+            queued<br>—
+          </div>
+        </div>
+      </summary>
+      <details class="wp-tasks">
+        <summary><span>Tasks</span> <span class="ct">(7)</span></summary>
+        <div class="task-list">
+          <div class="trow" data-status="done">
+            <div class="statusbar"></div><div class="tid">TSK-03-01</div><div class="badge">done</div>
+            <div class="ttitle"><span class="path">a11y/</span>aria-live regions for activity</div>
+            <div class="elapsed">1m 09s</div><div class="retry">×0</div><div class="flags"></div>
+          </div>
+          <div class="trow" data-status="done">
+            <div class="statusbar"></div><div class="tid">TSK-03-02</div><div class="badge">done</div>
+            <div class="ttitle"><span class="path">a11y/</span>keyboard shortcuts table</div>
+            <div class="elapsed">2m 44s</div><div class="retry">×0</div><div class="flags"></div>
+          </div>
+          <div class="trow" data-status="bypass">
+            <div class="statusbar"></div><div class="tid">TSK-03-03</div><div class="badge">bypass</div>
+            <div class="ttitle"><span class="path">a11y/</span>high-contrast theme · skip</div>
+            <div class="elapsed">—</div><div class="retry">×0</div><div class="flags"></div>
+          </div>
+          <div class="trow" data-status="pending">
+            <div class="statusbar"></div><div class="tid">TSK-03-04</div><div class="badge">pending</div>
+            <div class="ttitle"><span class="path">ux/</span>drawer focus trap + Esc</div>
+            <div class="elapsed">—</div><div class="retry">×0</div><div class="flags"><span class="flag f-new">new</span></div>
+          </div>
+          <div class="trow" data-status="pending">
+            <div class="statusbar"></div><div class="tid">TSK-03-05</div><div class="badge">pending</div>
+            <div class="ttitle"><span class="path">ux/</span>empty states copy pass</div>
+            <div class="elapsed">—</div><div class="retry">×0</div><div class="flags"></div>
+          </div>
+          <div class="trow" data-status="pending">
+            <div class="statusbar"></div><div class="tid">TSK-03-06</div><div class="badge">pending</div>
+            <div class="ttitle"><span class="path">ux/</span>scroll-snap for KPI at ≤768px</div>
+            <div class="elapsed">—</div><div class="retry">×0</div><div class="flags"></div>
+          </div>
+          <div class="trow" data-status="pending">
+            <div class="statusbar"></div><div class="tid">TSK-03-07</div><div class="badge">pending</div>
+            <div class="ttitle"><span class="path">ux/</span>print stylesheet baseline</div>
+            <div class="elapsed">—</div><div class="retry">×0</div><div class="flags"></div>
+          </div>
+        </div>
+      </details>
+    </details>
+
+    <!-- WP-04 -->
+    <details class="wp">
+      <summary style="list-style:none; display:block;">
+        <div class="wp-head">
+          <div class="wp-donut" aria-label="0% complete">
+            <svg viewBox="0 0 36 36">
+              <circle cx="18" cy="18" r="15.9" fill="none" stroke="var(--bg-3)" stroke-width="3"/>
+              <circle cx="18" cy="18" r="15.9" fill="none" stroke="var(--pending)" stroke-width="3"
+                      stroke-dasharray="100 100" pathLength="100"/>
+            </svg>
+            <div class="pct">0<small>PCT</small></div>
+          </div>
+          <div class="wp-title">
+            <div class="row1">
+              <span class="id">WP-04</span>
+              <h3>Export · JSONL + Prometheus adapter</h3>
+            </div>
+            <div class="bar" aria-hidden="true">
+              <div class="b-pnd"  style="flex:1"></div>
+            </div>
+            <div class="wp-counts">
+              <span class="c" data-k="done"><span class="sw"></span><b>0</b> done</span>
+              <span class="c" data-k="run"><span class="sw"></span><b>0</b> running</span>
+              <span class="c" data-k="pnd"><span class="sw"></span><b>5</b> pending</span>
+              <span class="c" data-k="fail"><span class="sw"></span><b>0</b> failed</span>
+              <span class="c" data-k="byp"><span class="sw"></span><b>0</b> bypass</span>
+            </div>
+          </div>
+          <div class="wp-meta">
+            <span class="big">5 tasks</span>
+            queued<br>—
+          </div>
+        </div>
+      </summary>
+      <details class="wp-tasks">
+        <summary><span>Tasks</span> <span class="ct">(5)</span></summary>
+        <div class="task-list">
+          <div class="trow" data-status="pending">
+            <div class="statusbar"></div><div class="tid">TSK-04-01</div><div class="badge">pending</div>
+            <div class="ttitle"><span class="path">export/</span>jsonl writer + rotation</div>
+            <div class="elapsed">—</div><div class="retry">×0</div><div class="flags"></div>
+          </div>
+          <div class="trow" data-status="pending">
+            <div class="statusbar"></div><div class="tid">TSK-04-02</div><div class="badge">pending</div>
+            <div class="ttitle"><span class="path">export/</span>prom /metrics handler</div>
+            <div class="elapsed">—</div><div class="retry">×0</div><div class="flags"></div>
+          </div>
+          <div class="trow" data-status="pending">
+            <div class="statusbar"></div><div class="tid">TSK-04-03</div><div class="badge">pending</div>
+            <div class="ttitle"><span class="path">export/</span>buckets &amp; labels mapping</div>
+            <div class="elapsed">—</div><div class="retry">×0</div><div class="flags"></div>
+          </div>
+          <div class="trow" data-status="pending">
+            <div class="statusbar"></div><div class="tid">TSK-04-04</div><div class="badge">pending</div>
+            <div class="ttitle"><span class="path">export/</span>cardinality guard</div>
+            <div class="elapsed">—</div><div class="retry">×0</div><div class="flags"></div>
+          </div>
+          <div class="trow" data-status="pending">
+            <div class="statusbar"></div><div class="tid">TSK-04-05</div><div class="badge">pending</div>
+            <div class="ttitle"><span class="path">export/</span>backfill from history table</div>
+            <div class="elapsed">—</div><div class="retry">×0</div><div class="flags"></div>
+          </div>
+        </div>
+      </details>
+    </details>
+
+  </div>
+</section>
+
+<!-- 5. Features -->
+<section data-section="features" aria-label="Independent features">
+  <div class="section-head">
+    <div>
+      <div class="eyebrow">unassigned</div>
+      <h2>Features</h2>
+    </div>
+    <div class="aside">3 tasks · no WP</div>
+  </div>
+  <div class="features-wrap">
+    <div class="trow" data-status="running">
+      <div class="statusbar"></div>
+      <div class="tid">FTR-12-a</div>
+      <div class="badge">running</div>
+      <div class="ttitle"><span class="path">hotfix/</span>redact api keys in pane preview</div>
+      <div class="elapsed">0m 28s</div>
+      <div class="retry">×0</div>
+      <div class="flags"><span class="flag f-new">new</span></div>
+    </div>
+    <div class="trow" data-status="done">
+      <div class="statusbar"></div>
+      <div class="tid">FTR-12-b</div>
+      <div class="badge">done</div>
+      <div class="ttitle"><span class="path">polish/</span>favicon + dock badge count</div>
+      <div class="elapsed">0m 51s</div>
+      <div class="retry">×0</div>
+      <div class="flags"></div>
+    </div>
+    <div class="trow" data-status="pending">
+      <div class="statusbar"></div>
+      <div class="tid">FTR-12-c</div>
+      <div class="badge">pending</div>
+      <div class="ttitle"><span class="path">backlog/</span>opt-in anonymized telemetry</div>
+      <div class="elapsed">—</div>
+      <div class="retry">×0</div>
+      <div class="flags"></div>
+    </div>
+  </div>
+</section>
+
+</div><!-- /left col -->
+
+
+<!-- RIGHT COL -->
+<div class="col">
+
+<!-- 6. Live Activity -->
+<section data-section="live-activity" aria-label="Live activity stream">
+  <div class="section-head">
+    <div>
+      <div class="eyebrow">stream</div>
+      <h2>Live Activity</h2>
+    </div>
+    <div class="aside">last 20 events · <b style="color:var(--done)">tailing</b></div>
+  </div>
+  <div class="panel">
+    <div class="activity" aria-live="polite">
+
+      <div class="arow" data-to="running"><span class="t">14:15:27</span><span class="tid">TSK-00-07</span><span class="evt">render <span class="arrow">→</span><span class="from">pending</span><span class="arrow">→</span><span class="to">running</span></span><span class="el">0m 42s</span></div>
+      <div class="arow" data-to="done"><span class="t">14:14:51</span><span class="tid">TSK-01-05</span><span class="evt">persist <span class="arrow">→</span><span class="from">running</span><span class="arrow">→</span><span class="to">done</span></span><span class="el">4m 12s</span></div>
+      <div class="arow" data-to="failed"><span class="t">14:14:22</span><span class="tid">TSK-01-08</span><span class="evt">wbs <span class="arrow">→</span><span class="from">running</span><span class="arrow">→</span><span class="to">failed</span></span><span class="el">0m 19s</span></div>
+      <div class="arow" data-to="running"><span class="t">14:13:48</span><span class="tid">TSK-01-07</span><span class="evt">wbs <span class="arrow">→</span><span class="from">pending</span><span class="arrow">→</span><span class="to">running</span></span><span class="el">3m 06s</span></div>
+      <div class="arow" data-to="running"><span class="t">14:12:44</span><span class="tid">FTR-12-a</span><span class="evt">hotfix <span class="arrow">→</span><span class="from">pending</span><span class="arrow">→</span><span class="to">running</span></span><span class="el">0m 28s</span></div>
+      <div class="arow" data-to="done"><span class="t">14:11:09</span><span class="tid">TSK-02-04</span><span class="evt">pool <span class="arrow">→</span><span class="from">running</span><span class="arrow">→</span><span class="to">done</span></span><span class="el">0m 54s</span></div>
+      <div class="arow" data-to="running"><span class="t">14:10:55</span><span class="tid">TSK-02-05</span><span class="evt">pool <span class="arrow">→</span><span class="from">pending</span><span class="arrow">→</span><span class="to">running</span></span><span class="el">5m 11s</span></div>
+      <div class="arow" data-to="bypass"><span class="t">14:09:12</span><span class="tid">TSK-00-08</span><span class="evt">render <span class="arrow">→</span><span class="from">pending</span><span class="arrow">→</span><span class="to">bypass</span></span><span class="el">—</span></div>
+      <div class="arow" data-to="done"><span class="t">14:07:41</span><span class="tid">TSK-00-06</span><span class="evt">render <span class="arrow">→</span><span class="from">running</span><span class="arrow">→</span><span class="to">done</span></span><span class="el">6m 40s</span></div>
+      <div class="arow" data-to="done"><span class="t">14:06:33</span><span class="tid">FTR-12-b</span><span class="evt">polish <span class="arrow">→</span><span class="from">running</span><span class="arrow">→</span><span class="to">done</span></span><span class="el">0m 51s</span></div>
+      <div class="arow" data-to="done"><span class="t">14:05:02</span><span class="tid">TSK-01-04</span><span class="evt">persist <span class="arrow">→</span><span class="from">running</span><span class="arrow">→</span><span class="to">done</span></span><span class="el">0m 48s</span></div>
+      <div class="arow" data-to="running"><span class="t">14:04:14</span><span class="tid">TSK-01-06</span><span class="evt">wbs <span class="arrow">→</span><span class="from">pending</span><span class="arrow">→</span><span class="to">running</span></span><span class="el">1m 22s</span></div>
+      <div class="arow" data-to="done"><span class="t">14:02:18</span><span class="tid">TSK-02-03</span><span class="evt">pool <span class="arrow">→</span><span class="from">running</span><span class="arrow">→</span><span class="to">done</span></span><span class="el">1m 38s</span></div>
+      <div class="arow" data-to="done"><span class="t">14:00:39</span><span class="tid">TSK-02-02</span><span class="evt">pool <span class="arrow">→</span><span class="from">running</span><span class="arrow">→</span><span class="to">done</span></span><span class="el">4m 19s</span></div>
+      <div class="arow" data-to="done"><span class="t">13:58:21</span><span class="tid">TSK-00-05</span><span class="evt">telemetry <span class="arrow">→</span><span class="from">running</span><span class="arrow">→</span><span class="to">done</span></span><span class="el">1m 07s</span></div>
+      <div class="arow" data-to="done"><span class="t">13:57:10</span><span class="tid">TSK-00-04</span><span class="evt">telemetry <span class="arrow">→</span><span class="from">running</span><span class="arrow">→</span><span class="to">done</span></span><span class="el">2m 55s</span></div>
+      <div class="arow" data-to="done"><span class="t">13:54:16</span><span class="tid">TSK-01-03</span><span class="evt">wbs <span class="arrow">→</span><span class="from">running</span><span class="arrow">→</span><span class="to">done</span></span><span class="el">1m 47s</span></div>
+      <div class="arow" data-to="done"><span class="t">13:52:29</span><span class="tid">TSK-01-02</span><span class="evt">wbs <span class="arrow">→</span><span class="from">running</span><span class="arrow">→</span><span class="to">done</span></span><span class="el">3m 01s</span></div>
+      <div class="arow" data-to="done"><span class="t">13:50:15</span><span class="tid">TSK-01-01</span><span class="evt">wbs <span class="arrow">→</span><span class="from">running</span><span class="arrow">→</span><span class="to">done</span></span><span class="el">2m 14s</span></div>
+      <div class="arow" data-to="done"><span class="t">13:47:04</span><span class="tid">TSK-00-03</span><span class="evt">telemetry <span class="arrow">→</span><span class="from">running</span><span class="arrow">→</span><span class="to">done</span></span><span class="el">4m 22s</span></div>
+
+    </div>
+  </div>
+</section>
+
+<!-- 7. Phase Timeline -->
+<section data-section="phase-timeline" aria-label="Phase timeline">
+  <div class="section-head">
+    <div>
+      <div class="eyebrow">last 60 min</div>
+      <h2>Phase Timeline</h2>
+    </div>
+    <div class="aside">tick: 5m</div>
+  </div>
+  <div class="panel timeline">
+    <div class="timeline-head">
+      <span>−60m</span>
+      <span>now</span>
+    </div>
+
+    <!-- 12 rows = 12 tasks -->
+    <!--
+      x-axis: 0→100% represents -60m→now. Segments are positional.
+    -->
+
+    <div class="tl-row">
+      <span class="lbl">TSK-00-06</span>
+      <div class="tl-track">
+        <div class="seg seg-running" style="left:0%;   width:12%"></div>
+        <div class="seg seg-done"    style="left:12%;  width:78%"></div>
+        <div class="seg seg-done"    style="left:90%;  width:10%"></div>
+      </div>
+    </div>
+    <div class="tl-row">
+      <span class="lbl">TSK-00-07</span>
+      <div class="tl-track">
+        <div class="seg seg-pending" style="left:0%;   width:84%"></div>
+        <div class="seg seg-running" style="left:84%;  width:16%"></div>
+      </div>
+    </div>
+    <div class="tl-row">
+      <span class="lbl">TSK-00-08</span>
+      <div class="tl-track">
+        <div class="seg seg-pending" style="left:0%;   width:74%"></div>
+        <div class="seg seg-bypass"  style="left:74%;  width:26%"></div>
+      </div>
+    </div>
+    <div class="tl-row">
+      <span class="lbl">TSK-01-04</span>
+      <div class="tl-track">
+        <div class="seg seg-pending" style="left:0%;   width:18%"></div>
+        <div class="seg seg-running" style="left:18%;  width:6%"></div>
+        <div class="seg seg-done"    style="left:24%;  width:76%"></div>
+      </div>
+    </div>
+    <div class="tl-row">
+      <span class="lbl">TSK-01-05</span>
+      <div class="tl-track">
+        <div class="seg seg-pending" style="left:0%;   width:42%"></div>
+        <div class="seg seg-running" style="left:42%;  width:22%"></div>
+        <div class="seg seg-done"    style="left:64%;  width:36%"></div>
+      </div>
+    </div>
+    <div class="tl-row">
+      <span class="lbl">TSK-01-06</span>
+      <div class="tl-track">
+        <div class="seg seg-pending" style="left:0%;   width:82%"></div>
+        <div class="seg seg-running" style="left:82%;  width:18%"></div>
+      </div>
+    </div>
+    <div class="tl-row">
+      <span class="lbl">TSK-01-07</span>
+      <div class="tl-track">
+        <div class="seg seg-pending" style="left:0%;   width:76%"></div>
+        <div class="seg seg-running" style="left:76%;  width:24%"></div>
+      </div>
+    </div>
+    <div class="tl-row">
+      <span class="lbl">TSK-01-08</span>
+      <div class="tl-track">
+        <div class="seg seg-pending" style="left:0%;   width:58%"></div>
+        <div class="seg seg-running" style="left:58%;  width:36%"></div>
+        <div class="seg seg-failed"  style="left:94%;  width:6%"></div>
+      </div>
+    </div>
+    <div class="tl-row">
+      <span class="lbl">TSK-02-04</span>
+      <div class="tl-track">
+        <div class="seg seg-pending" style="left:0%;   width:20%"></div>
+        <div class="seg seg-running" style="left:20%;  width:46%"></div>
+        <div class="seg seg-done"    style="left:66%;  width:34%"></div>
+      </div>
+    </div>
+    <div class="tl-row">
+      <span class="lbl">TSK-02-05</span>
+      <div class="tl-track">
+        <div class="seg seg-pending" style="left:0%;   width:50%"></div>
+        <div class="seg seg-running" style="left:50%;  width:50%"></div>
+      </div>
+    </div>
+    <div class="tl-row">
+      <span class="lbl">FTR-12-a</span>
+      <div class="tl-track">
+        <div class="seg seg-pending" style="left:0%;   width:94%"></div>
+        <div class="seg seg-running" style="left:94%;  width:6%"></div>
+      </div>
+    </div>
+    <div class="tl-row">
+      <span class="lbl">FTR-12-b</span>
+      <div class="tl-track">
+        <div class="seg seg-pending" style="left:0%;   width:76%"></div>
+        <div class="seg seg-running" style="left:76%;  width:8%"></div>
+        <div class="seg seg-done"    style="left:84%;  width:16%"></div>
+      </div>
+    </div>
+
+    <!-- axis -->
+    <div class="tl-row" style="margin-top: 8px;">
+      <span class="lbl"></span>
+      <div class="tl-axis" aria-hidden="true">
+        <!-- 13 ticks every 5 min over 60 min -->
+        <div class="tick major" style="left:0%"></div>
+        <div class="tick"       style="left:8.33%"></div>
+        <div class="tick major" style="left:16.66%"></div>
+        <div class="tick"       style="left:25%"></div>
+        <div class="tick major" style="left:33.33%"></div>
+        <div class="tick"       style="left:41.66%"></div>
+        <div class="tick major" style="left:50%"></div>
+        <div class="tick"       style="left:58.33%"></div>
+        <div class="tick major" style="left:66.66%"></div>
+        <div class="tick"       style="left:75%"></div>
+        <div class="tick major" style="left:83.33%"></div>
+        <div class="tick"       style="left:91.66%"></div>
+        <div class="tick major" style="left:100%"></div>
+
+        <div class="tlabel" style="left:0%">−60m</div>
+        <div class="tlabel" style="left:16.66%">−50</div>
+        <div class="tlabel" style="left:33.33%">−40</div>
+        <div class="tlabel" style="left:50%">−30</div>
+        <div class="tlabel" style="left:66.66%">−20</div>
+        <div class="tlabel" style="left:83.33%">−10</div>
+        <div class="tlabel" style="left:100%">now</div>
+
+        <div class="tl-now" style="left:100%"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 8. Team Agents -->
+<section data-section="team" aria-label="Team agents (tmux panes)">
+  <div class="section-head">
+    <div>
+      <div class="eyebrow">tmux</div>
+      <h2>Team Agents</h2>
+    </div>
+    <div class="aside"><span style="color:var(--done)">●</span> 3 live · 1 idle</div>
+  </div>
+  <div class="panel team">
+
+    <!-- pane 1 -->
+    <div class="pane" data-state="live">
+      <div class="pane-head">
+        <div class="name">claude-core-01</div>
+        <div class="meta">%0 · <span class="cmd">zsh</span> · pid 17203 · 2 panes · window: orchestrator</div>
+        <button class="mini-btn" type="button">show output</button>
+        <button class="mini-btn primary" type="button" data-pane-expand="pane-claude-core-01">
+          expand <span class="kbd">↵</span>
+        </button>
+      </div>
+      <pre class="pane-preview"><span class="dim">(~/src/dev-plugin) $</span> <span class="prompt">▸</span> claude --resume wbs-03 <span class="dim">--stream</span>
+<span class="info">[14:15:22]</span> entering phase <span class="hi">render</span> · TSK-00-07 · budget 4k
+<span class="info">[14:15:27]</span> emit <span class="hi">activity.event</span> · to=running · elapsed=0m42s</pre>
+    </div>
+
+    <!-- pane 2 -->
+    <div class="pane" data-state="live">
+      <div class="pane-head">
+        <div class="name">claude-worker-a</div>
+        <div class="meta">%3 · <span class="cmd">claude</span> · pid 17431 · 1 pane · window: worker-a</div>
+        <button class="mini-btn" type="button">show output</button>
+        <button class="mini-btn primary" type="button" data-pane-expand="pane-worker-a">
+          expand <span class="kbd">↵</span>
+        </button>
+      </div>
+      <pre class="pane-preview"><span class="dim">─</span> wbs/cycle_detect.py:142 <span class="dim">─</span>
+<span class="err">AssertionError</span>: disjoint graph component has no roots
+<span class="warn">retry 3/3</span> · <span class="err">giving up</span> · bubbling to TSK-01-08</pre>
+    </div>
+
+    <!-- pane 3 -->
+    <div class="pane" data-state="live">
+      <div class="pane-head">
+        <div class="name">claude-worker-b</div>
+        <div class="meta">%5 · <span class="cmd">claude</span> · pid 18002 · 1 pane · window: worker-b</div>
+        <button class="mini-btn" type="button">show output</button>
+        <button class="mini-btn primary" type="button" data-pane-expand="pane-worker-b">
+          expand <span class="kbd">↵</span>
+        </button>
+      </div>
+      <pre class="pane-preview"><span class="info">[14:14:51]</span> tx commit ok · 412 rows
+<span class="info">[14:14:52]</span> fsync 1.8ms · wal 2.1MB
+<span class="dim">── wp-01/persist · idle 8s ──</span></pre>
+    </div>
+
+    <!-- pane 4 -->
+    <div class="pane" data-state="idle">
+      <div class="pane-head">
+        <div class="name">claude-scribe</div>
+        <div class="meta">%7 · <span class="cmd">zsh</span> · pid 19120 · 1 pane · window: docs · idle 03:22</div>
+        <button class="mini-btn" type="button">show output</button>
+        <button class="mini-btn primary" type="button" data-pane-expand="pane-scribe">
+          expand <span class="kbd">↵</span>
+        </button>
+      </div>
+      <pre class="pane-preview"><span class="dim">$ waiting for lease · no task assigned</span>
+<span class="dim">last cmd: claude --dry-run docs/adr/</span>
+<span class="dim">idle since 14:12:06</span></pre>
+    </div>
+
+  </div>
+</section>
+
+<!-- 9. Subagents -->
+<section data-section="subagents" aria-label="Subagents (agent-pool)">
+  <div class="section-head">
+    <div>
+      <div class="eyebrow">agent-pool</div>
+      <h2>Subagents</h2>
+    </div>
+    <div class="aside">fan-out / fan-in signals</div>
+  </div>
+  <div class="panel">
+    <div class="subs">
+      <span class="sub" data-state="running"><span class="sw"></span>sub/retry-scout<span class="n">×1</span></span>
+      <span class="sub" data-state="running"><span class="sw"></span>sub/pool-tail<span class="n">×2</span></span>
+      <span class="sub" data-state="running"><span class="sw"></span>sub/wbs-reparse<span class="n">×1</span></span>
+      <span class="sub" data-state="done"><span class="sw"></span>sub/migrate-0007<span class="n">×1</span></span>
+      <span class="sub" data-state="done"><span class="sw"></span>sub/schema-diff<span class="n">×1</span></span>
+      <span class="sub" data-state="failed"><span class="sw"></span>sub/cycle-probe<span class="n">×3</span></span>
+    </div>
+  </div>
+</section>
+
+</div><!-- /right col -->
+
+</div><!-- /grid -->
+
+
+<!-- 10. Phase History -->
+<section data-section="phase-history" aria-label="Recent phase history">
+  <div class="section-head">
+    <div>
+      <div class="eyebrow">audit</div>
+      <h2>Recent Phase History</h2>
+    </div>
+    <div class="aside">last 10 transitions</div>
+  </div>
+  <div class="history">
+    <table>
+      <thead>
+        <tr>
+          <th style="width:36px;">#</th>
+          <th>Timestamp</th>
+          <th>Task</th>
+          <th>Event</th>
+          <th>Transition</th>
+          <th style="text-align:right;">Elapsed</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td class="idx">01</td><td class="t">2026-04-21T14:15:27Z</td><td class="tid">TSK-00-07</td><td class="ev">render</td><td><span class="from" style="color:var(--ink-4)">pending</span><span class="arr">→</span><span class="to running">running</span></td><td class="el" style="text-align:right;">0m 42s</td></tr>
+        <tr><td class="idx">02</td><td class="t">2026-04-21T14:14:51Z</td><td class="tid">TSK-01-05</td><td class="ev">persist</td><td><span class="from" style="color:var(--ink-4)">running</span><span class="arr">→</span><span class="to done">done</span></td><td class="el" style="text-align:right;">4m 12s</td></tr>
+        <tr><td class="idx">03</td><td class="t">2026-04-21T14:14:22Z</td><td class="tid">TSK-01-08</td><td class="ev">wbs</td><td><span class="from" style="color:var(--ink-4)">running</span><span class="arr">→</span><span class="to failed">failed</span></td><td class="el" style="text-align:right;">0m 19s</td></tr>
+        <tr><td class="idx">04</td><td class="t">2026-04-21T14:13:48Z</td><td class="tid">TSK-01-07</td><td class="ev">wbs</td><td><span class="from" style="color:var(--ink-4)">pending</span><span class="arr">→</span><span class="to running">running</span></td><td class="el" style="text-align:right;">3m 06s</td></tr>
+        <tr><td class="idx">05</td><td class="t">2026-04-21T14:12:44Z</td><td class="tid">FTR-12-a</td><td class="ev">hotfix</td><td><span class="from" style="color:var(--ink-4)">pending</span><span class="arr">→</span><span class="to running">running</span></td><td class="el" style="text-align:right;">0m 28s</td></tr>
+        <tr><td class="idx">06</td><td class="t">2026-04-21T14:11:09Z</td><td class="tid">TSK-02-04</td><td class="ev">pool</td><td><span class="from" style="color:var(--ink-4)">running</span><span class="arr">→</span><span class="to done">done</span></td><td class="el" style="text-align:right;">0m 54s</td></tr>
+        <tr><td class="idx">07</td><td class="t">2026-04-21T14:10:55Z</td><td class="tid">TSK-02-05</td><td class="ev">pool</td><td><span class="from" style="color:var(--ink-4)">pending</span><span class="arr">→</span><span class="to running">running</span></td><td class="el" style="text-align:right;">5m 11s</td></tr>
+        <tr><td class="idx">08</td><td class="t">2026-04-21T14:09:12Z</td><td class="tid">TSK-00-08</td><td class="ev">render</td><td><span class="from" style="color:var(--ink-4)">pending</span><span class="arr">→</span><span class="to bypass">bypass</span></td><td class="el" style="text-align:right;">—</td></tr>
+        <tr><td class="idx">09</td><td class="t">2026-04-21T14:07:41Z</td><td class="tid">TSK-00-06</td><td class="ev">render</td><td><span class="from" style="color:var(--ink-4)">running</span><span class="arr">→</span><span class="to done">done</span></td><td class="el" style="text-align:right;">6m 40s</td></tr>
+        <tr><td class="idx">10</td><td class="t">2026-04-21T14:06:33Z</td><td class="tid">FTR-12-b</td><td class="ev">polish</td><td><span class="from" style="color:var(--ink-4)">running</span><span class="arr">→</span><span class="to done">done</span></td><td class="el" style="text-align:right;">0m 51s</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<div style="height: 40px;"></div>
+
+</div><!-- /shell -->
+
+
+<!-- 11. Drawer -->
+<div class="drawer-backdrop" data-drawer-backdrop aria-hidden="true"></div>
+<aside class="drawer"
+       data-drawer
+       role="dialog"
+       aria-modal="true"
+       aria-hidden="true"
+       aria-labelledby="drawer-title">
+  <header class="drawer-head">
+    <div>
+      <h3 id="drawer-title" data-drawer-title>claude-worker-a</h3>
+      <div class="meta" data-drawer-meta>
+        <span><b>pane</b> %3</span>
+        <span><b>pid</b> 17431</span>
+        <span><b>cmd</b> claude</span>
+        <span><b>window</b> worker-a</span>
+      </div>
+    </div>
+    <button class="drawer-close" type="button" data-drawer-close aria-label="Close pane drawer">
+      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M2 2 L10 10 M10 2 L2 10"/></svg>
+    </button>
+  </header>
+  <div class="drawer-status">
+    <span class="poll">polling · 2s</span>
+    <span>· scrollback 500 lines</span>
+    <span>· press <span class="kbd">Esc</span> to close</span>
+  </div>
+  <pre class="drawer-pre" data-drawer-pre><span class="dim">─ tmux capture-pane -p -J -t %3 ──────────────────────────────</span>
+<span class="info">[14:14:08]</span> <span class="hi">▸</span> claude <span class="dim">--resume</span> wbs-03 <span class="dim">--stream</span>
+<span class="info">[14:14:08]</span> loaded context: <span class="hi">12.4k tokens</span> · budget <span class="hi">8.0k</span>
+<span class="info">[14:14:09]</span> entering phase <span class="hi">wbs</span> · TSK-01-08
+<span class="info">[14:14:10]</span>   ▸ reading docs/wbs/03-persistence.md
+<span class="info">[14:14:11]</span>   ▸ reading docs/wbs/04-render.md
+<span class="info">[14:14:13]</span>   ▸ building task graph · 12 nodes · 18 edges
+<span class="info">[14:14:14]</span>   ▸ running cycle detector
+<span class="warn">[14:14:15]</span>   ! disjoint subgraph found: [node-7, node-11]
+<span class="warn">[14:14:15]</span>   ! retry 1/3 with heuristic=topo-sort
+<span class="warn">[14:14:17]</span>   ! retry 2/3 with heuristic=kahn
+<span class="info">[14:14:19]</span>   ▸ attempt 3 · fallback to brute tarjan
+<span class="dim">──────────────────────────────────────────────────────────────</span>
+  <span class="dim">File "wbs/cycle_detect.py", line 142, in _roots</span>
+  <span class="dim">    assert roots, "graph component has no roots"</span>
+  <span class="err">AssertionError: disjoint graph component has no roots</span>
+<span class="dim">──────────────────────────────────────────────────────────────</span>
+<span class="err">[14:14:22]</span>   × TSK-01-08 <span class="err">FAILED</span> after 3 retries · 0m 19s
+<span class="info">[14:14:22]</span> emit activity.event → to=<span class="err">failed</span>
+<span class="info">[14:14:22]</span> emit phase.history #1214
+<span class="info">[14:14:23]</span> releasing lease on worker-a
+<span class="dim">──────────────────────────────────────────────────────────────</span>
+<span class="info">[14:14:24]</span> <span class="hi">▸</span> awaiting next task from pool...
+<span class="info">[14:14:51]</span> <span class="hi">▸</span> lease acquired: TSK-01-05 (persist)
+<span class="info">[14:14:51]</span> entering phase <span class="hi">persist</span>
+<span class="info">[14:14:52]</span>   ▸ opening sqlite connection · WAL mode
+<span class="info">[14:14:53]</span>   ▸ begin transaction
+<span class="info">[14:14:54]</span>   ▸ inserting 412 rows · batch size 100
+<span class="info">[14:14:55]</span>   ▸ commit ok · 1.8ms fsync
+<span class="info">[14:14:55]</span>   ▸ wal size: 2.1MB
+<span class="info">[14:14:55]</span> emit activity.event → to=<span class="hi">done</span> · elapsed=4m 12s
+<span class="dim">──────────────────────────────────────────────────────────────</span>
+<span class="info">[14:15:00]</span> ▸ idle · waiting for lease...
+<span class="dim">$ _</span></pre>
+</aside>
+
+
+<script>
+(function(){
+  'use strict';
+
+  // ---------- clock ----------
+  const clock = document.getElementById('clock');
+  function pad(n){ return String(n).padStart(2,'0'); }
+  function tick(){
+    if(!clock) return;
+    // keep it in the user-specified format but advance seconds only
+    const d = new Date();
+    const s = `2026-04-21T${pad(d.getHours())}:${pad(d.getMinutes())}.${pad(d.getSeconds())}Z`;
+    clock.textContent = s;
+  }
+  setInterval(tick, 1000); // cosmetic; not a real clock
+
+  // ---------- filter chips ----------
+  const chips = document.querySelectorAll('[data-section="kpi-chips"] .chip');
+  chips.forEach(chip => {
+    chip.addEventListener('click', () => {
+      const f = chip.getAttribute('data-filter');
+      chips.forEach(c => c.setAttribute('aria-pressed', c === chip ? 'true' : 'false'));
+      document.body.setAttribute('data-filter', f);
+    });
+  });
+
+  // ---------- auto-refresh toggle ----------
+  const rt = document.querySelector('.refresh-toggle');
+  if(rt){
+    rt.addEventListener('click', () => {
+      const on = rt.getAttribute('aria-pressed') === 'true';
+      rt.setAttribute('aria-pressed', on ? 'false' : 'true');
+    });
+  }
+  // R shortcut
+  document.addEventListener('keydown', e => {
+    if(e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
+    if(e.key === 'r' || e.key === 'R'){
+      if(rt) rt.click();
+    }
+  });
+
+  // ---------- drawer ----------
+  const drawer = document.querySelector('[data-drawer]');
+  const backdrop = document.querySelector('[data-drawer-backdrop]');
+  const drawerTitle = drawer.querySelector('[data-drawer-title]');
+  const drawerMeta  = drawer.querySelector('[data-drawer-meta]');
+  let lastFocused = null;
+
+  function openDrawer(paneId, name, metaHtml){
+    lastFocused = document.activeElement;
+    if(name) drawerTitle.textContent = name;
+    if(metaHtml) drawerMeta.innerHTML = metaHtml;
+    drawer.setAttribute('aria-hidden', 'false');
+    backdrop.setAttribute('aria-hidden', 'false');
+    document.body.style.overflow = 'hidden';
+    // focus first focusable
+    const closeBtn = drawer.querySelector('[data-drawer-close]');
+    if(closeBtn) closeBtn.focus();
+  }
+  function closeDrawer(){
+    drawer.setAttribute('aria-hidden', 'true');
+    backdrop.setAttribute('aria-hidden', 'true');
+    document.body.style.overflow = '';
+    if(lastFocused && lastFocused.focus) lastFocused.focus();
+  }
+
+  document.querySelectorAll('[data-pane-expand]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const paneId = btn.getAttribute('data-pane-expand');
+      const pane = btn.closest('.pane');
+      const name = pane?.querySelector('.name')?.textContent?.trim() || 'pane';
+      const metaEl = pane?.querySelector('.meta');
+      let metaHtml = '';
+      if(metaEl){
+        // build meta chips from the existing text
+        metaHtml = metaEl.innerHTML;
+      }
+      openDrawer(paneId, name, metaHtml);
+    });
+  });
+  document.querySelectorAll('[data-drawer-close]').forEach(b => b.addEventListener('click', closeDrawer));
+  backdrop.addEventListener('click', closeDrawer);
+  document.addEventListener('keydown', e => {
+    if(e.key === 'Escape' && drawer.getAttribute('aria-hidden') === 'false'){
+      closeDrawer();
+    }
+  });
+
+  // focus trap (basic)
+  drawer.addEventListener('keydown', e => {
+    if(e.key !== 'Tab') return;
+    const focusables = drawer.querySelectorAll('button, [href], [tabindex]:not([tabindex="-1"])');
+    if(!focusables.length) return;
+    const first = focusables[0];
+    const last  = focusables[focusables.length - 1];
+    if(e.shiftKey && document.activeElement === first){
+      last.focus(); e.preventDefault();
+    } else if(!e.shiftKey && document.activeElement === last){
+      first.focus(); e.preventDefault();
+    }
+  });
+
+})();
+</script>
+
+</body>
+</html>
