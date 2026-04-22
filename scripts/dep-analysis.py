@@ -7,8 +7,10 @@ Output format is identical JSON.
 Modes:
   default        : topological sort → execution levels (backward compatible)
   --graph-stats  : dependency graph health metrics (max chain depth, fan-in,
-                   diamond patterns, review candidates for contract extraction)
+                   diamond patterns, review candidates for contract extraction,
+                   fan_out per task, critical_path, bottleneck_ids)
 """
+import heapq
 import sys
 import os
 import json
@@ -72,11 +74,146 @@ def parse_depends(dep_str):
     return out
 
 
+def _chain_depth(t, dep_map, memo, stack):
+    """Recursively compute the longest dependency chain length ending at t.
+
+    Args:
+        t: task id to compute depth for
+        dep_map: dict mapping tsk_id -> list of dependency ids
+        memo: shared memoization dict (tsk_id -> int)
+        stack: set of currently active nodes (cycle guard)
+
+    Returns:
+        int: depth of longest chain ending at t (inclusive)
+    """
+    if t in memo:
+        return memo[t]
+    if t in stack:
+        return 0  # circular guard
+    stack.add(t)
+    deps = dep_map.get(t, [])
+    if not deps:
+        d = 1
+    else:
+        d = 1 + max((_chain_depth(x, dep_map, memo, stack) for x in deps if x in dep_map), default=0)
+    stack.discard(t)
+    memo[t] = d
+    return d
+
+
+def _compute_fan_out(dep_map, task_ids):
+    """Compute fan-out for each task.
+
+    fan_out[t] = number of tasks that list t as a dependency
+    (i.e., how many tasks t "feeds" — its direct successors in execution order).
+
+    Args:
+        dep_map: dict mapping tsk_id -> list of dependency ids
+        task_ids: list of all known tsk_ids in the graph
+
+    Returns:
+        dict mapping tsk_id -> int (0 if no successors)
+    """
+    fan_out = {t: 0 for t in task_ids}
+    for t, deps in dep_map.items():
+        for d in deps:
+            if d in fan_out:
+                fan_out[d] += 1
+    return fan_out
+
+
+def _compute_critical_path(dep_map, task_ids):
+    """Compute the critical (longest) path from a root to a leaf via DP.
+
+    Uses Kahn's algorithm (topological BFS) + longest-path DP.
+    Tiebreak: alphabetically smaller task_id wins (both for parent selection
+    and endpoint selection).
+
+    Graph direction convention:
+        dep_map[t] = list of tasks that t depends on.
+        Execution order: dependency runs first → t runs after.
+        So edge direction in execution graph: dependency → t.
+        critical_path.edges[i] = {"source": nodes[i], "target": nodes[i+1]}
+        means nodes[i] executes before nodes[i+1].
+
+    Args:
+        dep_map: dict mapping tsk_id -> list of dependency ids
+        task_ids: list of all known tsk_ids in the graph
+
+    Returns:
+        dict {"nodes": [...], "edges": [...]}
+
+    Raises:
+        ValueError: if a cycle is detected
+    """
+    if not task_ids:
+        return {"nodes": [], "edges": []}
+
+    task_set = set(task_ids)
+
+    # Build in-degree (fan-in) and successor map (execution direction)
+    # successors[t] = tasks that depend on t (t runs before them)
+    in_degree = {t: 0 for t in task_ids}
+    successors = {t: [] for t in task_ids}
+    for t in task_ids:
+        for d in dep_map.get(t, []):
+            if d in task_set:
+                in_degree[t] += 1
+                successors[d].append(t)
+
+    # Kahn's algorithm: process nodes in topological order.
+    # Use a min-heap for O(log n) deterministic (alphabetical) ordering.
+    heap = list(sorted(t for t in task_ids if in_degree[t] == 0))
+    heapq.heapify(heap)
+
+    # DP: dist[t] = longest chain length ending at t (inclusive)
+    # parent[t] = predecessor in the longest path to t
+    dist = {t: 1 for t in task_ids}
+    parent = {t: None for t in task_ids}
+
+    processed = []
+    while heap:
+        node = heapq.heappop(heap)
+        processed.append(node)
+
+        for succ in successors[node]:
+            new_dist = dist[node] + 1
+            # Update if longer, or equal dist with alphabetically smaller parent
+            if new_dist > dist[succ] or (
+                new_dist == dist[succ] and (parent[succ] is None or node < parent[succ])
+            ):
+                dist[succ] = new_dist
+                parent[succ] = node
+
+            in_degree[succ] -= 1
+            if in_degree[succ] == 0:
+                heapq.heappush(heap, succ)
+
+    if len(processed) != len(task_ids):
+        raise ValueError("cycle detected in dependency graph")
+
+    # Find endpoint: node with max dist, tiebreak alphabetical
+    max_dist = max(dist.values())
+    candidates = sorted(t for t in task_ids if dist[t] == max_dist)
+    endpoint = candidates[0]
+
+    # Trace back via parent pointers
+    path = []
+    cur = endpoint
+    while cur is not None:
+        path.append(cur)
+        cur = parent[cur]
+    path.reverse()
+
+    edges = [{"source": path[i], "target": path[i + 1]} for i in range(len(path) - 1)]
+    return {"nodes": path, "edges": edges}
+
+
 def compute_graph_stats(items, fan_in_threshold=3, depends_threshold=4, top_n=5):
     """Compute dependency graph health metrics.
 
     Returns dict with max_chain_depth, fan_in_top, diamond_patterns,
-    review_candidates, etc.
+    review_candidates, fan_out, critical_path, bottleneck_ids.
     """
     dep_map = {}
     task_ids = []
@@ -98,26 +235,11 @@ def compute_graph_stats(items, fan_in_threshold=3, depends_threshold=4, top_n=5)
     fan_in_ge_3_count = sum(1 for _, c in fan_in.items() if c >= fan_in_threshold)
 
     # Max chain depth via memoized DFS (depth including self)
-    memo = {}
-
-    def depth(t, stack):
-        if t in memo:
-            return memo[t]
-        if t in stack:
-            return 0  # circular guard
-        stack.add(t)
-        deps = dep_map.get(t, [])
-        if not deps:
-            d = 1
-        else:
-            d = 1 + max((depth(x, stack) for x in deps if x in dep_map), default=0)
-        stack.discard(t)
-        memo[t] = d
-        return d
-
-    max_chain_depth = 0
-    for t in task_ids:
-        max_chain_depth = max(max_chain_depth, depth(t, set()))
+    memo: dict = {}
+    max_chain_depth = max(
+        (_chain_depth(t, dep_map, memo, set()) for t in task_ids),
+        default=0,
+    )
 
     # Diamond patterns: apex X has 2+ direct children A,B that share a merge M
     children = {t: [] for t in task_ids}
@@ -168,6 +290,20 @@ def compute_graph_stats(items, fan_in_threshold=3, depends_threshold=4, top_n=5)
                 }
     review_candidates = sorted(candidates.values(), key=lambda x: x["tsk_id"])
 
+    # Fan-out: how many tasks each task feeds (number of direct successors)
+    fan_out = _compute_fan_out(dep_map, task_ids)
+
+    # Critical path: longest path from root to leaf via DP
+    critical_path = _compute_critical_path(dep_map, task_ids)
+
+    # Bottleneck IDs: fan_in >= threshold OR fan_out >= threshold.
+    # Both fan-in and fan-out use the same threshold value (fan_in_threshold).
+    bottleneck_threshold = fan_in_threshold
+    bottleneck_ids = sorted(
+        t for t in task_ids
+        if fan_in.get(t, 0) >= bottleneck_threshold or fan_out.get(t, 0) >= bottleneck_threshold
+    )
+
     return {
         "max_chain_depth": max_chain_depth,
         "total": len(task_ids),
@@ -176,6 +312,10 @@ def compute_graph_stats(items, fan_in_threshold=3, depends_threshold=4, top_n=5)
         "diamond_patterns": diamond_patterns,
         "diamond_count": len(diamond_patterns),
         "review_candidates": review_candidates,
+        "fan_out": fan_out,
+        "fan_out_map": fan_out,  # alias: monitor-server.py _build_graph_payload 호환
+        "critical_path": critical_path,
+        "bottleneck_ids": bottleneck_ids,
     }
 
 
@@ -209,6 +349,10 @@ def main():
                 "diamond_patterns": [],
                 "diamond_count": 0,
                 "review_candidates": [],
+                "fan_out": {},
+                "fan_out_map": {},  # alias for monitor-server.py compatibility
+                "critical_path": {"nodes": [], "edges": []},
+                "bottleneck_ids": [],
             }, ensure_ascii=False, indent=2))
         else:
             print(json.dumps({"levels": {}, "completed": [], "circular": [], "total": 0, "pending": 0}))
@@ -221,7 +365,11 @@ def main():
         sys.exit(1)
 
     if graph_stats_mode:
-        result = compute_graph_stats(items)
+        try:
+            result = compute_graph_stats(items)
+        except ValueError as e:
+            print(f"ERROR: {e}", file=sys.stderr)
+            sys.exit(1)
         print(json.dumps(result, ensure_ascii=False, indent=2))
         sys.exit(0)
 

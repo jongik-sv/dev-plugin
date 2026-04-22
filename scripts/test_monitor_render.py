@@ -1771,6 +1771,179 @@ class RenderDashboardTabsTests(unittest.TestCase):
         html = render_dashboard(model)
         self.assertIn("<!DOCTYPE html>", html)
         self.assertIn("</html>", html)
+# ---------------------------------------------------------------------------
+# TSK-03-04: Dependency Graph 섹션 테스트
+# ---------------------------------------------------------------------------
+
+class DepGraphSectionEmbeddedTests(unittest.TestCase):
+    """test_graph_section_embedded_in_dashboard — render_dashboard HTML 구조 검증."""
+
+    def _html(self, lang="ko", subproject="all"):
+        return render_dashboard(_normal_model(), lang=lang, subproject=subproject)
+
+    def test_dep_graph_canvas_div_present(self):
+        """render_dashboard 출력에 <div id="dep-graph-canvas"> 포함."""
+        html = self._html()
+        self.assertIn('<div id="dep-graph-canvas"', html)
+
+    def test_dep_graph_summary_aside_present(self):
+        """render_dashboard 출력에 <aside ... id="dep-graph-summary"> 포함."""
+        html = self._html()
+        self.assertIn('id="dep-graph-summary"', html)
+
+    def test_dep_graph_section_marker_present(self):
+        """render_dashboard 출력에 data-section="dep-graph" 포함."""
+        html = self._html()
+        self.assertIn('data-section="dep-graph"', html)
+
+    def test_vendor_script_dagre_present(self):
+        """render_dashboard 출력에 /static/dagre.min.js <script> 포함."""
+        html = self._html()
+        self.assertIn('/static/dagre.min.js', html)
+
+    def test_vendor_script_cytoscape_present(self):
+        """render_dashboard 출력에 /static/cytoscape.min.js <script> 포함."""
+        html = self._html()
+        self.assertIn('/static/cytoscape.min.js', html)
+
+    def test_vendor_script_cytoscape_dagre_present(self):
+        """render_dashboard 출력에 /static/cytoscape-dagre.min.js <script> 포함."""
+        html = self._html()
+        self.assertIn('/static/cytoscape-dagre.min.js', html)
+
+    def test_vendor_script_graph_client_present(self):
+        """render_dashboard 출력에 /static/graph-client.js <script> 포함."""
+        html = self._html()
+        self.assertIn('/static/graph-client.js', html)
+
+    def test_script_load_order_dagre_before_cytoscape(self):
+        """dagre.min.js가 cytoscape.min.js보다 먼저 등장해야 함."""
+        html = self._html()
+        pos_dagre = html.find('/static/dagre.min.js')
+        pos_cy = html.find('/static/cytoscape.min.js')
+        self.assertGreater(pos_dagre, -1)
+        self.assertGreater(pos_cy, -1)
+        self.assertLess(pos_dagre, pos_cy, "dagre must come before cytoscape")
+
+    def test_script_load_order_cytoscape_before_cytoscape_dagre(self):
+        """cytoscape.min.js가 cytoscape-dagre.min.js보다 먼저 등장해야 함."""
+        html = self._html()
+        pos_cy = html.find('/static/cytoscape.min.js')
+        pos_cy_dagre = html.find('/static/cytoscape-dagre.min.js')
+        self.assertLess(pos_cy, pos_cy_dagre, "cytoscape must come before cytoscape-dagre")
+
+    def test_script_load_order_cytoscape_dagre_before_graph_client(self):
+        """cytoscape-dagre.min.js가 graph-client.js보다 먼저 등장해야 함."""
+        html = self._html()
+        pos_cy_dagre = html.find('/static/cytoscape-dagre.min.js')
+        pos_gc = html.find('/static/graph-client.js')
+        self.assertLess(pos_cy_dagre, pos_gc, "cytoscape-dagre must come before graph-client")
+
+    def test_i18n_ko_default_h2(self):
+        """lang 미지정(기본 ko) 시 dep-graph 섹션 h2가 '의존성 그래프'."""
+        html = self._html(lang="ko")
+        self.assertIn('의존성 그래프', html)
+
+    def test_i18n_en_h2(self):
+        """lang='en' 시 dep-graph 섹션 h2가 'Dependency Graph'."""
+        html = self._html(lang="en")
+        self.assertIn('Dependency Graph', html)
+
+    def test_subproject_data_attribute_default_all(self):
+        """subproject 미지정 시 data-subproject="all"."""
+        html = self._html()
+        self.assertIn('data-subproject="all"', html)
+
+    def test_subproject_data_attribute_custom(self):
+        """subproject='p1' 시 data-subproject="p1"."""
+        html = self._html(subproject="p1")
+        self.assertIn('data-subproject="p1"', html)
+
+    def test_canvas_height_520px(self):
+        """dep-graph-canvas height가 520px."""
+        html = self._html()
+        self.assertIn('height:520px', html.replace(': ', ':').replace(' ', ''))
+
+    def test_empty_model_no_exception(self):
+        """render_dashboard({}) 빈 모델에서도 예외 없이 완료."""
+        try:
+            html = render_dashboard({})
+            self.assertIn('dep-graph-canvas', html)
+        except Exception as exc:
+            self.fail(f"render_dashboard({{}}) raised: {exc}")
+
+    def test_existing_sections_still_present(self):
+        """dep-graph 추가 후 기존 섹션들이 모두 여전히 존재 (regression)."""
+        html = self._html()
+        for anchor in (
+            'data-section="hdr"',
+            '<section id="wp-cards"',
+            '<section id="features"',
+            '<section id="team"',
+            '<section id="subagents"',
+            'data-section="phases"',
+        ):
+            self.assertIn(anchor, html, f"regression: missing {anchor}")
+
+
+class DepGraphSubprojectAttributeTests(unittest.TestCase):
+    """test_dep_graph_section_marks_subproject_in_data_attribute."""
+
+    def test_subproject_p1_in_section(self):
+        """render_dashboard(model, lang='ko', subproject='p1') 시 data-subproject='p1' 존재."""
+        html = render_dashboard(_normal_model(), lang="ko", subproject="p1")
+        self.assertIn('data-subproject="p1"', html)
+
+    def test_subproject_xss_escaped(self):
+        """subproject 값에 XSS 페이로드 주입 시 HTML-escape되어 실행 불가."""
+        html = render_dashboard(_normal_model(), lang="ko",
+                                subproject='"><script>alert(1)</script>')
+        self.assertNotIn('<script>alert(1)</script>', html)
+
+    def test_subproject_default_when_empty(self):
+        """subproject 빈 문자열 시 data-subproject='all' 또는 빈값 중 안전한 값."""
+        html = render_dashboard(_normal_model(), lang="ko", subproject="")
+        # 빈 문자열 전달 시 "all"로 fallback 또는 빈값 — 최소한 크래시 없어야 함
+        self.assertIn('data-subproject=', html)
+
+
+class DepGraphSectionAnchorTests(unittest.TestCase):
+    """_SECTION_ANCHORS에 dep-graph 포함 검증."""
+
+    def test_dep_graph_in_section_anchors(self):
+        """_SECTION_ANCHORS 튜플에 'dep-graph' 포함."""
+        anchors = getattr(monitor_server, '_SECTION_ANCHORS', ())
+        self.assertIn('dep-graph', anchors)
+
+
+class DepGraphI18nTests(unittest.TestCase):
+    """_I18N / _t 헬퍼 검증."""
+
+    def test_t_ko_dep_graph(self):
+        """_t('ko', 'dep_graph') == '의존성 그래프'."""
+        if not hasattr(monitor_server, '_t'):
+            self.skipTest('_t 미구현')
+        self.assertEqual(monitor_server._t('ko', 'dep_graph'), '의존성 그래프')
+
+    def test_t_en_dep_graph(self):
+        """_t('en', 'dep_graph') == 'Dependency Graph'."""
+        if not hasattr(monitor_server, '_t'):
+            self.skipTest('_t 미구현')
+        self.assertEqual(monitor_server._t('en', 'dep_graph'), 'Dependency Graph')
+
+    def test_t_unknown_key_fallback(self):
+        """_t('en', 'unknown_key') == 'unknown_key' (key 자체 fallback)."""
+        if not hasattr(monitor_server, '_t'):
+            self.skipTest('_t 미구현')
+        self.assertEqual(monitor_server._t('en', 'unknown_key'), 'unknown_key')
+
+    def test_t_unknown_lang_fallback(self):
+        """_t('xx', 'dep_graph') — 예외 없이 문자열 반환."""
+        if not hasattr(monitor_server, '_t'):
+            self.skipTest('_t 미구현')
+        result = monitor_server._t('xx', 'dep_graph')
+        self.assertIsInstance(result, str)
+        self.assertTrue(len(result) > 0)
 
 
 if __name__ == "__main__":

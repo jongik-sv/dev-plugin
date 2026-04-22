@@ -107,6 +107,21 @@ _AGENT_POOL_SCOPE_PREFIX = "agent-pool:"
 # TSK-01-01: WP-scoped signal task_id prefix pattern (e.g. "WP-01-").
 _WP_SIGNAL_PREFIX_RE = re.compile(r"^WP-\d{2}-")
 
+# ---------------------------------------------------------------------------
+# Static file serving constants (TSK-03-03)
+# ---------------------------------------------------------------------------
+
+_STATIC_PATH_PREFIX = "/static/"
+
+# Whitelist of allowed vendor filenames under skills/dev-monitor/vendor/.
+# graph-client.js is a TSK-03-04 placeholder committed as an empty file.
+_STATIC_WHITELIST: "frozenset[str]" = frozenset({
+    "cytoscape.min.js",
+    "dagre.min.js",
+    "cytoscape-dagre.min.js",
+    "graph-client.js",
+})
+
 
 # ---------------------------------------------------------------------------
 # Dataclasses (TRD §5.2, §5.3)
@@ -778,7 +793,33 @@ def _filter_by_subproject(state: dict, sp: str, project_name: str) -> dict:
 _DEFAULT_REFRESH_SECONDS = 3
 _PHASES_SECTION_LIMIT = 10
 _ERROR_TITLE_CAP = 200
-_SECTION_ANCHORS = ("wp-cards", "features", "team", "subagents", "activity", "timeline", "phases")
+_SECTION_ANCHORS = ("wp-cards", "features", "team", "subagents", "activity", "timeline", "phases", "dep-graph")
+
+# ---------------------------------------------------------------------------
+# i18n (TSK-03-04) — minimal table; other sections adopt as follow-on Tasks
+# ---------------------------------------------------------------------------
+
+_I18N: dict[str, dict[str, str]] = {
+    "ko": {
+        "dep_graph": "의존성 그래프",
+    },
+    "en": {
+        "dep_graph": "Dependency Graph",
+    },
+}
+
+
+def _t(lang: str, key: str) -> str:
+    """Return i18n string for *key* in *lang*.
+
+    Fallback chain: requested lang → "ko" → key itself.
+    Never raises.
+    """
+    return (
+        _I18N.get(lang, {}).get(key)
+        or _I18N.get("ko", {}).get(key)
+        or key
+    )
 
 # Status → (emoji, label, css_class) for the non-override branch of
 # ``_status_badge``. The bypass/failed/running overrides stay inline in the
@@ -2574,6 +2615,71 @@ def _section_phase_history(tasks, features) -> str:
 
 
 # ---------------------------------------------------------------------------
+# TSK-03-04: Dependency Graph section (SSR skeleton + vendor scripts)
+# ---------------------------------------------------------------------------
+
+
+def _section_dep_graph(lang: str = "ko", subproject: str = "all") -> str:
+    """Render the Dependency Graph section SSR skeleton (TRD §3.9.5).
+
+    Returns a ``<section id="dep-graph">`` block containing:
+    - ``.section-head`` with i18n h2 + ``<aside id="dep-graph-summary">``
+    - ``.dep-graph-wrap``: canvas div (height 520px) + legend div
+    - 4 vendor ``<script>`` tags in load order:
+      dagre → cytoscape → cytoscape-dagre → graph-client
+
+    The ``subproject`` value is HTML-escaped and injected as
+    ``data-subproject="..."`` on the root ``<section>`` element so that
+    graph-client.js can read it without inline scripts.
+    """
+    sp_esc = html.escape(subproject or "all", quote=True)
+    heading = _t(lang, "dep_graph")
+
+    summary_html = (
+        '<aside id="dep-graph-summary" class="dep-graph-summary">'
+        '<span data-stat="total">-</span> · '
+        '<span data-stat="done">-</span> · '
+        '<span data-stat="running">-</span> · '
+        '<span data-stat="pending">-</span> · '
+        '<span data-stat="failed">-</span> · '
+        '<span data-stat="bypassed">-</span>'
+        '</aside>'
+    )
+
+    legend_html = (
+        '<div id="dep-graph-legend" class="dep-graph-legend">'
+        '<span class="leg-item" style="color:#22c55e">&#9632; done</span> '
+        '<span class="leg-item" style="color:#eab308">&#9632; running</span> '
+        '<span class="leg-item" style="color:#94a3b8">&#9632; pending</span> '
+        '<span class="leg-item" style="color:#ef4444">&#9632; failed</span> '
+        '<span class="leg-item" style="color:#a855f7">&#9632; bypassed</span>'
+        '</div>'
+    )
+
+    scripts_html = (
+        '<script src="/static/dagre.min.js"></script>\n'
+        '<script src="/static/cytoscape.min.js"></script>\n'
+        '<script src="/static/cytoscape-dagre.min.js"></script>\n'
+        '<script src="/static/graph-client.js"></script>'
+    )
+
+    return (
+        f'<section id="dep-graph" data-section="dep-graph"'
+        f' data-subproject="{sp_esc}">\n'
+        '  <div class="section-head">\n'
+        f'    <div><h2>{html.escape(heading)}</h2></div>\n'
+        f'    {summary_html}\n'
+        '  </div>\n'
+        '  <div class="dep-graph-wrap">\n'
+        '    <div id="dep-graph-canvas" style="height:520px;"></div>\n'
+        f'    {legend_html}\n'
+        '  </div>\n'
+        f'{scripts_html}\n'
+        '</section>'
+    )
+
+
+# ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
 # TSK-01-04: Live Activity + Phase Timeline render functions
 # ---------------------------------------------------------------------------
@@ -3081,6 +3187,9 @@ _DASHBOARD_JS = """\
   function patchSection(name,newHtml){
     var current=document.querySelector('[data-section="'+name+'"]');
     if(!current)return;
+    /* dep-graph is managed autonomously by graph-client.js; skip DOM replacement
+       to prevent cytoscape canvas destruction on every 5-second dashboard poll. */
+    if(name==='dep-graph')return;
     if(name==='hdr'){
       /* Preserve chip aria-pressed states and refresh-toggle visual state
          across DOM replacement so client-side filter/toggle survive server push. */
@@ -3332,18 +3441,19 @@ def _build_dashboard_body(s: dict) -> str:
         s["subagents"], "\n",
         '    </div>\n',
         '  </div>\n',
+        s["dep-graph"], "\n",
         s["phase-history"], "\n",
         '</div>\n',
     ])
 
 
-def render_dashboard(model: dict, lang: str = "ko", subproject: str = "") -> str:
-    """Render the full v2 monitor dashboard HTML document (TSK-01-06).
+def render_dashboard(model: dict, lang: str = "ko", subproject: str = "all") -> str:
+    """Render the full v3 monitor dashboard HTML document (TSK-01-06).
 
     Assembly order (design.md §구현방향):
       sticky_header → kpi → .page[col-left: wp_cards + features,
       col-right: live_activity + phase_timeline + team + subagents]
-      → phase_history (full-width footer)
+      → dep-graph (full-width, TSK-03-04) → phase_history (full-width footer)
 
     Changes from v1:
     - ``<meta http-equiv="refresh">`` removed (JS polling TBD in WP-02).
@@ -3352,6 +3462,7 @@ def render_dashboard(model: dict, lang: str = "ko", subproject: str = "") -> str
     - ``_drawer_skeleton()`` injected before ``</body>``.
     - Empty ``<script id="dashboard-js">`` placeholder inserted for WP-02.
     - ``<a id="wbs">`` landing pad added before wp-cards for backward compat.
+    - ``lang`` / ``subproject`` args added (TSK-03-04): dep-graph i18n + SP query.
 
     TSK-02-02: ``lang`` / ``subproject`` 파라미터 추가.
     - ``lang`` ('ko'|'en', 기본 'ko'): 섹션 h2 heading 번역.
@@ -3399,12 +3510,13 @@ def render_dashboard(model: dict, lang: str = "ko", subproject: str = "") -> str
         "team":           _section_team(panes, heading=_t(lang, "team_agents")),
         "subagents":      _section_subagents(ap_sigs,
                                               heading=_t(lang, "subagents")),
+        "dep-graph":      _section_dep_graph(lang=lang, subproject=subproject),
         "phase-history":  _section_phase_history(tasks, features),
     }
 
     # Inject data-section attribute on each section's outermost tag.
-    for key, html in sections.items():
-        sections[key] = _wrap_with_data_section(html, key)
+    for key, html_str in sections.items():
+        sections[key] = _wrap_with_data_section(html_str, key)
 
     body = _build_dashboard_body({**sections, "header": header_html, "subproject-tabs": tabs_html})
 
@@ -3478,6 +3590,122 @@ pre.pane-capture {
 }
 .error { color: var(--warn); font-weight: 600; margin: 0.5rem 0; }
 .footer { color: var(--muted); font-size: 0.8rem; margin-top: 0.5rem; }"""
+
+
+# ---------------------------------------------------------------------------
+# Static file route helpers (TSK-03-03)
+# ---------------------------------------------------------------------------
+
+
+def _send_plain_404(handler) -> None:
+    """Write a minimal ``404 Not Found`` text/plain response to *handler*.
+
+    Shared by :func:`_handle_static` (static-route guard) and
+    :meth:`MonitorHandler._route_not_found` to avoid duplicating the same
+    response block in multiple places.
+    """
+    body = b"404 Not Found"
+    handler.send_response(404)
+    handler.send_header("Content-Type", "text/plain; charset=utf-8")
+    handler.send_header("Content-Length", str(len(body)))
+    handler.end_headers()
+    handler.wfile.write(body)
+
+
+def _resolve_plugin_root() -> str:
+    """Return the plugin root directory path.
+
+    Resolution order:
+    1. ``$CLAUDE_PLUGIN_ROOT`` environment variable — set when running inside
+       the dev-plugin Claude Code plugin context.
+    2. Fallback: parent of the parent of ``__file__`` (i.e., the repository
+       root when ``__file__`` is ``scripts/monitor-server.py``).
+    """
+    env_val = os.environ.get("CLAUDE_PLUGIN_ROOT", "")
+    if env_val:
+        return env_val
+    return str(Path(__file__).resolve().parent.parent)
+
+
+def _is_static_path(path: str) -> bool:
+    """Return True iff *path* is a valid /static/{whitelist-file} URL.
+
+    Returns False for:
+    - Paths not starting with ``_STATIC_PATH_PREFIX``
+    - Paths that contain ``..`` (directory traversal attempt)
+    - Filenames not in ``_STATIC_WHITELIST``
+    - Empty filename after the prefix
+
+    This function is the *first* defence line — ``_handle_static`` performs a
+    second ``Path.resolve()``-based guard as belt-and-suspenders.
+    """
+    if not isinstance(path, str):
+        return False
+    if not path.startswith(_STATIC_PATH_PREFIX):
+        return False
+    if ".." in path:
+        return False
+    filename = path[len(_STATIC_PATH_PREFIX):]
+    if not filename:
+        return False
+    return filename in _STATIC_WHITELIST
+
+
+def _handle_static(handler: "BaseHTTPRequestHandler", path: str) -> None:
+    """Serve a static vendor JS file to *handler*.
+
+    Protocol:
+    - Extract filename from *path* after ``_STATIC_PATH_PREFIX``.
+    - Re-validate whitelist + ``..`` guard (second defence line).
+    - Resolve absolute path under ``handler.server.plugin_root/skills/dev-monitor/vendor/``.
+    - Verify resolved path is still under ``vendor_dir`` (traversal post-resolve).
+    - On any failure (whitelist miss, file missing, traversal) → 404.
+    - On success → 200 with ``Content-Type: application/javascript; charset=utf-8``
+      and ``Cache-Control: public, max-age=3600``.
+    """
+    # ── Guard 1: prefix + traversal + whitelist ──────────────────────────────
+    if not isinstance(path, str) or not path.startswith(_STATIC_PATH_PREFIX):
+        _send_plain_404(handler)
+        return
+    if ".." in path:
+        _send_plain_404(handler)
+        return
+    filename = path[len(_STATIC_PATH_PREFIX):]
+    if not filename or filename not in _STATIC_WHITELIST:
+        _send_plain_404(handler)
+        return
+
+    # ── Resolve vendor directory via plugin_root ──────────────────────────────
+    plugin_root = _server_attr(handler, "plugin_root") or _resolve_plugin_root()
+    vendor_dir = Path(plugin_root) / "skills" / "dev-monitor" / "vendor"
+    target = vendor_dir / filename
+
+    # ── Guard 2: post-resolve traversal check ────────────────────────────────
+    try:
+        resolved = target.resolve()
+        vendor_resolved = vendor_dir.resolve()
+        # resolved must be vendor_dir itself or a direct child
+        if vendor_resolved not in (resolved, *resolved.parents):
+            _send_plain_404(handler)
+            return
+    except (OSError, ValueError):
+        _send_plain_404(handler)
+        return
+
+    # ── File read ────────────────────────────────────────────────────────────
+    try:
+        data = target.read_bytes()
+    except OSError:
+        _send_plain_404(handler)
+        return
+
+    # ── Successful response ───────────────────────────────────────────────────
+    handler.send_response(200)
+    handler.send_header("Content-Type", "application/javascript; charset=utf-8")
+    handler.send_header("Cache-Control", "public, max-age=3600")
+    handler.send_header("Content-Length", str(len(data)))
+    handler.end_headers()
+    handler.wfile.write(data)
 
 
 def _is_pane_html_path(path: str) -> bool:
@@ -3679,6 +3907,271 @@ def _handle_pane_api(
 
 
 # ---------------------------------------------------------------------------
+# /api/graph endpoint (TSK-03-02)
+# ---------------------------------------------------------------------------
+
+_API_GRAPH_PATH = "/api/graph"
+_DEP_ANALYSIS_TIMEOUT = 3  # seconds
+
+# Active statuses that map to "running" (no signal needed)
+_RUNNING_STATUSES = {"[dd]", "[im]", "[ts]"}
+
+
+def _is_api_graph_path(path: str) -> bool:
+    """Return True iff *path* matches ``/api/graph`` exactly (query allowed).
+
+    - ``"/api/graph"`` → True
+    - ``"/api/graph?subproject=all"`` → True
+    - ``"/api/graph/"`` → False (trailing slash)
+    - ``"/api/graphql"`` → False
+
+    Matching uses :func:`urllib.parse.urlsplit` so the query string is stripped
+    before the equality comparison.
+    """
+    if not isinstance(path, str):
+        return False
+    return urlsplit(path).path == _API_GRAPH_PATH
+
+
+def _derive_node_status(task: "WorkItem", signals: "List[SignalEntry]") -> str:
+    """Derive display status for a graph node.
+
+    Priority order (higher overrides lower):
+      1. ``bypassed``:  task.bypassed == True
+      2. ``failed``:    .failed signal exists OR last_event ends with ".fail"
+      3. ``done``:      task.status == "[xx]"
+      4. ``running``:   .running signal exists OR status in {[dd],[im],[ts]}
+      5. ``pending``:   all other cases
+    """
+    # Build signal kind sets for this task's id
+    task_signals = {sig.kind for sig in signals if sig.task_id == task.id}
+
+    # 1. bypassed
+    if task.bypassed:
+        return "bypassed"
+
+    # 2. failed
+    has_failed_signal = "failed" in task_signals
+    last_ev = task.last_event or ""
+    has_fail_event = last_ev.endswith(".fail") or last_ev == "fail"
+    if has_failed_signal or has_fail_event:
+        return "failed"
+
+    # 3. done
+    if task.status == "[xx]":
+        return "done"
+
+    # 4. running
+    has_running_signal = "running" in task_signals
+    if has_running_signal or task.status in _RUNNING_STATUSES:
+        return "running"
+
+    # 5. pending
+    return "pending"
+
+
+def _build_graph_payload(
+    tasks: "List[WorkItem]",
+    signals: "List[SignalEntry]",
+    graph_stats: dict,
+    docs_dir_str: str,
+    subproject: str,
+) -> dict:
+    """Assemble the /api/graph response payload.
+
+    Args:
+        tasks: WorkItem list from scan_tasks().
+        signals: SignalEntry list from scan_signals().
+        graph_stats: dict from dep-analysis.py --graph-stats.
+        docs_dir_str: effective docs directory path string.
+        subproject: subproject query parameter value (e.g. "all" or "p1").
+
+    Returns:
+        dict with keys: subproject, docs_dir, generated_at, stats,
+        critical_path, nodes, edges.
+    """
+    # dep-analysis.py returns both "fan_out" and "fan_out_map" (alias).
+    # fan_in_map is injected locally by _handle_graph_api before calling here.
+    fan_in_map: dict = graph_stats.get("fan_in_map", {})
+    fan_out_map: dict = graph_stats.get("fan_out_map", {})
+    critical_path: dict = graph_stats.get("critical_path", {"nodes": [], "edges": []})
+    bottleneck_ids: list = graph_stats.get("bottleneck_ids", [])
+    cp_node_set = set(critical_path.get("nodes", []))
+
+    # Derive per-task status and count stats
+    status_counts = {"done": 0, "running": 0, "pending": 0, "failed": 0, "bypassed": 0}
+    nodes = []
+    task_id_set = {t.id for t in tasks}
+
+    for task in tasks:
+        node_status = _derive_node_status(task, signals)
+        status_counts[node_status] += 1
+
+        nodes.append({
+            "id": task.id,
+            "label": task.title or task.id,
+            "status": node_status,
+            "is_critical": task.id in cp_node_set,
+            "is_bottleneck": task.id in bottleneck_ids,
+            "fan_in": fan_in_map.get(task.id, 0),
+            "fan_out": fan_out_map.get(task.id, 0),
+            "bypassed": task.bypassed,
+            "wp_id": task.wp_id,
+            "depends": list(task.depends),
+        })
+
+    # Build edges from task depends relationships
+    edges = []
+    for task in tasks:
+        for dep_id in task.depends:
+            if dep_id in task_id_set:
+                edges.append({"source": dep_id, "target": task.id})
+
+    total = len(nodes)
+    stats = {
+        "total": total,
+        "done": status_counts["done"],
+        "running": status_counts["running"],
+        "pending": status_counts["pending"],
+        "failed": status_counts["failed"],
+        "bypassed": status_counts["bypassed"],
+        "max_chain_depth": graph_stats.get("max_chain_depth", 0),
+        "critical_path_length": len(critical_path.get("nodes", [])),
+        "bottleneck_count": len(bottleneck_ids),
+    }
+
+    return {
+        "subproject": subproject,
+        "docs_dir": docs_dir_str,
+        "generated_at": _now_iso_z(),
+        "stats": stats,
+        "critical_path": critical_path,
+        "nodes": nodes,
+        "edges": edges,
+    }
+
+
+def _call_dep_analysis_graph_stats(tasks_input: list) -> "Tuple[Optional[dict], str]":
+    """Run dep-analysis.py --graph-stats with *tasks_input* as JSON stdin.
+
+    Returns ``(graph_stats_dict, "")`` on success, or ``(None, error_message)``
+    on subprocess failure (timeout, OSError, non-zero exit, bad JSON).
+    """
+    dep_analysis_script = str(Path(__file__).resolve().parent / "dep-analysis.py")
+    try:
+        proc = subprocess.run(
+            [sys.executable, dep_analysis_script, "--graph-stats"],
+            input=json.dumps(tasks_input, ensure_ascii=False),
+            capture_output=True,
+            text=True,
+            timeout=_DEP_ANALYSIS_TIMEOUT,
+            check=False,
+            shell=False,
+        )
+    except (subprocess.TimeoutExpired, OSError, subprocess.SubprocessError) as exc:
+        return None, f"dep-analysis error: {exc!r}"
+
+    if proc.returncode != 0:
+        stderr_snippet = (proc.stderr or "").strip()[:200]
+        return None, f"dep-analysis exited {proc.returncode}: {stderr_snippet}"
+
+    try:
+        return json.loads(proc.stdout), ""
+    except (ValueError, TypeError) as exc:
+        return None, f"dep-analysis bad JSON: {exc!r}"
+
+
+def _build_fan_in_map(tasks: "List[WorkItem]") -> dict:
+    """Compute fan-in counts for each task from its dependents.
+
+    fan_in_map[t] = number of tasks that list *t* as a dependency.
+    Returns a dict with an entry for every task id, defaulting to 0.
+    """
+    fan_in_map: dict = {t.id: 0 for t in tasks}
+    for t in tasks:
+        for dep_id in t.depends:
+            if dep_id in fan_in_map:
+                fan_in_map[dep_id] += 1
+    return fan_in_map
+
+
+def _handle_graph_api(
+    handler,
+    *,
+    scan_tasks_fn: "Callable[[Any], List[WorkItem]]" = scan_tasks,  # type: ignore[assignment]
+    scan_signals_fn: "Callable[[], List[SignalEntry]]" = scan_signals,  # type: ignore[assignment]
+) -> None:
+    """Handle ``GET /api/graph`` on *handler*.
+
+    Flow:
+      1. Parse ?subproject= query param (default: "all").
+      2. Resolve effective_docs_dir from server.docs_dir + subproject.
+      3. Call scan_tasks_fn(effective_docs_dir) → List[WorkItem].
+      4. Call scan_signals_fn() → List[SignalEntry].
+      5. Serialize tasks to JSON and pipe to dep-analysis.py --graph-stats subprocess.
+      6. Assemble payload via _build_graph_payload().
+      7. Respond with JSON 200.
+
+    On subprocess failure (OSError, TimeoutExpired, non-zero exit, bad JSON):
+      respond with JSON 500.
+
+    No in-memory caching — every request triggers a fresh scan (AC-16).
+    """
+    # Parse subproject query param
+    parsed = urlsplit(handler.path)
+    qs = parse_qs(parsed.query)
+    subproject = (qs.get("subproject") or ["all"])[0] or "all"
+
+    # Resolve effective_docs_dir
+    base_docs_dir = _server_attr(handler, "docs_dir")
+    if subproject == "all":
+        effective_docs_dir = base_docs_dir
+    else:
+        effective_docs_dir = str(Path(base_docs_dir) / subproject)
+
+    # Scan tasks and signals (fresh, no cache)
+    try:
+        tasks = list(scan_tasks_fn(effective_docs_dir) or [])
+        signals = list(scan_signals_fn() or [])
+    except Exception as exc:
+        sys.stderr.write(f"/api/graph scan failed: {exc!r}\n")
+        _json_error(handler, 500, f"scan error: {exc!r}")
+        return
+
+    # Serialize tasks for dep-analysis.py --graph-stats stdin
+    tasks_input = [
+        {
+            "tsk_id": t.id,
+            "depends": ", ".join(t.depends) if t.depends else "-",
+            "status": t.status or "[ ]",
+            "bypassed": t.bypassed,
+            "title": t.title or "",
+            "wp_id": t.wp_id or "",
+        }
+        for t in tasks
+    ]
+
+    # Call dep-analysis.py --graph-stats via subprocess
+    graph_stats, err = _call_dep_analysis_graph_stats(tasks_input)
+    if graph_stats is None:
+        sys.stderr.write(f"/api/graph dep-analysis failed: {err}\n")
+        _json_error(handler, 500, err)
+        return
+
+    # Inject locally-computed fan_in_map (dep-analysis.py doesn't return it)
+    graph_stats.setdefault("fan_in_map", _build_fan_in_map(tasks))
+
+    # Build response payload
+    try:
+        payload = _build_graph_payload(tasks, signals, graph_stats, effective_docs_dir, subproject)
+    except Exception as exc:
+        sys.stderr.write(f"/api/graph build payload failed: {exc!r}\n")
+        _json_error(handler, 500, f"payload build error: {exc!r}")
+        return
+
+    _json_response(handler, 200, payload)
+
+
 # /api/state JSON snapshot endpoint (TSK-01-06)
 # ---------------------------------------------------------------------------
 
@@ -4259,6 +4752,10 @@ class MonitorHandler(BaseHTTPRequestHandler):
 
         if path == "/":
             self._route_root()
+        elif _is_static_path(path):
+            _handle_static(self, path)
+        elif _is_api_graph_path(self.path):
+            _handle_graph_api(self)
         elif _is_api_state_path(self.path):
             self._route_api_state()
         elif _is_pane_api_path(path):
@@ -4384,12 +4881,7 @@ class MonitorHandler(BaseHTTPRequestHandler):
 
     def _route_not_found(self) -> None:
         """Unmatched GET path → 404."""
-        body = b"404 Not Found"
-        self.send_response(404)
-        self.send_header("Content-Type", "text/plain; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+        _send_plain_404(self)
 
 
 class ThreadingMonitorServer(ThreadingHTTPServer):
@@ -4401,6 +4893,8 @@ class ThreadingMonitorServer(ThreadingHTTPServer):
         max_pane_lines (int): scrollback line cap for pane capture.
         refresh_seconds (int): dashboard meta-refresh interval.
         no_tmux (bool): when True, tmux calls should be skipped.
+        plugin_root (str): plugin root directory for static file serving
+            (TSK-03-03). Resolved by ``_resolve_plugin_root()`` in ``main()``.
 
     ``allow_reuse_address = True`` prevents ``OSError: Address already in use``
     when the server restarts quickly (e.g., during test runs).
@@ -4416,6 +4910,7 @@ class ThreadingMonitorServer(ThreadingHTTPServer):
         self.max_pane_lines: int = 500
         self.refresh_seconds: int = 3
         self.no_tmux: bool = False
+        self.plugin_root: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -4532,6 +5027,7 @@ def main(argv: Optional[List[str]] = None) -> None:
     server.max_pane_lines = args.max_pane_lines
     server.refresh_seconds = args.refresh_seconds
     server.no_tmux = args.no_tmux
+    server.plugin_root = _resolve_plugin_root()  # TSK-03-03: static file serving
 
     _setup_signal_handler(server, pid_path)
 
