@@ -65,10 +65,14 @@ _I18N: dict = {
 }
 
 
+def _normalize_lang(lang: str) -> str:
+    """lang 정규화 헬퍼. ko/en 이외의 값은 'ko'로 폴백."""
+    return lang if lang in _I18N else "ko"
+
+
 def _t(lang: str, key: str) -> str:
     """i18n 헬퍼. 미지원 lang은 'ko' fallback, 미지원 key는 key 자체 반환."""
-    table = _I18N.get(lang) or _I18N["ko"]
-    return table.get(key, key)
+    return _I18N[_normalize_lang(lang)].get(key, key)
 
 
 # ---------------------------------------------------------------------------
@@ -1544,7 +1548,7 @@ def _section_header(model: dict, lang: str = "ko", subproject: str = "") -> str:
         href_en = "?lang=en"
 
     lang_toggle_html = (
-        f'<nav class="lang-toggle" aria-label="Language">'
+        f'<nav class="lang-toggle">'
         f'<a href="{href_ko}">한</a>'
         f' <a href="{href_en}">EN</a>'
         f'</nav>\n'
@@ -2056,7 +2060,7 @@ def _render_task_row_v2(item, running_ids: set, failed_ids: set) -> str:
     )
 
 
-def _section_wp_cards(tasks, running_ids: set, failed_ids: set) -> str:
+def _section_wp_cards(tasks, running_ids: set, failed_ids: set, heading: str = "Work Packages") -> str:
     """WP card section: tasks grouped by wp_id, each WP as a v3 .wp card.
 
     v3 structure per card:
@@ -2068,9 +2072,11 @@ def _section_wp_cards(tasks, running_ids: set, failed_ids: set) -> str:
 
     Empty tasks list → empty-state. Individual empty WP → empty-state per card.
     WP name XSS is escaped via ``_esc``.
+
+    TSK-02-02: heading 파라미터 추가 — i18n 지원.
     """
     if not tasks:
-        return _empty_section("wp-cards", "Work Packages", "no tasks found — docs/tasks/ is empty")
+        return _empty_section("wp-cards", heading, "no tasks found — docs/tasks/ is empty")
 
     groups, order = _group_preserving_order(
         tasks, lambda item: getattr(item, "wp_id", None) or "WP-unknown"
@@ -2158,19 +2164,22 @@ def _section_wp_cards(tasks, running_ids: set, failed_ids: set) -> str:
             '</details>'
         )
 
-    return _section_wrap("wp-cards", "Work Packages", "\n".join(blocks))
+    return _section_wrap("wp-cards", heading, "\n".join(blocks))
 
 
-def _section_features(features, running_ids: set, failed_ids: set) -> str:
-    """Feature section: flat .trow list inside .features-wrap panel (no WP grouping)."""
+def _section_features(features, running_ids: set, failed_ids: set, heading: str = "Features") -> str:
+    """Feature section: flat .trow list inside .features-wrap panel (no WP grouping).
+
+    TSK-02-02: heading 파라미터 추가 — i18n 지원.
+    """
     if not features:
         return _empty_section(
-            "features", "Features", "no features found — docs/features/ is empty"
+            "features", heading, "no features found — docs/features/ is empty"
         )
     rows = "\n".join(
         _render_task_row_v2(item, running_ids, failed_ids) for item in features
     )
-    return _section_wrap("features", "Features", f'<div class="features-wrap">\n{rows}\n</div>')
+    return _section_wrap("features", heading, f'<div class="features-wrap">\n{rows}\n</div>')
 
 
 def _pane_attr(pane, key: str, default=""):
@@ -2251,17 +2260,19 @@ def _render_pane_row(pane, preview_lines: "Optional[str]" = "") -> str:
 _TOO_MANY_PANES_THRESHOLD = 20
 
 
-def _section_team(panes) -> str:
+def _section_team(panes, heading: str = "Team Agents (tmux)") -> str:
     """Team section: tmux panes + inline preview + expand button.
 
     When ``panes`` contains ≥ ``_TOO_MANY_PANES_THRESHOLD`` entries the
     preview is suppressed (``preview_lines=None``) to control subprocess cost.
     ``capture_pane()`` is the v1 implementation and is not called in that case.
+
+    TSK-02-02: heading 파라미터 추가 — i18n 지원.
     """
     if panes is None:
         return _empty_section(
             "team",
-            "Team Agents (tmux)",
+            heading,
             "tmux not available on this host — Team section shows no data,"
             " other sections work normally.",
             css="info",
@@ -2269,7 +2280,7 @@ def _section_team(panes) -> str:
 
     all_panes = list(panes)
     if not all_panes:
-        return _empty_section("team", "Team Agents (tmux)", "no tmux panes running")
+        return _empty_section("team", heading, "no tmux panes running")
 
     too_many = len(all_panes) >= _TOO_MANY_PANES_THRESHOLD
 
@@ -2298,7 +2309,7 @@ def _section_team(panes) -> str:
         )
 
     team_body = '<div class="panel team">\n' + "\n".join(blocks) + '\n</div>'
-    return _section_wrap("team", "Team Agents (tmux)", team_body)
+    return _section_wrap("team", heading, team_body)
 
 
 _SUBAGENT_INFO = (
@@ -2331,12 +2342,15 @@ def _render_subagent_row(sig) -> str:
     )
 
 
-def _section_subagents(signals) -> str:
-    """Subagent section: agent-pool signal slots grouped by scope."""
+def _section_subagents(signals, heading: str = "Subagents (agent-pool)") -> str:
+    """Subagent section: agent-pool signal slots grouped by scope.
+
+    TSK-02-02: heading 파라미터 추가 — i18n 지원.
+    """
     if not signals:
         return _section_wrap(
             "subagents",
-            "Subagents (agent-pool)",
+            heading,
             f'  {_SUBAGENT_INFO}\n  <p class="empty">no agent-pool signals</p>',
         )
 
@@ -2345,7 +2359,7 @@ def _section_subagents(signals) -> str:
         f'  {_SUBAGENT_INFO}\n'
         f'  <div class="panel"><div class="subs">\n{pills}\n  </div></div>'
     )
-    return _section_wrap("subagents", "Subagents (agent-pool)", subs_body)
+    return _section_wrap("subagents", heading, subs_body)
 
 
 def _status_class_for_phase(status_str: str) -> str:
@@ -2506,18 +2520,20 @@ def _live_activity_rows(tasks, features, limit=_LIVE_ACTIVITY_LIMIT):
     return collected[:limit]
 
 
-def _section_live_activity(model):
+def _section_live_activity(model, heading: str = "Live Activity"):
     """Live Activity 섹션을 렌더링한다.
 
     모든 WBS 태스크 + 피처의 phase_history_tail을 평탄화하여 최신 20건을
     내림차순으로 activity-row div 목록으로 렌더한다.
+
+    TSK-02-02: heading 파라미터 추가 — i18n 지원.
     """
     tasks = model.get("wbs_tasks") or []
     features = model.get("features") or []
     rows = _live_activity_rows(tasks, features)
 
     if not rows:
-        return _empty_section("activity", "Live Activity", "no recent events")
+        return _empty_section("activity", heading, "no recent events")
 
     row_htmls = []
     for item_id, entry, dt in rows:
@@ -2564,7 +2580,7 @@ def _section_live_activity(model):
         row_htmls.append(row_html)
 
     body = '<div class="panel"><div class="activity" aria-live="polite">\n' + "\n".join(row_htmls) + '\n</div></div>'
-    return _section_wrap("activity", "Live Activity", body)
+    return _section_wrap("activity", heading, body)
 
 
 def _phase_label(status_str):
@@ -2735,12 +2751,14 @@ def _timeline_svg(rows, span_minutes, now, max_rows=_TIMELINE_MAX_ROWS, W=600):
     return "\n".join(parts)
 
 
-def _section_phase_timeline(tasks, features):
+def _section_phase_timeline(tasks, features, heading: str = "Phase Timeline"):
     """Phase Timeline 섹션을 렌더링한다 (v3: CSS positional .tl-track/.seg divs).
 
     시간축: 현재 - 60분 = left:0%, 현재 = left:100%.
     Task 수 50 초과 시 상위 50건만 렌더 후 +N more 링크 표시.
     SVG 사용 안 함 — CSS left%/width% 배치.
+
+    TSK-02-02: heading 파라미터 추가 — i18n 지원.
     """
     now = datetime.now(timezone.utc)
     rows = _timeline_rows(tasks, features, now)
@@ -2750,7 +2768,7 @@ def _section_phase_timeline(tasks, features):
 
     if not visible:
         body = '<p class="tl-empty">no phase history</p>'
-        return _section_wrap("timeline", "Phase Timeline", body)
+        return _section_wrap("timeline", heading, body)
 
     span_sec = _TIMELINE_SPAN_MINUTES * 60
     origin = now - timedelta(minutes=_TIMELINE_SPAN_MINUTES)
@@ -2846,7 +2864,7 @@ def _section_phase_timeline(tasks, features):
         + '\n</div>'
         + more_html
     )
-    return _section_wrap("timeline", "Phase Timeline", body)
+    return _section_wrap("timeline", heading, body)
 
 # Compiled once at module load; used by _wrap_with_data_section.
 _DATA_SECTION_TAG_RE = re.compile(r'(<(?:section|header)(\s[^>]*)?>)', re.DOTALL)
@@ -3170,9 +3188,7 @@ def render_dashboard(model: dict, lang: str = "ko", subproject: str = "") -> str
     if not isinstance(model, dict):
         model = {}
 
-    # Normalize lang: ko/en 이외는 ko 폴백.
-    if lang not in _I18N:
-        lang = "ko"
+    lang = _normalize_lang(lang)
 
     # subproject: model에서도 읽을 수 있도록 fallback.
     if not subproject:
@@ -3788,6 +3804,8 @@ class MonitorHandler(BaseHTTPRequestHandler):
         :func:`_build_state_snapshot` (dict lists) because the renderer
         accesses fields via ``getattr(item, "id")``; dict items would silently
         render as empty spans.
+
+        TSK-02-02: Parses ?lang= and ?subproject= query parameters.
         """
         server = getattr(self, "server", None)
         refresh_seconds = int(getattr(server, "refresh_seconds", _DEFAULT_REFRESH_SECONDS))
@@ -3804,7 +3822,16 @@ class MonitorHandler(BaseHTTPRequestHandler):
             list_tmux_panes=_tmux_fn,
         )
         model = {**state, "refresh_seconds": refresh_seconds}
-        html_body = render_dashboard(model)
+
+        # Parse ?lang= and ?subproject= query parameters (TSK-02-02).
+        query_string = urlsplit(self.path).query or ""
+        query_params = parse_qs(query_string)
+
+        lang = _normalize_lang((query_params.get("lang") or ["ko"])[0])
+
+        subproject = (query_params.get("subproject") or [""])[0]
+
+        html_body = render_dashboard(model, lang=lang, subproject=subproject)
         _send_html_response(self, 200, html_body)
 
     def _route_api_state(self) -> None:
