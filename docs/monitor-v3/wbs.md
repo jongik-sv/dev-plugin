@@ -160,7 +160,7 @@ monitor-server, monitor-launcher
 - category: development
 - domain: backend
 - model: sonnet
-- status: [dd]
+- status: [xx]
 - priority: high
 - assignee: -
 - schedule: 2026-04-24 ~ 2026-04-24
@@ -200,7 +200,7 @@ monitor-server, monitor-launcher
 - category: development
 - domain: fullstack
 - model: opus
-- status: [dd]
+- status: [im]
 - priority: high
 - assignee: -
 - schedule: 2026-04-25 ~ 2026-04-26

@@ -104,6 +104,9 @@ _CAPTURE_PANE_TIMEOUT = 3
 _AGENT_POOL_DIR_PREFIX = "agent-pool-signals-"
 _AGENT_POOL_SCOPE_PREFIX = "agent-pool:"
 
+# TSK-01-01: WP-scoped signal task_id prefix pattern (e.g. "WP-01-").
+_WP_SIGNAL_PREFIX_RE = re.compile(r"^WP-\d{2}-")
+
 
 # ---------------------------------------------------------------------------
 # Dataclasses (TRD §5.2, §5.3)
@@ -1478,6 +1481,35 @@ body[data-filter="bypass"]  .trow:not([data-status="bypass"]) { display: none; }
 .kpi-num { font-size: 1.8rem; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.1; display: block; }
 .kpi-sparkline { display: block; width: 100%; height: 24px; margin-top: 0.25rem; }
 .kpi-section { padding: 0.75rem 0; margin-bottom: 0.5rem; }
+
+/* ---------- subproject tabs (TSK-01-02) ---------- */
+.subproject-tabs{
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: 0.5rem 0 0;
+  margin: 0 0 0.5rem;
+  border-bottom: 1px solid var(--line);
+  font-size: var(--font-body);
+  font-family: var(--sans);
+}
+.subproject-tabs a{
+  color: var(--ink-2);
+  text-decoration: none;
+  padding: 0.4rem 0.8rem;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  transition: color 0.15s, border-color 0.15s;
+}
+.subproject-tabs a:hover{
+  color: var(--ink);
+}
+.subproject-tabs a.active,
+.subproject-tabs a[aria-current="page"]{
+  color: var(--accent-hi);
+  border-bottom: 2px solid var(--accent);
+  font-weight: 600;
+}
 
 /* ---------- responsive ---------- */
 @media (max-width: 1280px){
@@ -3223,6 +3255,50 @@ def _wrap_with_data_section(section_html: str, key: str) -> str:
     return f'<div {attr}>{section_html}</div>'
 
 
+# ---------------------------------------------------------------------------
+# TSK-01-02: Subproject tabs nav section
+# ---------------------------------------------------------------------------
+
+
+def _section_subproject_tabs(model: dict) -> str:
+    """Render the subproject tabs nav bar (TSK-01-02).
+
+    Returns an empty string in legacy mode (``is_multi_mode=False``).
+    In multi mode returns a ``<nav class="subproject-tabs">`` element with
+    ``all`` + one link per subproject.
+
+    Current tab gets ``aria-current="page"`` and ``class="active"``.
+    Existing ``lang`` query parameter is preserved in each link.
+
+    Args:
+        model: render_state dict with ``is_multi_mode``, ``available_subprojects``,
+               ``subproject``, and optionally ``lang`` keys.
+
+    Returns:
+        HTML string (empty if legacy mode).
+    """
+    if not model.get("is_multi_mode"):
+        return ""
+
+    current_sp = model.get("subproject") or "all"
+    available = model.get("available_subprojects") or []
+    lang = model.get("lang") or ""
+    lang_qs = f"&lang={_esc(lang)}" if lang and lang != "ko" else ""
+
+    def _tab(sp: str) -> str:
+        href = f"?subproject={_esc(sp)}{lang_qs}"
+        if sp == current_sp:
+            return (
+                f'<a href="{href}" class="active" aria-current="page">'
+                f'{_esc(sp)}</a>'
+            )
+        return f'<a href="{href}">{_esc(sp)}</a>'
+
+    tabs = [_tab("all")] + [_tab(sp) for sp in available]
+    inner = " | ".join(tabs)
+    return f'<nav class="subproject-tabs" data-section="subproject-tabs">{inner}</nav>\n'
+
+
 def _build_dashboard_body(s: dict) -> str:
     """Assemble section HTMLs into the ``<body>`` inner content string (v3 layout).
 
@@ -3235,10 +3311,13 @@ def _build_dashboard_body(s: dict) -> str:
     sticky/backdrop effect aligns with the KPI strip and grid columns.
     """
     wbs_landing_pad = '<a id="wbs" aria-hidden="true" tabindex="-1"></a>\n'
+    # TSK-01-02: subproject-tabs is optional (empty string in legacy mode)
+    tabs_html = s.get("subproject-tabs", "")
 
     return "".join([
         '<div class="shell">\n',
         s["header"], "\n",
+        tabs_html,
         s["kpi"], "\n",
         '  <div class="grid">\n',
         '    <div class="col">\n',
@@ -3303,7 +3382,10 @@ def render_dashboard(model: dict, lang: str = "ko", subproject: str = "") -> str
 
     # Build each section HTML.  ``header`` is excluded from data-section
     # injection (it is nav metadata, not a JS partial-update target).
+    # TSK-01-02: subproject-tabs is also excluded from wrap (it has its own
+    # data-section already via _section_subproject_tabs).
     header_html = _section_header(model, lang=lang, subproject=subproject)
+    tabs_html = _section_subproject_tabs(model)
     sections: dict = {
         "kpi":            _section_kpi(model),
         "wp-cards":       _section_wp_cards(tasks, running_ids, failed_ids,
@@ -3324,7 +3406,7 @@ def render_dashboard(model: dict, lang: str = "ko", subproject: str = "") -> str
     for key, html in sections.items():
         sections[key] = _wrap_with_data_section(html, key)
 
-    body = _build_dashboard_body({**sections, "header": header_html})
+    body = _build_dashboard_body({**sections, "header": header_html, "subproject-tabs": tabs_html})
 
     return "".join([
         '<!DOCTYPE html>\n',
@@ -3764,6 +3846,131 @@ def _filter_signals_by_project(
     return result
 
 
+# ---------------------------------------------------------------------------
+# TSK-01-01: /api/state 쿼리 파라미터 헬퍼 (순수 함수 — 테스트 용이)
+# ---------------------------------------------------------------------------
+
+
+def _parse_state_query_params(query_string: str) -> dict:
+    """Parse /api/state query parameters into a dict with typed defaults.
+
+    Parameters
+    ----------
+    query_string:
+        Raw query string (without leading ``?``). Empty string is accepted.
+
+    Returns
+    -------
+    dict with keys:
+        ``subproject`` (str, default ``"all"``)
+        ``lang``       (str, default ``"ko"``)
+        ``include_pool`` (bool, default ``False``)
+        ``refresh``    (str | None, default ``None``)
+    """
+    from urllib.parse import parse_qs
+
+    parsed = parse_qs(query_string, keep_blank_values=False)
+
+    subproject = parsed.get("subproject", ["all"])[0] or "all"
+    lang = parsed.get("lang", ["ko"])[0] or "ko"
+    raw_pool = parsed.get("include_pool", ["0"])[0]
+    include_pool = raw_pool.strip() == "1"
+    refresh_vals = parsed.get("refresh")
+    refresh = refresh_vals[0] if refresh_vals else None
+
+    return {
+        "subproject": subproject,
+        "lang": lang,
+        "include_pool": include_pool,
+        "refresh": refresh,
+    }
+
+
+def _resolve_effective_docs_dir(docs_dir: str, subproject: str) -> str:
+    """Resolve the effective docs directory for the given subproject.
+
+    ``subproject == "all"`` or empty/None → *docs_dir* unchanged.
+    Otherwise returns ``os.path.join(docs_dir, subproject)``.
+
+    Path existence is *not* checked here — callers (scan_tasks/scan_features)
+    return empty lists for non-existent directories.
+    """
+    if not subproject or subproject == "all":
+        return docs_dir
+    return os.path.join(docs_dir, subproject)
+
+
+def _get_field(item, field: str, default: str = "") -> str:
+    """Return *field* from *item* regardless of whether it is a dict or dataclass.
+
+    Centralises the ``isinstance(item, dict)`` branching used in several filter
+    helpers so each call site only needs one expression instead of a ternary.
+    """
+    if isinstance(item, dict):
+        return item.get(field, default) or default
+    return getattr(item, field, default) or default
+
+
+def _apply_subproject_filter(raw: dict, subproject: str) -> dict:
+    """Apply subproject filter to shared_signals and tmux_panes in *raw*.
+
+    When ``subproject == "all"`` the dict is returned unchanged.
+
+    For a specific subproject, ``shared_signals`` entries whose ``task_id``
+    starts with a WP prefix (e.g. ``"WP-00-"`` signals) are kept only if
+    they do *not* start with ``"WP-00-"`` — or rather: we keep signals that
+    are either:
+    - not WP-scoped (task_id does not match ``WP-NN-`` pattern), or
+    - WP-scoped to the requested subproject.
+
+    ``tmux_panes`` entries are filtered by ``window_name`` containing the
+    subproject slug.
+
+    This is a pure function — *raw* is not mutated in-place; a new dict is
+    returned with the filtered lists.
+    """
+    if subproject == "all":
+        return raw
+
+    result = dict(raw)
+    sp_lower = subproject.lower()
+
+    # Filter shared_signals: keep non-WP signals, and WP-scoped signals only
+    # when the task_id contains the requested subproject slug.
+    # (Best-effort heuristic; full naming convention wired in TSK-00-03.)
+    raw_signals = raw.get("shared_signals") or []
+
+    def _sig_matches(sig) -> bool:
+        task_id = _get_field(sig, "task_id")
+        if _WP_SIGNAL_PREFIX_RE.match(task_id):
+            return sp_lower in task_id.lower()
+        return True  # non-WP signals are kept
+
+    result["shared_signals"] = [s for s in raw_signals if _sig_matches(s)]
+
+    # Filter tmux_panes: keep panes whose window_name contains subproject slug.
+    raw_panes = raw.get("tmux_panes") or []
+
+    def _pane_matches(p) -> bool:
+        return sp_lower in _get_field(p, "window_name").lower()
+
+    result["tmux_panes"] = [p for p in raw_panes if _pane_matches(p)]
+
+    return result
+
+
+def _apply_include_pool(raw: dict, include_pool: bool) -> dict:
+    """Zero out agent_pool_signals when *include_pool* is False.
+
+    Returns a new dict (does not mutate *raw*).
+    """
+    if include_pool:
+        return raw
+    result = dict(raw)
+    result["agent_pool_signals"] = []
+    return result
+
+
 def _build_render_state(
     project_root: str,
     docs_dir: str,
@@ -3771,6 +3978,8 @@ def _build_render_state(
     scan_features: Callable[[Any], List[WorkItem]],
     scan_signals: Callable[[], List[SignalEntry]],
     list_tmux_panes: Callable[[], Optional[List[PaneInfo]]],
+    subproject: str = "all",
+    lang: str = "ko",
 ) -> dict:
     """Collect state with raw dataclass instances intact (for HTML rendering).
 
@@ -3781,9 +3990,19 @@ def _build_render_state(
     found by TSK-03-02 QA retest: task-row id/title/status spans rendered as
     empty strings because ``getattr(dict, "id")`` returns ``None``).
 
-    Returns a dict with the same 8 keys as :func:`_build_state_snapshot` but
-    list entries remain as ``WorkItem`` / ``SignalEntry`` / ``PaneInfo``
-    dataclass instances.
+    Returns a dict with the 8 original keys plus 4 new keys added by
+    TSK-01-02: ``project_name``, ``subproject``, ``available_subprojects``,
+    ``is_multi_mode``. The 5 list-valued keys remain as dataclass instances.
+
+    Args:
+        project_root: absolute project root path.
+        docs_dir: effective docs directory (may be a subproject subdir).
+        scan_tasks: callable that accepts docs_dir and returns WorkItem list.
+        scan_features: callable that accepts docs_dir and returns WorkItem list.
+        scan_signals: callable that returns SignalEntry list.
+        list_tmux_panes: callable that returns PaneInfo list or None.
+        subproject: active subproject slug (default ``"all"``).
+        lang: active language (default ``"ko"``).
     """
     tasks = list(scan_tasks(docs_dir) or [])
     features = list(scan_features(docs_dir) or [])
@@ -3791,6 +4010,14 @@ def _build_render_state(
         scan_signals() or []
     )
     panes = list_tmux_panes()
+
+    # TSK-01-01 / TSK-01-02: discover subprojects from original docs_dir root
+    # (docs_dir may already be narrowed to subproject; use project_root to
+    # find the original docs root — but for discover we need the top-level
+    # docs dir, which is stored in the server's docs_dir attribute).
+    available_subprojects = discover_subprojects(docs_dir)
+    is_multi_mode = len(available_subprojects) > 0
+    project_name = os.path.basename(os.path.normpath(project_root)) if project_root else ""
 
     return {
         "generated_at": _now_iso_z(),
@@ -3801,6 +4028,12 @@ def _build_render_state(
         "shared_signals": shared_signals,
         "agent_pool_signals": agent_pool_signals,
         "tmux_panes": panes,
+        # TSK-01-02: new fields
+        "project_name": project_name,
+        "subproject": subproject,
+        "available_subprojects": available_subprojects,
+        "is_multi_mode": is_multi_mode,
+        "lang": lang,
     }
 
 
@@ -3898,18 +4131,68 @@ def _handle_api_state(
     (the HTTP bootstrap — TSK-01-02 / TSK-01-01 — will wire these). Missing
     attributes degrade to empty strings so the endpoint still responds.
 
+    TSK-01-01 extension: parses ``?subproject=``, ``?lang=``,
+    ``?include_pool=``, ``?refresh=`` query parameters and injects 7 new
+    top-level fields (``subproject``, ``available_subprojects``,
+    ``is_multi_mode``, ``project_name``, ``generated_at`` (pre-existing),
+    ``project_root`` (pre-existing), ``docs_dir`` (pre-existing)) into the
+    response.  Existing 8 keys are preserved unchanged for legacy
+    compatibility.
+
     All scanner exceptions are caught and mapped to a 500 JSON envelope; one
     line is logged to stderr so the server operator can see the failure.
     """
     try:
+        # --- 1. Query parameter parsing (TSK-01-01) ---
+        raw_path = getattr(handler, "path", "") or ""
+        _qs = urlsplit(raw_path).query
+        qp = _parse_state_query_params(_qs)
+        subproject: str = qp["subproject"]
+        include_pool: bool = qp["include_pool"]
+
+        project_root: str = _server_attr(handler, "project_root")
+        docs_dir: str = _server_attr(handler, "docs_dir")
+
+        # --- 2. Subproject discovery ---
+        available_subprojects: List[str] = discover_subprojects(docs_dir)
+        is_multi_mode: bool = bool(available_subprojects)
+
+        # --- 3. effective_docs_dir for scan_tasks / scan_features ---
+        effective_docs_dir: str = _resolve_effective_docs_dir(docs_dir, subproject)
+
+        # --- 4. Build base snapshot using effective_docs_dir ---
         payload = _build_state_snapshot(
-            project_root=_server_attr(handler, "project_root"),
-            docs_dir=_server_attr(handler, "docs_dir"),
+            project_root=project_root,
+            docs_dir=effective_docs_dir,
             scan_tasks=scan_tasks,
             scan_features=scan_features,
             scan_signals=scan_signals,
             list_tmux_panes=list_tmux_panes,
         )
+
+        # --- 5. Post-processing pipeline ---
+        # 5a. Subproject filter on shared_signals / tmux_panes
+        payload = _apply_subproject_filter(payload, subproject)
+
+        # 5b. agent_pool_signals exclusion when include_pool=0 (default)
+        payload = _apply_include_pool(payload, include_pool)
+
+        # --- 6. Inject 7 new top-level fields (TSK-01-01 schema extension) ---
+        project_name: str = (
+            getattr(getattr(handler, "server", None), "project_name", None)
+            or os.path.basename(project_root)
+            or ""
+        )
+        payload = {
+            **payload,
+            "subproject": subproject,
+            "available_subprojects": available_subprojects,
+            "is_multi_mode": is_multi_mode,
+            "project_name": project_name,
+        }
+        # generated_at / project_root / docs_dir are already in payload
+        # (from _build_state_snapshot), so they satisfy the "7 fields" count.
+
     except Exception as exc:  # 방어 계층 — 일반 경로 미도달
         sys.stderr.write(f"/api/state build failed: {exc!r}\n")
         _json_error(handler, 500, f"internal error: {exc!r}")
@@ -3992,7 +4275,11 @@ class MonitorHandler(BaseHTTPRequestHandler):
     # ------------------------------------------------------------------
 
     def _route_root(self) -> None:
-        """GET / — build model dict and render dashboard HTML.
+        """GET / — parse query, build model dict and render dashboard HTML.
+
+        TSK-01-02: Parses ``?subproject=`` and ``?lang=`` query parameters,
+        discovers subprojects, resolves effective_docs_dir, and composes
+        filter closures before calling :func:`_build_render_state`.
 
         Uses :func:`_build_render_state` (raw dataclass lists) instead of
         :func:`_build_state_snapshot` (dict lists) because the renderer
@@ -4001,20 +4288,80 @@ class MonitorHandler(BaseHTTPRequestHandler):
 
         TSK-02-02: Parses ?lang= and ?subproject= query parameters.
         """
+        from urllib.parse import parse_qs
+
         server = getattr(self, "server", None)
         refresh_seconds = int(getattr(server, "refresh_seconds", _DEFAULT_REFRESH_SECONDS))
 
         no_tmux = bool(getattr(server, "no_tmux", False))
         _tmux_fn = (lambda: None) if no_tmux else list_tmux_panes
 
+        project_root = _server_attr(self, "project_root")
+        base_docs_dir = _server_attr(self, "docs_dir")
+
+        # --- TSK-01-02: query parsing ---
+        query_string = urlsplit(self.path).query or ""
+        qs = parse_qs(query_string, keep_blank_values=False)
+        raw_sp = (qs.get("subproject") or ["all"])[0] or "all"
+        lang = (qs.get("lang") or ["ko"])[0] or "ko"
+
+        # Discover available subprojects from base docs dir
+        available_subprojects = discover_subprojects(base_docs_dir)
+        is_multi_mode = len(available_subprojects) > 0
+
+        # Validate subproject whitelist (path-traversal guard + fallback)
+        if raw_sp != "all" and raw_sp not in available_subprojects:
+            sys.stderr.write(
+                f"[monitor] unknown subproject={raw_sp!r}, falling back to 'all'\n"
+            )
+            raw_sp = "all"
+        subproject = raw_sp
+
+        # Resolve effective docs dir
+        effective_docs_dir = _resolve_effective_docs_dir(base_docs_dir, subproject)
+
+        # Build project_name for filter helpers
+        project_name: str = (
+            getattr(server, "project_name", None)
+            or os.path.basename(os.path.normpath(project_root))
+            or ""
+        )
+
+        # Compose filter closures (layer 1: project, layer 2: subproject)
+        def _scan_signals_f() -> List[SignalEntry]:
+            raw_sigs = scan_signals()
+            if project_name:
+                raw_sigs = _filter_signals_by_project(raw_sigs, project_name)
+            if subproject != "all" and project_name:
+                filtered = _filter_by_subproject(raw_sigs, subproject, project_name)
+                raw_sigs = filtered["signals"]
+            return raw_sigs
+
+        def _list_panes_f() -> Optional[List[PaneInfo]]:
+            raw_panes = _tmux_fn()
+            if raw_panes is None:
+                return None
+            if project_root and project_name:
+                raw_panes = _filter_panes_by_project(raw_panes, project_root, project_name)
+            if subproject != "all" and project_name:
+                filtered = _filter_by_subproject(raw_panes, subproject, project_name)
+                raw_panes = filtered["panes"]
+            return raw_panes
+
         state = _build_render_state(
-            project_root=_server_attr(self, "project_root"),
-            docs_dir=_server_attr(self, "docs_dir"),
+            project_root=project_root,
+            docs_dir=effective_docs_dir,
             scan_tasks=scan_tasks,
             scan_features=scan_features,
-            scan_signals=scan_signals,
-            list_tmux_panes=_tmux_fn,
+            scan_signals=_scan_signals_f,
+            list_tmux_panes=_list_panes_f,
+            subproject=subproject,
+            lang=lang,
         )
+        # Override available_subprojects and is_multi_mode from top-level docs dir
+        # (_build_render_state computes them from effective_docs_dir which may be a subdir)
+        state["available_subprojects"] = available_subprojects
+        state["is_multi_mode"] = is_multi_mode
         model = {**state, "refresh_seconds": refresh_seconds}
 
         # Parse ?lang= and ?subproject= query parameters (TSK-02-02).

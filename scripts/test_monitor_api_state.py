@@ -618,9 +618,10 @@ class MonitorHandlerRoutingTests(unittest.TestCase):
 
 
 class ApiStateSchemaRegressionTests(unittest.TestCase):
-    """`_build_state_snapshot` 최상위 키 집합이 v1 스냅샷과 정확히 일치."""
+    """`_build_state_snapshot` 최상위 키 집합이 v1 스냅샷 8개 키를 모두 포함."""
 
     # v1 /api/state 응답 구조 스냅샷 (TSK-01-06 수락 기준 기준)
+    # TSK-01-01에서 신규 필드 7개가 추가되므로 완화: 기존 8개 키 포함 여부만 검사
     _V1_KEYS = frozenset({
         "generated_at",
         "project_root",
@@ -632,8 +633,8 @@ class ApiStateSchemaRegressionTests(unittest.TestCase):
         "tmux_panes",
     })
 
-    def test_api_state_keys_match_v1_snapshot(self):
-        """`_build_state_snapshot` 반환 dict의 최상위 키 집합이 v1 스냅샷 8개 키와 정확히 일치."""
+    def test_api_state_v1_keys_all_present(self):
+        """`_build_state_snapshot` 반환 dict에 v1 스냅샷 8개 키가 모두 존재 (레거시 호환)."""
         out = _snapshot(
             tasks=[_make_task()],
             features=[_make_feat()],
@@ -642,12 +643,282 @@ class ApiStateSchemaRegressionTests(unittest.TestCase):
             docs_dir="docs/monitor",
         )
         actual_keys = frozenset(out.keys())
+        missing = self._V1_KEYS - actual_keys
         self.assertEqual(
-            actual_keys,
-            self._V1_KEYS,
-            f"Key mismatch — extra: {actual_keys - self._V1_KEYS!r}, "
-            f"missing: {self._V1_KEYS - actual_keys!r}",
+            missing,
+            frozenset(),
+            f"v1 키 누락 — missing: {missing!r}",
         )
+
+
+# ---------------------------------------------------------------------------
+# TSK-01-01: /api/state 쿼리 파라미터 & 응답 스키마 확장
+# ---------------------------------------------------------------------------
+
+
+def _make_api_state_handler(
+    project_root: str = "/abs",
+    docs_dir: str = "docs/monitor",
+    path: str = "/api/state",
+    tasks=None,
+    features=None,
+    signals=None,
+    panes=None,
+) -> "_FakeHandler":
+    """_handle_api_state 에 필요한 fake handler 생성 헬퍼."""
+    h = _FakeHandler()
+    h.path = path
+    h.server = _FakeServer(project_root=project_root, docs_dir=docs_dir)
+    return h
+
+
+class ParseStateQueryParamsTests(unittest.TestCase):
+    """`_parse_state_query_params` 단위 테스트."""
+
+    def _parse(self, qs: str) -> dict:
+        return monitor_server._parse_state_query_params(qs)
+
+    def test_empty_query_string_returns_defaults(self):
+        result = self._parse("")
+        self.assertEqual(result["subproject"], "all")
+        self.assertEqual(result["lang"], "ko")
+        self.assertEqual(result["include_pool"], False)
+        self.assertIsNone(result["refresh"])
+
+    def test_subproject_billing_parsed(self):
+        result = self._parse("subproject=billing")
+        self.assertEqual(result["subproject"], "billing")
+
+    def test_subproject_all_explicit(self):
+        result = self._parse("subproject=all")
+        self.assertEqual(result["subproject"], "all")
+
+    def test_lang_en_parsed(self):
+        result = self._parse("lang=en")
+        self.assertEqual(result["lang"], "en")
+
+    def test_lang_ko_explicit(self):
+        result = self._parse("lang=ko")
+        self.assertEqual(result["lang"], "ko")
+
+    def test_include_pool_1_is_true(self):
+        result = self._parse("include_pool=1")
+        self.assertEqual(result["include_pool"], True)
+
+    def test_include_pool_0_is_false(self):
+        result = self._parse("include_pool=0")
+        self.assertEqual(result["include_pool"], False)
+
+    def test_include_pool_missing_defaults_false(self):
+        result = self._parse("subproject=billing")
+        self.assertEqual(result["include_pool"], False)
+
+    def test_refresh_numeric_parsed(self):
+        result = self._parse("refresh=5")
+        self.assertEqual(result["refresh"], "5")
+
+    def test_multiple_params_parsed(self):
+        result = self._parse("subproject=billing&lang=en&include_pool=1")
+        self.assertEqual(result["subproject"], "billing")
+        self.assertEqual(result["lang"], "en")
+        self.assertEqual(result["include_pool"], True)
+
+
+class ResolveEffectiveDocsDirTests(unittest.TestCase):
+    """`_resolve_effective_docs_dir` 단위 테스트."""
+
+    def _resolve(self, docs_dir: str, subproject: str) -> str:
+        return monitor_server._resolve_effective_docs_dir(docs_dir, subproject)
+
+    def test_subproject_all_returns_docs_dir_unchanged(self):
+        self.assertEqual(self._resolve("docs", "all"), "docs")
+
+    def test_subproject_billing_returns_joined_path(self):
+        self.assertEqual(self._resolve("docs", "billing"), os.path.join("docs", "billing"))
+
+    def test_subproject_reporting_returns_joined_path(self):
+        self.assertEqual(self._resolve("/abs/docs", "reporting"), "/abs/docs/reporting")
+
+    def test_empty_subproject_treated_as_all(self):
+        """subproject == "" 또는 None 이면 docs_dir 그대로 반환."""
+        self.assertEqual(self._resolve("docs", ""), "docs")
+
+    def test_subproject_all_with_absolute_path(self):
+        self.assertEqual(self._resolve("/proj/docs/monitor", "all"), "/proj/docs/monitor")
+
+
+class ApplyIncludePoolTests(unittest.TestCase):
+    """`_apply_include_pool` 단위 테스트."""
+
+    def _apply(self, raw: dict, include_pool: bool) -> dict:
+        return monitor_server._apply_include_pool(raw, include_pool)
+
+    def test_include_pool_false_replaces_agent_pool_signals_with_empty(self):
+        raw = {
+            "agent_pool_signals": [{"task_id": "A"}],
+            "wbs_tasks": [],
+        }
+        result = self._apply(raw, False)
+        self.assertEqual(result["agent_pool_signals"], [])
+
+    def test_include_pool_true_preserves_agent_pool_signals(self):
+        signals = [{"task_id": "A"}, {"task_id": "B"}]
+        raw = {"agent_pool_signals": signals, "wbs_tasks": []}
+        result = self._apply(raw, True)
+        self.assertEqual(result["agent_pool_signals"], signals)
+
+    def test_include_pool_false_does_not_touch_other_keys(self):
+        raw = {
+            "agent_pool_signals": [{"task_id": "X"}],
+            "shared_signals": [{"task_id": "Y"}],
+            "wbs_tasks": [1, 2],
+        }
+        result = self._apply(raw, False)
+        self.assertEqual(result["shared_signals"], [{"task_id": "Y"}])
+        self.assertEqual(result["wbs_tasks"], [1, 2])
+
+
+class ApiStateSubprojectAndSchemaTests(unittest.TestCase):
+    """TSK-01-01 acceptance 테스트 — subproject, include_pool, 신규 7개 필드."""
+
+    _NEW_FIELDS = frozenset({
+        "subproject",
+        "available_subprojects",
+        "is_multi_mode",
+        "project_name",
+        "generated_at",
+        "project_root",
+        "docs_dir",
+    })
+
+    def _call_handle_api_state(
+        self,
+        query_string: str = "",
+        project_root: str = "/abs",
+        docs_dir: str = "docs/monitor",
+        tasks=None,
+        features=None,
+        signals=None,
+        panes=None,
+        discover_fn=None,
+    ) -> dict:
+        """_handle_api_state 를 fake handler 로 호출하고 응답 body dict 반환."""
+        path = f"/api/state?{query_string}" if query_string else "/api/state"
+        h = _FakeHandler()
+        h.path = path
+        h.server = _FakeServer(project_root=project_root, docs_dir=docs_dir)
+
+        _tasks = tasks if tasks is not None else []
+        _feats = features if features is not None else []
+        _sigs = signals if signals is not None else []
+        _panes = panes if panes is not None else []
+
+        if discover_fn is None:
+            # 기본: single-mode (서브프로젝트 없음)
+            discover_fn = lambda _d: []
+
+        with mock.patch.object(monitor_server, "discover_subprojects", discover_fn, create=True):
+            monitor_server._handle_api_state(
+                h,
+                scan_tasks=lambda _d: _tasks,
+                scan_features=lambda _d: _feats,
+                scan_signals=lambda: _sigs,
+                list_tmux_panes=lambda: _panes,
+            )
+
+        self.assertEqual(h.status, 200)
+        return json.loads(h.wfile.getvalue().decode("utf-8"))
+
+    def test_api_state_subproject_query(self):
+        """`?subproject=billing` 응답에 "subproject":"billing" 필드 포함."""
+        body = self._call_handle_api_state(
+            query_string="subproject=billing",
+            discover_fn=lambda _d: ["billing", "reporting"],
+        )
+        self.assertEqual(body.get("subproject"), "billing")
+        self.assertIn("available_subprojects", body)
+        self.assertIn("billing", body["available_subprojects"])
+
+    def test_api_state_subproject_all_default(self):
+        """`?subproject=all` 또는 파라미터 미지정 시 "subproject":"all" 반환."""
+        body = self._call_handle_api_state(query_string="")
+        self.assertEqual(body.get("subproject"), "all")
+
+    def test_api_state_include_pool_default_excluded(self):
+        """`include_pool` 없이 요청 시 agent_pool_signals=[]."""
+        pool_sig = _make_signal(scope="agent-pool:ts1", task_id="A")
+        body = self._call_handle_api_state(
+            query_string="",
+            signals=[pool_sig],
+        )
+        self.assertEqual(body.get("agent_pool_signals"), [])
+
+    def test_api_state_include_pool_flag(self):
+        """`?include_pool=1` 요청 시 agent_pool_signals에 실제 신호 포함."""
+        pool_sig = _make_signal(scope="agent-pool:ts1", task_id="A")
+        body = self._call_handle_api_state(
+            query_string="include_pool=1",
+            signals=[pool_sig],
+        )
+        pool_ids = [s.get("task_id") for s in (body.get("agent_pool_signals") or [])]
+        self.assertIn("A", pool_ids)
+
+    def test_api_state_new_7_fields_present(self):
+        """응답에 신규 7개 필드가 모두 존재."""
+        body = self._call_handle_api_state()
+        for field_name in self._NEW_FIELDS:
+            self.assertIn(field_name, body, f"신규 필드 누락: {field_name!r}")
+
+    def test_api_state_v1_keys_still_present(self):
+        """신규 필드 추가 후에도 v1 8개 키가 여전히 존재 (레거시 호환)."""
+        v1_keys = frozenset({
+            "generated_at", "project_root", "docs_dir",
+            "wbs_tasks", "features", "shared_signals",
+            "agent_pool_signals", "tmux_panes",
+        })
+        body = self._call_handle_api_state()
+        for k in v1_keys:
+            self.assertIn(k, body, f"v1 키 누락: {k!r}")
+
+    def test_api_state_lang_does_not_affect_json(self):
+        """`?lang=en` 파라미터는 JSON 응답 내용에 영향 없음."""
+        body_ko = self._call_handle_api_state(query_string="lang=ko")
+        body_en = self._call_handle_api_state(query_string="lang=en")
+        # subproject/is_multi_mode 등 핵심 필드가 동일해야 함
+        self.assertEqual(body_ko.get("subproject"), body_en.get("subproject"))
+        self.assertEqual(body_ko.get("is_multi_mode"), body_en.get("is_multi_mode"))
+
+    def test_api_state_nonexistent_subproject_returns_200_not_500(self):
+        """존재하지 않는 서브프로젝트명 → 500이 아닌 200 응답(빈 task/feature 리스트)."""
+        body = self._call_handle_api_state(
+            query_string="subproject=nonexistent",
+            discover_fn=lambda _d: ["billing"],
+        )
+        self.assertEqual(body.get("subproject"), "nonexistent")
+        self.assertIsInstance(body.get("wbs_tasks"), list)
+        self.assertIsInstance(body.get("features"), list)
+
+    def test_api_state_is_multi_mode_true_when_subprojects_exist(self):
+        """`available_subprojects` 가 있을 때 `is_multi_mode=True`."""
+        body = self._call_handle_api_state(
+            discover_fn=lambda _d: ["billing", "reporting"],
+        )
+        self.assertTrue(body.get("is_multi_mode"))
+
+    def test_api_state_is_multi_mode_false_when_no_subprojects(self):
+        """`available_subprojects` 가 빈 리스트일 때 `is_multi_mode=False`."""
+        body = self._call_handle_api_state(
+            discover_fn=lambda _d: [],
+        )
+        self.assertFalse(body.get("is_multi_mode"))
+
+    def test_api_state_project_name_present(self):
+        """`project_name` 필드가 응답에 존재하고 비어있지 않거나 빈 문자열."""
+        body = self._call_handle_api_state(project_root="/proj/my-app")
+        self.assertIn("project_name", body)
+
+
+import os  # noqa: E402 — 파일 하단이지만 테스트 내 os.path.join 사용을 위해
 
 
 if __name__ == "__main__":
