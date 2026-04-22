@@ -2932,7 +2932,7 @@ _DASHBOARD_JS = """\
     fetchAndPatch(state.mainAbort.signal);
   }
   function fetchAndPatch(signal){
-    fetch('/',{cache:'no-store',signal:signal})
+    fetch(window.location.search?'/'+window.location.search:'/',{cache:'no-store',signal:signal})
       .then(function(r){return r.ok?r.text():null;})
       .then(function(text){
         if(!text)return;
