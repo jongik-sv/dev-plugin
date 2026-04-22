@@ -633,5 +633,49 @@ class RenderDashboardV2E2ETests(unittest.TestCase):
                             f"Section '{k1}' must appear before '{k2}'")
 
 
+@unittest.skipUnless(_SERVER_UP, f"monitor-server not reachable at {_E2E_URL}")
+class I18nE2ETests(unittest.TestCase):
+    """TSK-02-02: i18n 프레임워크 + 언어 토글 HTTP E2E."""
+
+    def _get_html(self, path: str = "/") -> str:
+        with urllib.request.urlopen(_E2E_URL + path, timeout=5) as resp:
+            return resp.read().decode("utf-8", errors="replace")
+
+    def test_section_titles_korean_default(self) -> None:
+        """?lang 미지정 시 한국어 섹션 제목 렌더."""
+        html = self._get_html("/")
+        self.assertIn("작업 패키지", html,
+                      "Korean default: '작업 패키지' not found in HTML")
+
+    def test_section_titles_english_with_lang_en(self) -> None:
+        """?lang=en 시 영문 섹션 제목 렌더."""
+        html = self._get_html("/?lang=en")
+        self.assertIn("Work Packages", html,
+                      "English: 'Work Packages' not found when ?lang=en")
+
+    def test_lang_toggle_nav_present(self) -> None:
+        """lang-toggle nav 존재."""
+        html = self._get_html("/")
+        self.assertIn('class="lang-toggle"', html,
+                      "<nav class=\"lang-toggle\"> not found in response")
+
+    def test_lang_toggle_preserves_subproject_query(self) -> None:
+        """?subproject= 쿼리 유지하면서 lang-toggle 링크 렌더."""
+        html = self._get_html("/?subproject=monitor-v3")
+        self.assertIn("subproject=monitor-v3", html,
+                      "subproject query not preserved in lang-toggle links")
+
+    def test_lang_en_features_heading(self) -> None:
+        """?lang=en Features 제목 번역."""
+        html = self._get_html("/?lang=en")
+        self.assertIn("Features", html)
+
+    def test_invalid_lang_falls_back_to_korean(self) -> None:
+        """알 수 없는 ?lang=xx 값은 한국어 fallback."""
+        html = self._get_html("/?lang=xx")
+        self.assertIn("작업 패키지", html,
+                      "Unknown lang should fall back to Korean")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
