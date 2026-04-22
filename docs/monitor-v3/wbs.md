@@ -285,7 +285,7 @@ monitor-server, monitor-launcher
 - category: development
 - domain: frontend
 - model: sonnet
-- status: [ ]
+- status: [im]
 - priority: medium
 - assignee: -
 - schedule: 2026-04-24 ~ 2026-04-24
@@ -322,7 +322,7 @@ monitor-server, monitor-launcher
 - category: development
 - domain: fullstack
 - model: sonnet
-- status: [ ]
+- status: [dd]
 - priority: medium
 - assignee: -
 - schedule: 2026-04-24 ~ 2026-04-25

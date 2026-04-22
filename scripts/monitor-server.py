@@ -38,7 +38,37 @@ from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, quote, unquote, urlsplit
+
+
+# ---------------------------------------------------------------------------
+# i18n (TSK-02-02)
+# ---------------------------------------------------------------------------
+
+_I18N: dict = {
+    "ko": {
+        "work_packages": "작업 패키지",
+        "features": "기능",
+        "team_agents": "팀 에이전트 (tmux)",
+        "subagents": "서브 에이전트 (agent-pool)",
+        "live_activity": "실시간 활동",
+        "phase_timeline": "단계 타임라인",
+    },
+    "en": {
+        "work_packages": "Work Packages",
+        "features": "Features",
+        "team_agents": "Team Agents (tmux)",
+        "subagents": "Subagents (agent-pool)",
+        "live_activity": "Live Activity",
+        "phase_timeline": "Phase Timeline",
+    },
+}
+
+
+def _t(lang: str, key: str) -> str:
+    """i18n 헬퍼. 미지원 lang은 'ko' fallback, 미지원 key는 key 자체 반환."""
+    table = _I18N.get(lang) or _I18N["ko"]
+    return table.get(key, key)
 
 
 # ---------------------------------------------------------------------------
@@ -702,6 +732,11 @@ DASHBOARD_CSS = """
 
   --radius: 4px;
   --radius-lg: 6px;
+
+  /* font size */
+  --font-body: 14px;
+  --font-mono: 14px;
+  --font-h2: 17px;
 }
 
 /* ---------- reset ---------- */
@@ -711,7 +746,7 @@ body{
   background: var(--bg);
   color: var(--ink);
   font-family: var(--mono);
-  font-size: 13px;
+  font-size: var(--font-body);
   line-height: 1.45;
   -webkit-font-smoothing: antialiased;
   letter-spacing: 0.01em;
@@ -839,7 +874,7 @@ summary::-webkit-details-marker{ display:none; }
 .section-head h2{
   margin: 0;
   font-family: var(--display);
-  font-size: 15px; font-weight: 600;
+  font-size: var(--font-h2); font-weight: 600;
   color: var(--ink);
 }
 .section-head h2::before{
@@ -950,7 +985,7 @@ summary::-webkit-details-marker{ display:none; }
   position:absolute; inset:0;
   display:grid; place-items:center;
   font-family: var(--mono);
-  font-size: 15px; font-weight: 600;
+  font-size: var(--font-h2); font-weight: 600;
   color: var(--ink);
 }
 .wp-donut .pct small{ font-size: 9px; color: var(--ink-4); font-weight: 400; display:block; }
@@ -972,7 +1007,7 @@ summary::-webkit-details-marker{ display:none; }
   white-space: nowrap;
 }
 .wp-title h3{
-  margin: 0; font-weight: 500; font-size: 15px;
+  margin: 0; font-weight: 500; font-size: var(--font-h2);
   color: var(--ink);
   font-family: var(--display);
   white-space: nowrap; overflow:hidden; text-overflow: ellipsis;
@@ -1075,7 +1110,7 @@ summary::-webkit-details-marker{ display:none; }
 .trow .ttitle{
   color: var(--ink);
   font-family: var(--sans);
-  font-size: 13px;
+  font-size: var(--font-body);
   white-space: nowrap; overflow:hidden; text-overflow: ellipsis;
   min-width: 0;
 }
@@ -1487,12 +1522,34 @@ def _empty_section(anchor: str, heading: str, message: str, css: str = "empty") 
     return _section_wrap(anchor, heading, f'  <p class="{css}">{message}</p>')
 
 
-def _section_header(model: dict) -> str:
-    """v3 cmdbar header: brand + meta + actions (replaces old section#header)."""
+def _section_header(model: dict, lang: str = "ko", subproject: str = "") -> str:
+    """v3 cmdbar header: brand + meta + lang-toggle + actions.
+
+    TSK-02-02: ``lang`` / ``subproject`` 파라미터 추가.  헤더 우측
+    actions 블록 안에 ``<nav class="lang-toggle">`` 를 삽입하여 ko/en
+    전환 링크를 렌더링한다.  subproject 쿼리가 있으면 lang 링크에 보존한다.
+    """
     generated_at = _esc(model.get("generated_at", ""))
     project_root = _esc(model.get("project_root", ""))
     docs_dir = _esc(model.get("docs_dir", ""))
     refresh_s = _refresh_seconds(model)
+
+    # Build lang-toggle href pairs (subproject preserved when non-empty).
+    if subproject:
+        sp_enc = quote(subproject, safe="")
+        href_ko = f"?lang=ko&subproject={sp_enc}"
+        href_en = f"?lang=en&subproject={sp_enc}"
+    else:
+        href_ko = "?lang=ko"
+        href_en = "?lang=en"
+
+    lang_toggle_html = (
+        f'<nav class="lang-toggle" aria-label="Language">'
+        f'<a href="{href_ko}">한</a>'
+        f' <a href="{href_en}">EN</a>'
+        f'</nav>\n'
+    )
+
     return (
         '<header class="cmdbar" data-section="hdr" role="banner" aria-label="Command bar">\n'
         '  <div class="brand">\n'
@@ -1520,6 +1577,7 @@ def _section_header(model: dict) -> str:
         f'<span class="v">{refresh_s}s</span></span>\n'
         '  </div>\n'
         '  <div class="actions">\n'
+        f'    {lang_toggle_html}'
         '    <span class="pulse" aria-live="polite">'
         '<span class="dot" aria-hidden="true"></span> live</span>\n'
         '    <button class="btn refresh-toggle" type="button"'
@@ -2180,7 +2238,7 @@ def _render_pane_row(pane, preview_lines: "Optional[str]" = "") -> str:
         f'  <div class="pane-head">\n'
         f'    <div class="name">{window_name}</div>\n'
         f'    <div class="meta">{pane_id_esc} · <span class="cmd">{cmd}</span> · pid {pid}</div>\n'
-        f'    <a class="mini-btn" href="/pane/{pane_id_esc}">show output</a>\n'
+        f'    <a class="mini-btn" href="/pane/{quote(pane_id_raw, safe="")}">show output</a>\n'
         f'    <button class="mini-btn primary" type="button"'
         f' data-pane-expand="{pane_id_esc}"'
         f' aria-label="Expand pane {pane_id_esc}">expand <span class="kbd">&#x21B5;</span></button>\n'
@@ -3084,7 +3142,7 @@ def _build_dashboard_body(s: dict) -> str:
     ])
 
 
-def render_dashboard(model: dict) -> str:
+def render_dashboard(model: dict, lang: str = "ko", subproject: str = "") -> str:
     """Render the full v2 monitor dashboard HTML document (TSK-01-06).
 
     Assembly order (design.md §구현방향):
@@ -3100,12 +3158,25 @@ def render_dashboard(model: dict) -> str:
     - Empty ``<script id="dashboard-js">`` placeholder inserted for WP-02.
     - ``<a id="wbs">`` landing pad added before wp-cards for backward compat.
 
+    TSK-02-02: ``lang`` / ``subproject`` 파라미터 추가.
+    - ``lang`` ('ko'|'en', 기본 'ko'): 섹션 h2 heading 번역.
+    - ``subproject`` (str): lang-toggle 링크에 보존할 subproject 쿼리 값.
+    - ko/en 이외의 lang 값은 'ko'로 정규화한다.
+
     All user-derived strings flow through ``html.escape`` (via ``_esc``)
     before being concatenated. No external CDN/font/script — only inline CSS.
     The returned string is a complete ``<!DOCTYPE html>`` document.
     """
     if not isinstance(model, dict):
         model = {}
+
+    # Normalize lang: ko/en 이외는 ko 폴백.
+    if lang not in _I18N:
+        lang = "ko"
+
+    # subproject: model에서도 읽을 수 있도록 fallback.
+    if not subproject:
+        subproject = model.get("subproject", "") or ""
 
     shared_signals = model.get("shared_signals") or []
     running_ids = _signal_set(shared_signals, "running")
@@ -3118,15 +3189,20 @@ def render_dashboard(model: dict) -> str:
 
     # Build each section HTML.  ``header`` is excluded from data-section
     # injection (it is nav metadata, not a JS partial-update target).
-    header_html = _section_header(model)
+    header_html = _section_header(model, lang=lang, subproject=subproject)
     sections: dict = {
         "kpi":            _section_kpi(model),
-        "wp-cards":       _section_wp_cards(tasks, running_ids, failed_ids),
-        "features":       _section_features(features, running_ids, failed_ids),
-        "live-activity":  _section_live_activity(model),
-        "phase-timeline": _section_phase_timeline(tasks, features),
-        "team":           _section_team(panes),
-        "subagents":      _section_subagents(ap_sigs),
+        "wp-cards":       _section_wp_cards(tasks, running_ids, failed_ids,
+                                            heading=_t(lang, "work_packages")),
+        "features":       _section_features(features, running_ids, failed_ids,
+                                            heading=_t(lang, "features")),
+        "live-activity":  _section_live_activity(model,
+                                                  heading=_t(lang, "live_activity")),
+        "phase-timeline": _section_phase_timeline(tasks, features,
+                                                   heading=_t(lang, "phase_timeline")),
+        "team":           _section_team(panes, heading=_t(lang, "team_agents")),
+        "subagents":      _section_subagents(ap_sigs,
+                                              heading=_t(lang, "subagents")),
         "phase-history":  _section_phase_history(tasks, features),
     }
 
@@ -3693,10 +3769,10 @@ class MonitorHandler(BaseHTTPRequestHandler):
         elif _is_api_state_path(self.path):
             self._route_api_state()
         elif _is_pane_api_path(path):
-            pane_id = path[len(_API_PANE_PATH_PREFIX):]
+            pane_id = unquote(path[len(_API_PANE_PATH_PREFIX):])
             _handle_pane_api(self, pane_id)
         elif _is_pane_html_path(path):
-            pane_id = path[len(_PANE_PATH_PREFIX):]
+            pane_id = unquote(path[len(_PANE_PATH_PREFIX):])
             _handle_pane_html(self, pane_id)
         else:
             self._route_not_found()
