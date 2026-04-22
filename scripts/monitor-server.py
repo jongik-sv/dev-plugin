@@ -2429,12 +2429,48 @@ def _pane_attr(pane, key: str, default=""):
     return getattr(pane, key, default)
 
 
-def _pane_last_n_lines(pane_id: str, n: int = 3) -> str:
-    """Return the last *n* non-blank lines from a tmux pane's scrollback.
+def _is_claude_cli_chrome(line: str) -> bool:
+    """Return True iff *line* is part of Claude CLI's bottom chrome.
 
-    Calls ``capture_pane(pane_id)`` and strips trailing whitespace-only lines
-    before taking the tail.  Returns an empty string on any error or when the
-    result is entirely blank.
+    The Claude CLI renders a fixed footer at the bottom of every pane:
+
+        ──────────────────── (separator, U+2500 box-drawing)
+        ❯                    (prompt, may contain NBSP)
+        ──────────────────── (separator)
+          [Sonnet 4.6] | branch
+          ctx: █▍░░░ 26% | ...
+          ⏵⏵ bypass permissions on · N shells
+
+    When we tail the pane for a dashboard preview these 6 lines drown out the
+    actual work output.  We detect and strip them so the preview shows
+    something meaningful instead.
+    """
+    stripped = line.strip().rstrip("\xa0").strip()
+    if not stripped:
+        return False
+    # horizontal separator of box-drawing chars (allow stray spaces)
+    if "─" in line and all(c in "─ \t" for c in line):
+        return True
+    # bare prompt
+    if stripped == "❯":
+        return True
+    # status bar lines (always prefixed with two spaces by Claude CLI)
+    if line.startswith("  [") and "]" in line:
+        return True
+    if line.startswith("  ctx:"):
+        return True
+    if line.startswith("  ⏵⏵") or line.startswith("  ⏸"):
+        return True
+    return False
+
+
+def _pane_last_n_lines(pane_id: str, n: int = 3) -> str:
+    """Return the last *n* non-chrome lines from a tmux pane's scrollback.
+
+    Calls ``capture_pane(pane_id)``, strips trailing Claude CLI chrome
+    (status bar, prompt separators) and whitespace-only lines from the tail,
+    then returns the last *n* remaining lines.  Returns an empty string on
+    any error or when the result is entirely blank/chrome.
     """
     try:
         raw = capture_pane(pane_id)
@@ -2443,6 +2479,9 @@ def _pane_last_n_lines(pane_id: str, n: int = 3) -> str:
     # rstrip removes trailing whitespace/newlines; splitlines() handles all
     # line-ending variants and produces no trailing empty element.
     lines = raw.rstrip().splitlines()
+    # Strip trailing CLI chrome + blank lines so the preview shows actual work.
+    while lines and (not lines[-1].strip() or _is_claude_cli_chrome(lines[-1])):
+        lines.pop()
     if not lines:
         return ""
     return "\n".join(lines[-n:])
