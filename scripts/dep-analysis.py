@@ -313,6 +313,7 @@ def compute_graph_stats(items, fan_in_threshold=3, depends_threshold=4, top_n=5)
         "diamond_count": len(diamond_patterns),
         "review_candidates": review_candidates,
         "fan_out": fan_out,
+        "fan_out_map": fan_out,  # alias: monitor-server.py _build_graph_payload 호환
         "critical_path": critical_path,
         "bottleneck_ids": bottleneck_ids,
     }
@@ -349,6 +350,7 @@ def main():
                 "diamond_count": 0,
                 "review_candidates": [],
                 "fan_out": {},
+                "fan_out_map": {},  # alias for monitor-server.py compatibility
                 "critical_path": {"nodes": [], "edges": []},
                 "bottleneck_ids": [],
             }, ensure_ascii=False, indent=2))

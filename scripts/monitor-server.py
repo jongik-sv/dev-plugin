@@ -3810,6 +3810,271 @@ def _handle_pane_api(
 
 
 # ---------------------------------------------------------------------------
+# /api/graph endpoint (TSK-03-02)
+# ---------------------------------------------------------------------------
+
+_API_GRAPH_PATH = "/api/graph"
+_DEP_ANALYSIS_TIMEOUT = 3  # seconds
+
+# Active statuses that map to "running" (no signal needed)
+_RUNNING_STATUSES = {"[dd]", "[im]", "[ts]"}
+
+
+def _is_api_graph_path(path: str) -> bool:
+    """Return True iff *path* matches ``/api/graph`` exactly (query allowed).
+
+    - ``"/api/graph"`` → True
+    - ``"/api/graph?subproject=all"`` → True
+    - ``"/api/graph/"`` → False (trailing slash)
+    - ``"/api/graphql"`` → False
+
+    Matching uses :func:`urllib.parse.urlsplit` so the query string is stripped
+    before the equality comparison.
+    """
+    if not isinstance(path, str):
+        return False
+    return urlsplit(path).path == _API_GRAPH_PATH
+
+
+def _derive_node_status(task: "WorkItem", signals: "List[SignalEntry]") -> str:
+    """Derive display status for a graph node.
+
+    Priority order (higher overrides lower):
+      1. ``bypassed``:  task.bypassed == True
+      2. ``failed``:    .failed signal exists OR last_event ends with ".fail"
+      3. ``done``:      task.status == "[xx]"
+      4. ``running``:   .running signal exists OR status in {[dd],[im],[ts]}
+      5. ``pending``:   all other cases
+    """
+    # Build signal kind sets for this task's id
+    task_signals = {sig.kind for sig in signals if sig.task_id == task.id}
+
+    # 1. bypassed
+    if task.bypassed:
+        return "bypassed"
+
+    # 2. failed
+    has_failed_signal = "failed" in task_signals
+    last_ev = task.last_event or ""
+    has_fail_event = last_ev.endswith(".fail") or last_ev == "fail"
+    if has_failed_signal or has_fail_event:
+        return "failed"
+
+    # 3. done
+    if task.status == "[xx]":
+        return "done"
+
+    # 4. running
+    has_running_signal = "running" in task_signals
+    if has_running_signal or task.status in _RUNNING_STATUSES:
+        return "running"
+
+    # 5. pending
+    return "pending"
+
+
+def _build_graph_payload(
+    tasks: "List[WorkItem]",
+    signals: "List[SignalEntry]",
+    graph_stats: dict,
+    docs_dir_str: str,
+    subproject: str,
+) -> dict:
+    """Assemble the /api/graph response payload.
+
+    Args:
+        tasks: WorkItem list from scan_tasks().
+        signals: SignalEntry list from scan_signals().
+        graph_stats: dict from dep-analysis.py --graph-stats.
+        docs_dir_str: effective docs directory path string.
+        subproject: subproject query parameter value (e.g. "all" or "p1").
+
+    Returns:
+        dict with keys: subproject, docs_dir, generated_at, stats,
+        critical_path, nodes, edges.
+    """
+    # dep-analysis.py returns both "fan_out" and "fan_out_map" (alias).
+    # fan_in_map is injected locally by _handle_graph_api before calling here.
+    fan_in_map: dict = graph_stats.get("fan_in_map", {})
+    fan_out_map: dict = graph_stats.get("fan_out_map", {})
+    critical_path: dict = graph_stats.get("critical_path", {"nodes": [], "edges": []})
+    bottleneck_ids: list = graph_stats.get("bottleneck_ids", [])
+    cp_node_set = set(critical_path.get("nodes", []))
+
+    # Derive per-task status and count stats
+    status_counts = {"done": 0, "running": 0, "pending": 0, "failed": 0, "bypassed": 0}
+    nodes = []
+    task_id_set = {t.id for t in tasks}
+
+    for task in tasks:
+        node_status = _derive_node_status(task, signals)
+        status_counts[node_status] += 1
+
+        nodes.append({
+            "id": task.id,
+            "label": task.title or task.id,
+            "status": node_status,
+            "is_critical": task.id in cp_node_set,
+            "is_bottleneck": task.id in bottleneck_ids,
+            "fan_in": fan_in_map.get(task.id, 0),
+            "fan_out": fan_out_map.get(task.id, 0),
+            "bypassed": task.bypassed,
+            "wp_id": task.wp_id,
+            "depends": list(task.depends),
+        })
+
+    # Build edges from task depends relationships
+    edges = []
+    for task in tasks:
+        for dep_id in task.depends:
+            if dep_id in task_id_set:
+                edges.append({"source": dep_id, "target": task.id})
+
+    total = len(nodes)
+    stats = {
+        "total": total,
+        "done": status_counts["done"],
+        "running": status_counts["running"],
+        "pending": status_counts["pending"],
+        "failed": status_counts["failed"],
+        "bypassed": status_counts["bypassed"],
+        "max_chain_depth": graph_stats.get("max_chain_depth", 0),
+        "critical_path_length": len(critical_path.get("nodes", [])),
+        "bottleneck_count": len(bottleneck_ids),
+    }
+
+    return {
+        "subproject": subproject,
+        "docs_dir": docs_dir_str,
+        "generated_at": _now_iso_z(),
+        "stats": stats,
+        "critical_path": critical_path,
+        "nodes": nodes,
+        "edges": edges,
+    }
+
+
+def _call_dep_analysis_graph_stats(tasks_input: list) -> "Tuple[Optional[dict], str]":
+    """Run dep-analysis.py --graph-stats with *tasks_input* as JSON stdin.
+
+    Returns ``(graph_stats_dict, "")`` on success, or ``(None, error_message)``
+    on subprocess failure (timeout, OSError, non-zero exit, bad JSON).
+    """
+    dep_analysis_script = str(Path(__file__).resolve().parent / "dep-analysis.py")
+    try:
+        proc = subprocess.run(
+            [sys.executable, dep_analysis_script, "--graph-stats"],
+            input=json.dumps(tasks_input, ensure_ascii=False),
+            capture_output=True,
+            text=True,
+            timeout=_DEP_ANALYSIS_TIMEOUT,
+            check=False,
+            shell=False,
+        )
+    except (subprocess.TimeoutExpired, OSError, subprocess.SubprocessError) as exc:
+        return None, f"dep-analysis error: {exc!r}"
+
+    if proc.returncode != 0:
+        stderr_snippet = (proc.stderr or "").strip()[:200]
+        return None, f"dep-analysis exited {proc.returncode}: {stderr_snippet}"
+
+    try:
+        return json.loads(proc.stdout), ""
+    except (ValueError, TypeError) as exc:
+        return None, f"dep-analysis bad JSON: {exc!r}"
+
+
+def _build_fan_in_map(tasks: "List[WorkItem]") -> dict:
+    """Compute fan-in counts for each task from its dependents.
+
+    fan_in_map[t] = number of tasks that list *t* as a dependency.
+    Returns a dict with an entry for every task id, defaulting to 0.
+    """
+    fan_in_map: dict = {t.id: 0 for t in tasks}
+    for t in tasks:
+        for dep_id in t.depends:
+            if dep_id in fan_in_map:
+                fan_in_map[dep_id] += 1
+    return fan_in_map
+
+
+def _handle_graph_api(
+    handler,
+    *,
+    scan_tasks_fn: "Callable[[Any], List[WorkItem]]" = scan_tasks,  # type: ignore[assignment]
+    scan_signals_fn: "Callable[[], List[SignalEntry]]" = scan_signals,  # type: ignore[assignment]
+) -> None:
+    """Handle ``GET /api/graph`` on *handler*.
+
+    Flow:
+      1. Parse ?subproject= query param (default: "all").
+      2. Resolve effective_docs_dir from server.docs_dir + subproject.
+      3. Call scan_tasks_fn(effective_docs_dir) → List[WorkItem].
+      4. Call scan_signals_fn() → List[SignalEntry].
+      5. Serialize tasks to JSON and pipe to dep-analysis.py --graph-stats subprocess.
+      6. Assemble payload via _build_graph_payload().
+      7. Respond with JSON 200.
+
+    On subprocess failure (OSError, TimeoutExpired, non-zero exit, bad JSON):
+      respond with JSON 500.
+
+    No in-memory caching — every request triggers a fresh scan (AC-16).
+    """
+    # Parse subproject query param
+    parsed = urlsplit(handler.path)
+    qs = parse_qs(parsed.query)
+    subproject = (qs.get("subproject") or ["all"])[0] or "all"
+
+    # Resolve effective_docs_dir
+    base_docs_dir = _server_attr(handler, "docs_dir")
+    if subproject == "all":
+        effective_docs_dir = base_docs_dir
+    else:
+        effective_docs_dir = str(Path(base_docs_dir) / subproject)
+
+    # Scan tasks and signals (fresh, no cache)
+    try:
+        tasks = list(scan_tasks_fn(effective_docs_dir) or [])
+        signals = list(scan_signals_fn() or [])
+    except Exception as exc:
+        sys.stderr.write(f"/api/graph scan failed: {exc!r}\n")
+        _json_error(handler, 500, f"scan error: {exc!r}")
+        return
+
+    # Serialize tasks for dep-analysis.py --graph-stats stdin
+    tasks_input = [
+        {
+            "tsk_id": t.id,
+            "depends": ", ".join(t.depends) if t.depends else "-",
+            "status": t.status or "[ ]",
+            "bypassed": t.bypassed,
+            "title": t.title or "",
+            "wp_id": t.wp_id or "",
+        }
+        for t in tasks
+    ]
+
+    # Call dep-analysis.py --graph-stats via subprocess
+    graph_stats, err = _call_dep_analysis_graph_stats(tasks_input)
+    if graph_stats is None:
+        sys.stderr.write(f"/api/graph dep-analysis failed: {err}\n")
+        _json_error(handler, 500, err)
+        return
+
+    # Inject locally-computed fan_in_map (dep-analysis.py doesn't return it)
+    graph_stats.setdefault("fan_in_map", _build_fan_in_map(tasks))
+
+    # Build response payload
+    try:
+        payload = _build_graph_payload(tasks, signals, graph_stats, effective_docs_dir, subproject)
+    except Exception as exc:
+        sys.stderr.write(f"/api/graph build payload failed: {exc!r}\n")
+        _json_error(handler, 500, f"payload build error: {exc!r}")
+        return
+
+    _json_response(handler, 200, payload)
+
+
 # /api/state JSON snapshot endpoint (TSK-01-06)
 # ---------------------------------------------------------------------------
 
@@ -4392,6 +4657,8 @@ class MonitorHandler(BaseHTTPRequestHandler):
             self._route_root()
         elif _is_static_path(path):
             _handle_static(self, path)
+        elif _is_api_graph_path(self.path):
+            _handle_graph_api(self)
         elif _is_api_state_path(self.path):
             self._route_api_state()
         elif _is_pane_api_path(path):
