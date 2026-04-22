@@ -243,7 +243,7 @@ monitor-server, monitor-launcher
 - category: defect
 - domain: backend
 - model: sonnet
-- status: [dd]
+- status: [xx]
 - priority: high
 - assignee: -
 - schedule: 2026-04-24 ~ 2026-04-24

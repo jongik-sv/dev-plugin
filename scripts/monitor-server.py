@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
 """dev-monitor HTTP 서버 (단일 파일).
 
-본 파일은 여러 Task에 걸쳐 점진적으로 채워진다. TSK-01-03 시점의 적재물:
+주요 구성 요소:
 
 - 시그널 스캐너: ``scan_signals()``
 - tmux pane 스캐너: ``list_tmux_panes()``, ``capture_pane(pane_id)``
 - 데이터 클래스: ``SignalEntry``, ``PaneInfo`` (TRD §5.2 / §5.3)
-
-후속 Task(TSK-01-01/02/04/05/06)가 HTTP 서버 뼈대와 라우팅, WBS/Feature 스캐너,
-HTML 대시보드 렌더러, JSON 스냅샷 엔드포인트를 같은 파일에 추가한다. 본 Task는
-HTTP 레이어와 독립적인 순수 함수만 배치하므로 병렬·후행 Task와 충돌하지 않는다.
+- HTTP 서버: ``MonitorHandler``, ``run_server()``
+- 라우팅: ``/`` (대시보드), ``/pane/{id}`` (HTML), ``/api/pane/{id}`` (JSON),
+  ``/api/state`` (전체 스냅샷)
 
 구현 원칙:
 - Python 3.8+ stdlib 전용 (``CLAUDE.md`` 규약)
@@ -17,6 +16,8 @@ HTTP 레이어와 독립적인 순수 함수만 배치하므로 병렬·후행 T
 - 모든 실패 경로(디렉터리 부재, tmux 부재, 서버 미기동, 잘못된 pane_id,
   subprocess 오류/타임아웃)는 정의된 반환 값으로 흡수 — 예외는
   ``capture_pane`` 의 pane_id 형식 위반(ValueError)만 허용
+- pane_id URL 인코딩: 링크 생성 시 ``quote(pane_id, safe="")``, 라우터에서
+  ``unquote(path_segment)`` 후 ``_PANE_ID_RE`` 검증
 """
 
 from __future__ import annotations
@@ -76,7 +77,7 @@ def _t(lang: str, key: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Constants (TSK-01-03)
+# Constants
 # ---------------------------------------------------------------------------
 
 _SIGNAL_KINDS = {"running", "done", "failed", "bypassed"}
@@ -3411,6 +3412,15 @@ def _is_pane_api_path(path: str) -> bool:
     return path.startswith(_API_PANE_PATH_PREFIX)
 
 
+def _extract_pane_id(path: str, prefix: str) -> str:
+    """Strip *prefix* from *path* and URL-decode the remainder.
+
+    Returns the decoded pane_id string (may be empty — callers must validate
+    against ``_PANE_ID_RE``).
+    """
+    return unquote(path[len(prefix):])
+
+
 def _pane_capture_payload(
     pane_id: str,
     capture: Callable[[str], str],
@@ -3969,10 +3979,10 @@ class MonitorHandler(BaseHTTPRequestHandler):
         elif _is_api_state_path(self.path):
             self._route_api_state()
         elif _is_pane_api_path(path):
-            pane_id = unquote(path[len(_API_PANE_PATH_PREFIX):])
+            pane_id = _extract_pane_id(path, _API_PANE_PATH_PREFIX)
             _handle_pane_api(self, pane_id)
         elif _is_pane_html_path(path):
-            pane_id = unquote(path[len(_PANE_PATH_PREFIX):])
+            pane_id = _extract_pane_id(path, _PANE_PATH_PREFIX)
             _handle_pane_html(self, pane_id)
         else:
             self._route_not_found()
