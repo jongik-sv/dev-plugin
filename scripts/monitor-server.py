@@ -793,7 +793,33 @@ def _filter_by_subproject(state: dict, sp: str, project_name: str) -> dict:
 _DEFAULT_REFRESH_SECONDS = 3
 _PHASES_SECTION_LIMIT = 10
 _ERROR_TITLE_CAP = 200
-_SECTION_ANCHORS = ("wp-cards", "features", "team", "subagents", "activity", "timeline", "phases")
+_SECTION_ANCHORS = ("wp-cards", "features", "team", "subagents", "activity", "timeline", "phases", "dep-graph")
+
+# ---------------------------------------------------------------------------
+# i18n (TSK-03-04) — minimal table; other sections adopt as follow-on Tasks
+# ---------------------------------------------------------------------------
+
+_I18N: dict[str, dict[str, str]] = {
+    "ko": {
+        "dep_graph": "의존성 그래프",
+    },
+    "en": {
+        "dep_graph": "Dependency Graph",
+    },
+}
+
+
+def _t(lang: str, key: str) -> str:
+    """Return i18n string for *key* in *lang*.
+
+    Fallback chain: requested lang → "ko" → key itself.
+    Never raises.
+    """
+    return (
+        _I18N.get(lang, {}).get(key)
+        or _I18N.get("ko", {}).get(key)
+        or key
+    )
 
 # Status → (emoji, label, css_class) for the non-override branch of
 # ``_status_badge``. The bypass/failed/running overrides stay inline in the
@@ -2589,6 +2615,71 @@ def _section_phase_history(tasks, features) -> str:
 
 
 # ---------------------------------------------------------------------------
+# TSK-03-04: Dependency Graph section (SSR skeleton + vendor scripts)
+# ---------------------------------------------------------------------------
+
+
+def _section_dep_graph(lang: str = "ko", subproject: str = "all") -> str:
+    """Render the Dependency Graph section SSR skeleton (TRD §3.9.5).
+
+    Returns a ``<section id="dep-graph">`` block containing:
+    - ``.section-head`` with i18n h2 + ``<aside id="dep-graph-summary">``
+    - ``.dep-graph-wrap``: canvas div (height 520px) + legend div
+    - 4 vendor ``<script>`` tags in load order:
+      dagre → cytoscape → cytoscape-dagre → graph-client
+
+    The ``subproject`` value is HTML-escaped and injected as
+    ``data-subproject="..."`` on the root ``<section>`` element so that
+    graph-client.js can read it without inline scripts.
+    """
+    sp_esc = html.escape(subproject or "all", quote=True)
+    heading = _t(lang, "dep_graph")
+
+    summary_html = (
+        '<aside id="dep-graph-summary" class="dep-graph-summary">'
+        '<span data-stat="total">-</span> · '
+        '<span data-stat="done">-</span> · '
+        '<span data-stat="running">-</span> · '
+        '<span data-stat="pending">-</span> · '
+        '<span data-stat="failed">-</span> · '
+        '<span data-stat="bypassed">-</span>'
+        '</aside>'
+    )
+
+    legend_html = (
+        '<div id="dep-graph-legend" class="dep-graph-legend">'
+        '<span class="leg-item" style="color:#22c55e">&#9632; done</span> '
+        '<span class="leg-item" style="color:#eab308">&#9632; running</span> '
+        '<span class="leg-item" style="color:#94a3b8">&#9632; pending</span> '
+        '<span class="leg-item" style="color:#ef4444">&#9632; failed</span> '
+        '<span class="leg-item" style="color:#a855f7">&#9632; bypassed</span>'
+        '</div>'
+    )
+
+    scripts_html = (
+        '<script src="/static/dagre.min.js"></script>\n'
+        '<script src="/static/cytoscape.min.js"></script>\n'
+        '<script src="/static/cytoscape-dagre.min.js"></script>\n'
+        '<script src="/static/graph-client.js"></script>'
+    )
+
+    return (
+        f'<section id="dep-graph" data-section="dep-graph"'
+        f' data-subproject="{sp_esc}">\n'
+        '  <div class="section-head">\n'
+        f'    <div><h2>{html.escape(heading)}</h2></div>\n'
+        f'    {summary_html}\n'
+        '  </div>\n'
+        '  <div class="dep-graph-wrap">\n'
+        '    <div id="dep-graph-canvas" style="height:520px;"></div>\n'
+        f'    {legend_html}\n'
+        '  </div>\n'
+        f'{scripts_html}\n'
+        '</section>'
+    )
+
+
+# ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
 # TSK-01-04: Live Activity + Phase Timeline render functions
 # ---------------------------------------------------------------------------
@@ -3347,18 +3438,19 @@ def _build_dashboard_body(s: dict) -> str:
         s["subagents"], "\n",
         '    </div>\n',
         '  </div>\n',
+        s["dep-graph"], "\n",
         s["phase-history"], "\n",
         '</div>\n',
     ])
 
 
-def render_dashboard(model: dict, lang: str = "ko", subproject: str = "") -> str:
-    """Render the full v2 monitor dashboard HTML document (TSK-01-06).
+def render_dashboard(model: dict, lang: str = "ko", subproject: str = "all") -> str:
+    """Render the full v3 monitor dashboard HTML document (TSK-01-06).
 
     Assembly order (design.md §구현방향):
       sticky_header → kpi → .page[col-left: wp_cards + features,
       col-right: live_activity + phase_timeline + team + subagents]
-      → phase_history (full-width footer)
+      → dep-graph (full-width, TSK-03-04) → phase_history (full-width footer)
 
     Changes from v1:
     - ``<meta http-equiv="refresh">`` removed (JS polling TBD in WP-02).
@@ -3367,6 +3459,7 @@ def render_dashboard(model: dict, lang: str = "ko", subproject: str = "") -> str
     - ``_drawer_skeleton()`` injected before ``</body>``.
     - Empty ``<script id="dashboard-js">`` placeholder inserted for WP-02.
     - ``<a id="wbs">`` landing pad added before wp-cards for backward compat.
+    - ``lang`` / ``subproject`` args added (TSK-03-04): dep-graph i18n + SP query.
 
     TSK-02-02: ``lang`` / ``subproject`` 파라미터 추가.
     - ``lang`` ('ko'|'en', 기본 'ko'): 섹션 h2 heading 번역.
@@ -3414,12 +3507,13 @@ def render_dashboard(model: dict, lang: str = "ko", subproject: str = "") -> str
         "team":           _section_team(panes, heading=_t(lang, "team_agents")),
         "subagents":      _section_subagents(ap_sigs,
                                               heading=_t(lang, "subagents")),
+        "dep-graph":      _section_dep_graph(lang=lang, subproject=subproject),
         "phase-history":  _section_phase_history(tasks, features),
     }
 
     # Inject data-section attribute on each section's outermost tag.
-    for key, html in sections.items():
-        sections[key] = _wrap_with_data_section(html, key)
+    for key, html_str in sections.items():
+        sections[key] = _wrap_with_data_section(html_str, key)
 
     body = _build_dashboard_body({**sections, "header": header_html, "subproject-tabs": tabs_html})
 
