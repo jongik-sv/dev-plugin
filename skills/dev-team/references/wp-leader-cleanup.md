@@ -80,7 +80,7 @@ done
    - `mcp__plugin_playwright_playwright__*` MCP 사용 (ecc extension MCP는 확장 필요로 이 환경 불가)
    - 구현한 주요 컴포넌트/페이지를 실제 렌더링 후 screenshot + `document.styleSheets` 로드 확인
    - Screenshot은 `docs/tasks/{TSK-ID}/screenshots/` 에 저장
-   - NG 판정 시 완료 보고 전에 원인 수정 또는 사용자 에스컬레이션
+   - NG 판정 시 (자율 실행 원칙): 먼저 자동 수정을 시도한다. 자동 수정 실패 시 **NG로 기록하고 진행** — 사용자 에스컬레이션 대기 금지. 최종 `.done` 시그널의 `brw-test` 필드에 `NG — 자동수정실패 — {원인 요약}`를 포함시켜 팀리더가 사후 판단할 수 있게 한다.
 
    결과는 `BRW_TEST_RESULT` 변수에 기록한다 (`OK — ...` 또는 `NG — ...`).
 

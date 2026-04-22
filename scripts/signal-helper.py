@@ -24,10 +24,11 @@ Commands:
   fail         <id> <dir> [message]  .failed file atomic create (.running removed)
   bypass       <id> <dir> [reason]   .bypassed file atomic create (.running/.failed removed)
   shutdown     <id> <dir> [reason]   .shutdown marker create (user-initiated graceful stop)
-  check        <id> <dir>            status output (running|done|failed|bypassed|shutdown|none)
-  wait         <id> <dir> [timeout]  wait for .done, .failed, or .bypassed (default: unlimited)
+  check        <id> <dir>            status output (running|done|failed|bypassed|shutdown|needs-restart|none)
+  wait         <id> <dir> [timeout]  wait for .done / .failed / .bypassed / .needs-restart (default: unlimited)
   wait-running <id> <dir> [timeout]  wait for .running/.done/.failed/.bypassed (default: 120s)
   heartbeat    <id> <dir>            touch .running file
+  ack-restart  <id> <dir>            remove .needs-restart marker (team leader after consuming)
 
 Examples:
   signal-helper.py start TSK-01-01 /tmp/claude-signals/proj
@@ -39,6 +40,7 @@ Examples:
   signal-helper.py wait TSK-01-01 /tmp/claude-signals/proj 600
   signal-helper.py wait-running TSK-01-01 /tmp/claude-signals/proj 120
   signal-helper.py heartbeat TSK-01-01 /tmp/claude-signals/proj
+  signal-helper.py ack-restart WP-04 /tmp/claude-signals/proj
 """
 
 
@@ -71,6 +73,7 @@ def main():
     bypassed_path = sig_dir / f"{sig_id}.bypassed"
     running_path = sig_dir / f"{sig_id}.running"
     shutdown_path = sig_dir / f"{sig_id}.shutdown"
+    restart_path = sig_dir / f"{sig_id}.needs-restart"
 
     if cmd == "start":
         running_path.write_text("started\n", encoding="utf-8")
@@ -140,6 +143,9 @@ def main():
         elif failed_path.exists():
             print("failed")
             print(read_truncated(failed_path))
+        elif restart_path.exists():
+            print("needs-restart")
+            print(read_truncated(restart_path))
         elif shutdown_path.exists():
             print("shutdown")
             print(read_truncated(shutdown_path))
@@ -156,7 +162,8 @@ def main():
             sys.exit(1)
         elapsed = 0
         interval = 5
-        while not done_path.exists() and not failed_path.exists() and not bypassed_path.exists():
+        while (not done_path.exists() and not failed_path.exists()
+               and not bypassed_path.exists() and not restart_path.exists()):
             if not sig_dir.exists():
                 print(f"ERROR:signal_dir_missing:{sig_id} ({sig_dir})", file=sys.stderr)
                 sys.exit(1)
@@ -173,6 +180,9 @@ def main():
         elif bypassed_path.exists():
             print(f"BYPASSED:{sig_id}")
             print(read_truncated(bypassed_path))
+        elif restart_path.exists():
+            print(f"NEEDS_RESTART:{sig_id}")
+            print(read_truncated(restart_path))
         else:
             print(f"FAILED:{sig_id}")
             print(read_truncated(failed_path))
@@ -205,6 +215,27 @@ def main():
 
     elif cmd == "heartbeat":
         running_path.touch()
+
+    elif cmd == "ack-restart":
+        removed = []
+        if restart_path.exists():
+            restart_path.unlink(missing_ok=True)
+            removed.append(restart_path.name)
+        # also clear the tmp file if a prior atomic write aborted
+        tmp_restart = sig_dir / f"{sig_id}.needs-restart.tmp"
+        if tmp_restart.exists():
+            tmp_restart.unlink(missing_ok=True)
+            removed.append(tmp_restart.name)
+        # rotate watchdog log so a new generation starts fresh
+        wlog = sig_dir / f"{sig_id}.watchdog.log"
+        if wlog.exists():
+            archive = sig_dir / f"{sig_id}.watchdog.log.prev"
+            try:
+                wlog.replace(archive)
+                removed.append(wlog.name + "->prev")
+            except OSError:
+                pass
+        print(f"OK:ack-restart removed={removed}")
 
     else:
         print(USAGE)

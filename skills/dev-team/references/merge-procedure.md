@@ -55,7 +55,7 @@ python3 ${CLAUDE_PLUGIN_ROOT}/scripts/graceful-shutdown.py \
 ```bash
 git merge --no-ff dev/${WT_NAME} -m "Merge dev/${WT_NAME}: {WP 제목} ({TSK-ID 목록})"
 ```
-3. 충돌 발생 시: 사용자에게 보고하고 수동 해결 요청. 60초 후 재확인 (최대 3회). 3회 초과 시 `git merge --abort`로 해당 WP 머지 건너뛰기
+3. 충돌 발생 시 (자율 실행 원칙): **즉시 `git merge --abort`로 해당 WP 머지를 건너뛴다.** 사용자 수동 해결을 대기하지 않는다. 워크트리(`.claude/worktrees/${WT_NAME}/`)와 브랜치(`dev/${WT_NAME}`)는 **보존**한다 (사후 수동 머지 가능). 충돌 파일 목록과 abort 사유를 최종 요약 보고에 기록한다.
 4. 워크트리 + 브랜치 정리 (머지 성공 시):
    머지가 완료된 WP는 재시작 시 다시 실행할 필요가 없으므로, 즉시 정리한다:
    ```bash
@@ -77,7 +77,7 @@ git merge --no-ff dev/${WT_NAME} -m "Merge dev/${WT_NAME}: {WP 제목} ({TSK-ID 
 2. main 브랜치에 순차적으로 머지 (`git merge --no-ff dev/${WT_NAME}`)
    - 머지 순서: 의존성 하위 WP부터
 3. 머지 후 충돌 여부 확인
-   - 충돌 발생 시: 사용자에게 보고하고 수동 해결 요청. 60초 후 재확인하여 미해결 시 다시 안내 (최대 3회). 3회 초과 시 `git merge --abort`로 해당 WP 머지를 건너뛰고 다음 WP 진행
+   - 충돌 발생 시 (자율 실행 원칙): **즉시 `git merge --abort`로 해당 WP 머지를 건너뛰고 다음 WP 진행.** 사용자 수동 해결을 대기하지 않는다. 워크트리/브랜치는 보존한다. 충돌 파일 목록과 abort 사유를 최종 요약 보고에 기록.
    - 충돌 없으면: 다음 브랜치 머지 진행
 4. 개별 WP 정리 (조기 머지(A)에서 이미 정리된 WP는 건너뛴다):
    각 머지 성공 WP에 대해:
