@@ -368,7 +368,7 @@ monitor-server, monitor-launcher
 - category: infrastructure
 - domain: backend
 - model: opus
-- status: [ ]
+- status: [dd]
 - priority: high
 - assignee: -
 - schedule: 2026-04-24 ~ 2026-04-24
@@ -411,7 +411,7 @@ monitor-server, monitor-launcher
 - category: development
 - domain: backend
 - model: sonnet
-- status: [ ]
+- status: [dd]
 - priority: high
 - assignee: -
 - schedule: 2026-04-25 ~ 2026-04-25
@@ -460,7 +460,7 @@ monitor-server, monitor-launcher
 - category: infrastructure
 - domain: infra
 - model: sonnet
-- status: [ ]
+- status: [dd]
 - priority: high
 - assignee: -
 - schedule: 2026-04-24 ~ 2026-04-24
