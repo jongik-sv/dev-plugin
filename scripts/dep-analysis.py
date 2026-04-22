@@ -10,6 +10,7 @@ Modes:
                    diamond patterns, review candidates for contract extraction,
                    fan_out per task, critical_path, bottleneck_ids)
 """
+import heapq
 import sys
 import os
 import json
@@ -73,6 +74,33 @@ def parse_depends(dep_str):
     return out
 
 
+def _chain_depth(t, dep_map, memo, stack):
+    """Recursively compute the longest dependency chain length ending at t.
+
+    Args:
+        t: task id to compute depth for
+        dep_map: dict mapping tsk_id -> list of dependency ids
+        memo: shared memoization dict (tsk_id -> int)
+        stack: set of currently active nodes (cycle guard)
+
+    Returns:
+        int: depth of longest chain ending at t (inclusive)
+    """
+    if t in memo:
+        return memo[t]
+    if t in stack:
+        return 0  # circular guard
+    stack.add(t)
+    deps = dep_map.get(t, [])
+    if not deps:
+        d = 1
+    else:
+        d = 1 + max((_chain_depth(x, dep_map, memo, stack) for x in deps if x in dep_map), default=0)
+    stack.discard(t)
+    memo[t] = d
+    return d
+
+
 def _compute_fan_out(dep_map, task_ids):
     """Compute fan-out for each task.
 
@@ -133,10 +161,10 @@ def _compute_critical_path(dep_map, task_ids):
                 in_degree[t] += 1
                 successors[d].append(t)
 
-    # Kahn's algorithm: process nodes in topological order
-    # Use sorted queue for determinism (alphabetical)
-    from collections import deque
-    queue = deque(sorted(t for t in task_ids if in_degree[t] == 0))
+    # Kahn's algorithm: process nodes in topological order.
+    # Use a min-heap for O(log n) deterministic (alphabetical) ordering.
+    heap = list(sorted(t for t in task_ids if in_degree[t] == 0))
+    heapq.heapify(heap)
 
     # DP: dist[t] = longest chain length ending at t (inclusive)
     # parent[t] = predecessor in the longest path to t
@@ -144,9 +172,8 @@ def _compute_critical_path(dep_map, task_ids):
     parent = {t: None for t in task_ids}
 
     processed = []
-    while queue:
-        # Pop the alphabetically first node from the front (queue is sorted on insert)
-        node = queue.popleft()
+    while heap:
+        node = heapq.heappop(heap)
         processed.append(node)
 
         for succ in successors[node]:
@@ -160,13 +187,7 @@ def _compute_critical_path(dep_map, task_ids):
 
             in_degree[succ] -= 1
             if in_degree[succ] == 0:
-                # Insert in sorted position for deterministic processing
-                # Use bisect to maintain sorted order in deque (convert to list)
-                import bisect
-                lst = list(queue)
-                pos = bisect.bisect_left(lst, succ)
-                lst.insert(pos, succ)
-                queue = deque(lst)
+                heapq.heappush(heap, succ)
 
     if len(processed) != len(task_ids):
         raise ValueError("cycle detected in dependency graph")
@@ -214,26 +235,11 @@ def compute_graph_stats(items, fan_in_threshold=3, depends_threshold=4, top_n=5)
     fan_in_ge_3_count = sum(1 for _, c in fan_in.items() if c >= fan_in_threshold)
 
     # Max chain depth via memoized DFS (depth including self)
-    memo = {}
-
-    def depth(t, stack):
-        if t in memo:
-            return memo[t]
-        if t in stack:
-            return 0  # circular guard
-        stack.add(t)
-        deps = dep_map.get(t, [])
-        if not deps:
-            d = 1
-        else:
-            d = 1 + max((depth(x, stack) for x in deps if x in dep_map), default=0)
-        stack.discard(t)
-        memo[t] = d
-        return d
-
-    max_chain_depth = 0
-    for t in task_ids:
-        max_chain_depth = max(max_chain_depth, depth(t, set()))
+    memo: dict = {}
+    max_chain_depth = max(
+        (_chain_depth(t, dep_map, memo, set()) for t in task_ids),
+        default=0,
+    )
 
     # Diamond patterns: apex X has 2+ direct children A,B that share a merge M
     children = {t: [] for t in task_ids}
@@ -290,10 +296,12 @@ def compute_graph_stats(items, fan_in_threshold=3, depends_threshold=4, top_n=5)
     # Critical path: longest path from root to leaf via DP
     critical_path = _compute_critical_path(dep_map, task_ids)
 
-    # Bottleneck IDs: fan_in >= threshold OR fan_out >= threshold
+    # Bottleneck IDs: fan_in >= threshold OR fan_out >= threshold.
+    # Both fan-in and fan-out use the same threshold value (fan_in_threshold).
+    bottleneck_threshold = fan_in_threshold
     bottleneck_ids = sorted(
         t for t in task_ids
-        if fan_in.get(t, 0) >= fan_in_threshold or fan_out.get(t, 0) >= fan_in_threshold
+        if fan_in.get(t, 0) >= bottleneck_threshold or fan_out.get(t, 0) >= bottleneck_threshold
     )
 
     return {

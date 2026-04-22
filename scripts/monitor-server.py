@@ -3500,6 +3500,21 @@ pre.pane-capture {
 # ---------------------------------------------------------------------------
 
 
+def _send_plain_404(handler) -> None:
+    """Write a minimal ``404 Not Found`` text/plain response to *handler*.
+
+    Shared by :func:`_handle_static` (static-route guard) and
+    :meth:`MonitorHandler._route_not_found` to avoid duplicating the same
+    response block in multiple places.
+    """
+    body = b"404 Not Found"
+    handler.send_response(404)
+    handler.send_header("Content-Type", "text/plain; charset=utf-8")
+    handler.send_header("Content-Length", str(len(body)))
+    handler.end_headers()
+    handler.wfile.write(body)
+
+
 def _resolve_plugin_root() -> str:
     """Return the plugin root directory path.
 
@@ -3551,29 +3566,20 @@ def _handle_static(handler: "BaseHTTPRequestHandler", path: str) -> None:
     - On success → 200 with ``Content-Type: application/javascript; charset=utf-8``
       and ``Cache-Control: public, max-age=3600``.
     """
-
-    def _send_404() -> None:
-        body = b"404 Not Found"
-        handler.send_response(404)
-        handler.send_header("Content-Type", "text/plain; charset=utf-8")
-        handler.send_header("Content-Length", str(len(body)))
-        handler.end_headers()
-        handler.wfile.write(body)
-
     # ── Guard 1: prefix + traversal + whitelist ──────────────────────────────
     if not isinstance(path, str) or not path.startswith(_STATIC_PATH_PREFIX):
-        _send_404()
+        _send_plain_404(handler)
         return
     if ".." in path:
-        _send_404()
+        _send_plain_404(handler)
         return
     filename = path[len(_STATIC_PATH_PREFIX):]
     if not filename or filename not in _STATIC_WHITELIST:
-        _send_404()
+        _send_plain_404(handler)
         return
 
     # ── Resolve vendor directory via plugin_root ──────────────────────────────
-    plugin_root = getattr(getattr(handler, "server", None), "plugin_root", None) or _resolve_plugin_root()
+    plugin_root = _server_attr(handler, "plugin_root") or _resolve_plugin_root()
     vendor_dir = Path(plugin_root) / "skills" / "dev-monitor" / "vendor"
     target = vendor_dir / filename
 
@@ -3583,17 +3589,17 @@ def _handle_static(handler: "BaseHTTPRequestHandler", path: str) -> None:
         vendor_resolved = vendor_dir.resolve()
         # resolved must be vendor_dir itself or a direct child
         if vendor_resolved not in (resolved, *resolved.parents):
-            _send_404()
+            _send_plain_404(handler)
             return
     except (OSError, ValueError):
-        _send_404()
+        _send_plain_404(handler)
         return
 
     # ── File read ────────────────────────────────────────────────────────────
     try:
         data = target.read_bytes()
     except OSError:
-        _send_404()
+        _send_plain_404(handler)
         return
 
     # ── Successful response ───────────────────────────────────────────────────
@@ -4511,12 +4517,7 @@ class MonitorHandler(BaseHTTPRequestHandler):
 
     def _route_not_found(self) -> None:
         """Unmatched GET path → 404."""
-        body = b"404 Not Found"
-        self.send_response(404)
-        self.send_header("Content-Type", "text/plain; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+        _send_plain_404(self)
 
 
 class ThreadingMonitorServer(ThreadingHTTPServer):
