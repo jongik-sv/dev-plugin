@@ -11,10 +11,10 @@ WBS 태스크 진행 현황 · tmux pane 상태 · 시그널 파일을 실시간
 
 | 옵션 | 기본값 | 설명 |
 |------|--------|------|
-| `--port N` | `7321` | 서버 바인딩 포트 |
+| `--port N` | 자동 탐색 (7321~7399) | 서버 바인딩 포트 (명시 시 고정, 생략 시 프로젝트별 자동 할당) |
 | `--docs DIR` | `docs` | 스캔할 docs 디렉터리 |
-| `--stop` | — | 실행 중인 서버 종료 |
-| `--status` | — | 서버 실행 상태 확인 |
+| `--stop` | — | 현재 프로젝트의 서버 종료 (`--port N` 명시 시 포트 기준) |
+| `--status` | — | 현재 프로젝트의 서버 실행 상태 확인 (`--port N` 명시 시 포트 기준) |
 
 ## 0. 인자 파싱
 
@@ -49,15 +49,20 @@ Bash 도구로 실행:
 
 launcher가 내부적으로 다음 순서로 실행한다:
 
-1. **PID 파일 존재 + 프로세스 생존** → URL 재출력 후 종료 (중복 기동 방지, idempotent)
-2. **socket bind 테스트** → 포트 점유 시 안내 메시지 + `--port` 옵션 힌트 출력
-3. **`subprocess.Popen` detach 기동**
+1. **프로젝트 PID 파일 존재 + 프로세스 생존** → URL 재출력 후 종료 (중복 기동 방지, idempotent). PID 파일 키는 `sha256(realpath(project_root))[:12]` 해시 기반
+2. **포트 결정**: `--port N` 명시 시 해당 포트 사용; 미지정 시 7321~7399 범위에서 자동 탐색
+3. **socket bind 테스트** → 포트 점유 시 안내 메시지 + `--port` 옵션 힌트 출력
+4. **`subprocess.Popen` detach 기동**
    - macOS/Linux: `start_new_session=True`
    - Windows psmux: `DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP`
-4. **PID 파일 기록**: `${TMPDIR}/dev-monitor-{port}.pid`
-5. **URL 출력**: `http://localhost:{port}`
+5. **JSON PID 파일 기록**: `${TMPDIR}/dev-monitor-{project_hash}.pid` → `{"pid": N, "port": N}`
+6. **URL 출력**: `http://localhost:{port}`
 
-로그는 `${TMPDIR}/dev-monitor-{port}.log`에 append된다.
+로그는 `${TMPDIR}/dev-monitor-{project_hash}.log`에 append된다.
+
+#### 프로젝트별 독립 실행
+
+같은 포트 범위(7321~7399)를 여러 프로젝트가 공유한다. 각 프로젝트는 고유한 해시 기반 PID 파일(`dev-monitor-{hash}.pid`)을 가지므로 서로 다른 프로젝트의 서버가 동시에 실행될 수 있다. `--stop` / `--status`를 포트 없이 실행하면 현재 프로젝트(`$PWD`)의 서버만 조작한다.
 
 ## 2. 완료 보고
 
