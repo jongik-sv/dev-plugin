@@ -273,9 +273,9 @@ class FeatureSectionE2ETests(unittest.TestCase):
         data = self._api_state()
         html_body = self._dashboard_html()
 
-        # #features 섹션 블록 추출
+        # #features 섹션 블록 추출 (추가 속성 허용: <section id="features" data-section="...">)
         section_match = re.search(
-            r'<section id="features">(.*?)</section>',
+            r'<section id="features"[^>]*>(.*?)</section>',
             html_body,
             re.DOTALL,
         )

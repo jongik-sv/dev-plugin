@@ -1490,43 +1490,47 @@ class FilterBySubprojectTests(unittest.TestCase):
     def test_filter_panes_by_window_name_suffix(self):
         """window_name이 '-{sp}' suffix이면 통과."""
         pane = self._make_pane_with_path("WP-01-billing", "/tmp")
-        result = self.filter_fn([pane], "billing", "proj-a")
-        self.assertEqual(len(result["panes"]), 1)
+        state = {"tmux_panes": [pane], "signals": []}
+        result = self.filter_fn(state, "billing", "proj-a")
+        self.assertEqual(len(result["tmux_panes"]), 1)
 
     def test_filter_panes_by_window_name_contains(self):
         """window_name에 '-{sp}-' substring이 있으면 통과."""
         pane = self._make_pane_with_path("WP-01-billing-2", "/tmp")
-        result = self.filter_fn([pane], "billing", "proj-a")
-        self.assertEqual(len(result["panes"]), 1)
+        state = {"tmux_panes": [pane], "signals": []}
+        result = self.filter_fn(state, "billing", "proj-a")
+        self.assertEqual(len(result["tmux_panes"]), 1)
 
     def test_filter_panes_by_path(self):
         """pane_current_path에 '/{sp}/' 포함이면 통과."""
         pane = self._make_pane_with_path("other-window", "/home/user/proj/billing/src")
-        result = self.filter_fn([pane], "billing", "proj-a")
-        self.assertEqual(len(result["panes"]), 1)
+        state = {"tmux_panes": [pane], "signals": []}
+        result = self.filter_fn(state, "billing", "proj-a")
+        self.assertEqual(len(result["tmux_panes"]), 1)
 
     def test_filter_panes_excludes_other(self):
         """다른 서브프로젝트 pane은 제외."""
         pane = self._make_pane_with_path("WP-01-auth", "/tmp/auth")
-        result = self.filter_fn([pane], "billing", "proj-a")
-        self.assertEqual(len(result["panes"]), 0)
+        state = {"tmux_panes": [pane], "signals": []}
+        result = self.filter_fn(state, "billing", "proj-a")
+        self.assertEqual(len(result["tmux_panes"]), 0)
 
     def test_filter_signals_by_scope_exact(self):
         """scope가 '{project_name}-{sp}'이면 통과."""
         sig = self._make_signal("proj-a-billing")
-        result = self.filter_fn([sig], "billing", "proj-a")
+        result = self.filter_fn({"tmux_panes": [], "signals": [sig]}, "billing", "proj-a")
         self.assertEqual(len(result["signals"]), 1)
 
     def test_filter_signals_by_scope_prefix(self):
         """scope가 '{project_name}-{sp}-*' prefix이면 통과."""
         sig = self._make_signal("proj-a-billing-worker")
-        result = self.filter_fn([sig], "billing", "proj-a")
+        result = self.filter_fn({"tmux_panes": [], "signals": [sig]}, "billing", "proj-a")
         self.assertEqual(len(result["signals"]), 1)
 
     def test_filter_signals_excludes_other_sp(self):
         """다른 서브프로젝트 scope는 제외."""
         sig = self._make_signal("proj-a-auth")
-        result = self.filter_fn([sig], "billing", "proj-a")
+        result = self.filter_fn({"tmux_panes": [], "signals": [sig]}, "billing", "proj-a")
         self.assertEqual(len(result["signals"]), 0)
 
 

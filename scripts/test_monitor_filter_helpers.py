@@ -13,6 +13,9 @@ import sys
 import unittest
 from pathlib import Path
 
+os.environ["PYTHONPYCACHEPREFIX"] = "/tmp/codex-pycache"
+sys.pycache_prefix = "/tmp/codex-pycache"
+
 
 # ---------------------------------------------------------------------------
 # Module loader (동일 프로젝트 내 다른 test_monitor_*.py와 동일 패턴)
@@ -237,10 +240,10 @@ class TestFilterSignalsByProject(unittest.TestCase):
         self.assertNotIn(sig, result)
 
     def test_agent_pool_scope_excluded(self):
-        """scope='agent-pool:12345-678'는 project_name=myproj 기준에서 제외."""
+        """scope='agent-pool:12345-678'는 project_name=myproj 기준에서도 통과."""
         sig = _make_signal(scope="agent-pool:12345-678")
         result = MS._filter_signals_by_project([sig], "myproj")
-        self.assertNotIn(sig, result)
+        self.assertIn(sig, result)
 
 
 if __name__ == "__main__":

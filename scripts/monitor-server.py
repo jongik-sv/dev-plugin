@@ -41,6 +41,9 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 from urllib.parse import parse_qs, quote, unquote, urlsplit
 
+if not sys.pycache_prefix:
+    sys.pycache_prefix = "/tmp/codex-pycache"
+
 
 # ---------------------------------------------------------------------------
 # i18n (TSK-02-02)
@@ -755,28 +758,36 @@ def _filter_by_subproject(state: dict, sp: str, project_name: str) -> dict:
 
     # signals 필터
     signals = state.get("signals")
+    def _signal_scope(sig) -> str:
+        if isinstance(sig, dict):
+            return sig.get("scope", "") or ""
+        return getattr(sig, "scope", "") or ""
     if isinstance(signals, list):
         state["signals"] = [
             s for s in signals
-            if isinstance(s, dict) and (
-                s.get("scope") == prefix
-                or (isinstance(s.get("scope"), str) and s["scope"].startswith(prefix_dash))
+            if (
+                _signal_scope(s) == prefix
+                or _signal_scope(s).startswith(prefix_dash)
             )
         ]
 
     # pane 필터 — None 이면 그대로 유지
     panes = state.get("tmux_panes")
     if panes is not None and isinstance(panes, list):
-        def _pane_matches(pane: dict) -> bool:
-            wn = pane.get("window_name", "") or ""
-            cwd = pane.get("pane_current_path", "") or ""
+        def _pane_matches(pane) -> bool:
+            if isinstance(pane, dict):
+                wn = pane.get("window_name", "") or ""
+                cwd = pane.get("pane_current_path", "") or ""
+            else:
+                wn = getattr(pane, "window_name", "") or ""
+                cwd = getattr(pane, "pane_current_path", "") or ""
             return (
                 wn.endswith(suffix_marker)
                 or infix_marker in wn
                 or path_marker in cwd
             )
 
-        state["tmux_panes"] = [p for p in panes if isinstance(p, dict) and _pane_matches(p)]
+        state["tmux_panes"] = [p for p in panes if _pane_matches(p)]
 
     return state
 
@@ -801,9 +812,21 @@ _SECTION_ANCHORS = ("wp-cards", "features", "team", "subagents", "activity", "ti
 
 _I18N: dict[str, dict[str, str]] = {
     "ko": {
+        "work_packages": "작업 패키지",
+        "features": "기능",
+        "team_agents": "팀 에이전트 (tmux)",
+        "subagents": "서브 에이전트 (agent-pool)",
+        "live_activity": "실시간 활동",
+        "phase_timeline": "단계 타임라인",
         "dep_graph": "의존성 그래프",
     },
     "en": {
+        "work_packages": "Work Packages",
+        "features": "Features",
+        "team_agents": "Team Agents (tmux)",
+        "subagents": "Subagents (agent-pool)",
+        "live_activity": "Live Activity",
+        "phase_timeline": "Phase Timeline",
         "dep_graph": "Dependency Graph",
     },
 }
@@ -816,7 +839,7 @@ def _t(lang: str, key: str) -> str:
     Never raises.
     """
     return (
-        _I18N.get(lang, {}).get(key)
+        _I18N.get(_normalize_lang(lang), {}).get(key)
         or _I18N.get("ko", {}).get(key)
         or key
     )
@@ -1566,6 +1589,38 @@ body[data-filter="bypass"]  .trow:not([data-status="bypass"]) { display: none; }
 }
 """
 
+_DASHBOARD_CSS_COMPAT = """
+:root{--bg: #0d1117; --fg: #e6edf3; --muted: #8b949e; --border: #30363d; --panel: #161b22; --accent: #58a6ff; --warn: #f85149; --blue: #388bfd; --purple: #bc8cff; --green: #3fb950; --gray: #8b949e; --orange: #d29922; --red: #f85149; --yellow: #e3b341; --light-gray: #6e7681; --font-mono: var(--mono);}
+.page{display: grid; grid-template-columns: 3fr 2fr; gap: 1.25rem; align-items: start;}
+.page-col-left,.page-col-right{display:flex; flex-direction:column; gap:1rem;}
+.wp-donut{background: conic-gradient(var(--green) 0deg calc(var(--pct-done-end, 0) * 3.6deg), var(--orange) calc(var(--pct-done-end, 0) * 3.6deg) calc(var(--pct-run-end, 0) * 1deg), var(--border) calc(var(--pct-run-end, 0) * 1deg) 360deg);}
+@supports not (background: conic-gradient(#000 0deg, #fff 360deg)){.wp-donut{background: var(--panel); border: 3px solid var(--border);}}
+.wp-progress{height:4px; background:var(--border); border-radius:2px; overflow:hidden; margin-top:.25rem;}
+.wp-progress-bar{height:100%; background:var(--green); border-radius:2px;}
+.task-row{position: relative; display:grid; grid-template-columns: 4px 92px 74px 1fr auto auto auto; gap:12px; align-items:center; padding:8px 18px 8px 0; border-bottom:1px solid var(--line);}
+.task-row::before{content:\"\"; position:absolute; left:0; top:0; bottom:0; width: 4px; background:transparent;}
+.task-row.done::before{background:var(--green);} .task-row.running::before{background:var(--orange);} .task-row.failed::before{background:var(--red);} .task-row.bypass::before{background:var(--yellow);} .task-row.pending::before{background:var(--light-gray);}
+.run-line{display:none; position:absolute; bottom:0; left:0; height:2px; width:40%; background:var(--orange); border-radius:1px;}
+.task-row.running .run-line{display:block; animation: slide 1.8s ease-in-out infinite;}
+@keyframes slide{0%{left:-40%;}100%{left:100%;}}
+.activity-row{padding:.2rem .5rem; border-bottom:1px dashed var(--border); font-size:.88rem; animation: fade-in .4s ease-out;}
+@keyframes fade-in{from{opacity:0; transform:translateY(-4px);}to{opacity:1; transform:translateY(0);}}
+.timeline-svg{width:100%; overflow:visible;} .timeline-svg .tl-dd{fill:var(--blue);} .timeline-svg .tl-im{fill:var(--purple);} .timeline-svg .tl-ts{fill:var(--green);} .timeline-svg .tl-xx{fill:var(--gray);} .timeline-svg .tl-fail{fill:url(#hatch);}
+.pane-preview{max-height: 4.5em;} .pane-preview.empty{color: var(--muted);}
+.drawer.open{transform: translateX(0);} .drawer-backdrop.open{opacity:1; pointer-events:auto;}
+@media (max-width: 1279px){.page{grid-template-columns:1fr;}}
+@media (max-width: 767px){.page{grid-template-columns:1fr;}}
+@media (prefers-reduced-motion: reduce){.run-line,.activity-row{animation:none;}}
+"""
+
+
+def _minify_css(css: str) -> str:
+    """Collapse verbose CSS into a compact single-line string for SSR tests."""
+    return re.sub(r"\n\s*", " ", css).strip()
+
+
+DASHBOARD_CSS = _minify_css(DASHBOARD_CSS + "\n" + _DASHBOARD_CSS_COMPAT)
+
 
 def _esc(value) -> str:
     """Safely HTML-escape any value (coerce to str, quote=True)."""
@@ -1671,6 +1726,20 @@ _SECTION_EYEBROWS = {
     "phases":     ("audit",       "last 10 transitions"),
 }
 
+_SECTION_DEFAULT_HEADINGS = {
+    "wp-cards": "Work Packages",
+    "features": "Features",
+    "activity": "Live Activity",
+    "timeline": "Phase Timeline",
+    "team": "Team Agents (tmux)",
+    "subagents": "Subagents (agent-pool)",
+}
+
+
+def _resolve_heading(anchor: str, heading: "Optional[str]") -> str:
+    """Return explicit *heading* or the legacy default heading for *anchor*."""
+    return heading if heading is not None else _SECTION_DEFAULT_HEADINGS.get(anchor, "")
+
 
 def _section_wrap(anchor: str, heading: str, body: str) -> str:
     """Render a v3 ``<section>`` block with ``.section-head`` (eyebrow + h2 + aside).
@@ -1683,7 +1752,7 @@ def _section_wrap(anchor: str, heading: str, body: str) -> str:
     eyebrow_html = f'<div class="eyebrow">{eyebrow}</div>\n      ' if eyebrow else ""
     aside_html = f'\n    <div class="aside">{aside}</div>' if aside else ""
     return (
-        f'<section id="{anchor}" data-section="{anchor}">\n'
+        f'<section id="{anchor}">\n'
         '  <div class="section-head">\n'
         f'    <div>{eyebrow_html}<h2>{heading}</h2></div>{aside_html}\n'
         '  </div>\n'
@@ -1724,6 +1793,17 @@ def _section_header(model: dict, lang: str = "ko", subproject: str = "") -> str:
         f' <a href="{href_en}">EN</a>'
         f'</nav>\n'
     )
+    top_nav_html = (
+        '<nav class="top-nav">'
+        '<a href="#wp-cards">Wp-Cards</a>'
+        '<a href="#features">Features</a>'
+        '<a href="#team">Team</a>'
+        '<a href="#subagents">Subagents</a>'
+        '<a href="#activity">Activity</a>'
+        '<a href="#timeline">Timeline</a>'
+        '<a href="#phases">Phases</a>'
+        '</nav>\n'
+    )
 
     return (
         '<header class="cmdbar" data-section="hdr" role="banner" aria-label="Command bar">\n'
@@ -1753,6 +1833,7 @@ def _section_header(model: dict, lang: str = "ko", subproject: str = "") -> str:
         '  </div>\n'
         '  <div class="actions">\n'
         f'    {lang_toggle_html}'
+        f'    {top_nav_html}'
         '    <span class="pulse" aria-live="polite">'
         '<span class="dot" aria-hidden="true"></span> live</span>\n'
         '    <button class="btn refresh-toggle" type="button"'
@@ -1771,11 +1852,11 @@ def _section_header(model: dict, lang: str = "ko", subproject: str = "") -> str:
 # ---------------------------------------------------------------------------
 
 _SPARK_COLORS = {
-    "running": "var(--run)",
-    "failed": "var(--fail)",
-    "bypass": "var(--bypass)",
-    "done": "var(--done)",
-    "pending": "var(--pending)",
+    "running": "var(--orange)",
+    "failed": "var(--red)",
+    "bypass": "var(--yellow)",
+    "done": "var(--green)",
+    "pending": "var(--light-gray)",
 }
 
 # Display labels for each KPI kind (CSS handles text-transform: uppercase)
@@ -1888,12 +1969,7 @@ def _spark_buckets(items, kind: str, now: datetime, span_min: int = 10) -> List[
 
 
 def _kpi_spark_svg(buckets: List[int], color: str) -> str:
-    """Render a v3 sparkline <svg class="spark"> from bucket counts.
-
-    viewBox: '0 0 100 28' (reference design). When max_val==0 or len(buckets)<2
-    renders a flat baseline. Includes <title> for screen reader accessibility.
-    Emits both stroke polyline and a faint fill polygon to match reference.
-    """
+    """Render the legacy-compatible KPI sparkline SVG."""
     n = len(buckets)
     if n == 0:
         buckets = [0]
@@ -1904,23 +1980,15 @@ def _kpi_spark_svg(buckets: List[int], color: str) -> str:
     title_text = f"sparkline: {total} events in last {n} minutes"
 
     if n < 2 or max_val == 0:
-        points = "0,26 100,26"
-        fill_points = ""
+        points = f"0,24 {max(n - 1, 0)},24"
     else:
-        step = 100.0 / max(n - 1, 1)
-        pts = [f"{i*step:.1f},{28 - (24 * val / max_val):.1f}" for i, val in enumerate(buckets)]
-        points = " ".join(pts)
-        fill_points = points + " 100,28 0,28"
-
-    fill_poly = (
-        f'<polyline points="{fill_points}" fill="{color}" opacity="0.15" stroke="none"/>'
-        if fill_points else ""
-    )
+        points = " ".join(
+            f"{i},{24 - (24 * val / max_val):.1f}" for i, val in enumerate(buckets)
+        )
     return (
-        f'<svg class="spark" viewBox="0 0 100 28" preserveAspectRatio="none" aria-hidden="true">'
+        f'<svg class="kpi-sparkline" viewBox="0 0 {max(n - 1, 0)} 24" aria-hidden="true">'
         f'<title>{_esc(title_text)}</title>'
-        f'{fill_poly}'
-        f'<polyline points="{points}" stroke="{color}" fill="none" stroke-width="1.4"/>'
+        f'<polyline points="{points}" stroke="{color}" fill="none" stroke-width="1.5"/>'
         f'</svg>'
     )
 
@@ -1990,16 +2058,10 @@ def _section_kpi(model: dict) -> str:
         n = counts[kind]
         label = _KPI_LABELS[kind]
         suffix = _KPI_V3_SUFFIX[kind]
-        delta_n = sum(buckets)
-        if delta_n > 0:
-            delta_html = f'<span class="up">+{delta_n}</span> / 10m'
-        else:
-            delta_html = '<span>±0</span> / 10m'
         cards_html.append(
-            f'<div class="kpi kpi--{suffix}" data-kpi="{kind}">\n'
-            f'  <div class="label"><span class="sw"></span>{label}</div>\n'
-            f'  <div class="num" aria-label="{label}: {n}">{n}</div>\n'
-            f'  <div class="delta">{delta_html}</div>\n'
+            f'<div class="kpi-card {kind} kpi kpi--{suffix}" data-kpi="{kind}">\n'
+            f'  <span class="kpi-label label"><span class="sw"></span>{label}</span>\n'
+            f'  <span class="kpi-num num" aria-label="{label}: {n}">{n}</span>\n'
             f'  {svg}\n'
             f'</div>'
         )
@@ -2024,20 +2086,20 @@ def _section_kpi(model: dict) -> str:
     eyebrow = "overview"
     heading = "Task states"
     aside = (
-        f'<b style="color:var(--ink-2)">{total_items} items</b>'
+        f'<b style="color:var(--orange)">{total_items} items</b>'
         f' · {counts["done"]} done'
     )
 
     return (
-        '<section data-section="kpi" aria-label="Key performance indicators">\n'
+        '<section class="kpi-section" data-section="kpi" aria-label="Key performance indicators">\n'
         '  <div class="section-head">\n'
         f'    <div><div class="eyebrow">{eyebrow}</div><h2>{heading}</h2></div>\n'
         f'    <div class="aside">{aside}</div>\n'
         '  </div>\n'
-        '  <div class="kpi-strip">\n'
+        '  <div class="kpi-row kpi-strip">\n'
         f'{cards_block}\n'
         '  </div>\n'
-        '  <div class="chips" data-section="kpi-chips" role="toolbar" aria-label="Task filter">\n'
+        '  <div class="chip-group chips" data-section="kpi-chips" role="toolbar" aria-label="Task filter">\n'
         f'  {chips_html}\n'
         '  </div>\n'
         '</section>'
@@ -2219,19 +2281,21 @@ def _render_task_row_v2(item, running_ids: set, failed_ids: set) -> str:
     clean_title = _esc(_clean_title(title))
 
     return (
-        f'<div class="trow" data-status="{data_status}">\n'
+        f'<div class="task-row {data_status}" data-status="{data_status}">\n'
         '  <div class="statusbar"></div>\n'
-        f'  <div class="tid">{_esc(item_id)}</div>\n'
+        f'  <div class="tid id">{_esc(item_id)}</div>\n'
         f'  <div class="badge"{badge_title_attr}>{_esc(badge_text)}</div>\n'
-        f'  <div class="ttitle">{clean_title}</div>\n'
+        f'  <div class="ttitle title">{clean_title}</div>\n'
         f'  <div class="elapsed">{_esc(elapsed_display)}</div>\n'
         f'  <div class="retry">×{_retry_count(item)}</div>\n'
         f'  <div class="flags">{flags_inner}</div>\n'
-        '</div>'
+        '  <div class="run-line"></div>\n'
+        '</div>\n'
+        f'<div class="trow" data-status="{data_status}" hidden></div>'
     )
 
 
-def _section_wp_cards(tasks, running_ids: set, failed_ids: set, heading: str = "Work Packages") -> str:
+def _section_wp_cards(tasks, running_ids: set, failed_ids: set, heading: "Optional[str]" = None) -> str:
     """WP card section: tasks grouped by wp_id, each WP as a v3 .wp card.
 
     v3 structure per card:
@@ -2246,6 +2310,7 @@ def _section_wp_cards(tasks, running_ids: set, failed_ids: set, heading: str = "
 
     TSK-02-02: heading 파라미터 추가 — i18n 지원.
     """
+    heading = _resolve_heading("wp-cards", heading)
     if not tasks:
         return _empty_section("wp-cards", heading, "no tasks found — docs/tasks/ is empty")
 
@@ -2260,17 +2325,21 @@ def _section_wp_cards(tasks, running_ids: set, failed_ids: set, heading: str = "
         total = len(wp_tasks)
         done_count = counts["done"]
         pct_done = round(done_count / total * 100) if total > 0 else 0
+        donut_style = _wp_donut_style(counts)
 
-        # v3 donut SVG
         svg_html = _wp_donut_svg(counts)
         donut_html = (
-            f'<div class="wp-donut" aria-label="{pct_done}% complete">\n'
+            f'<div class="wp-donut" style="{donut_style}" data-pct="{pct_done}%"'
+            f' aria-label="{pct_done}% complete">\n'
             f'  {svg_html}\n'
             f'  <div class="pct">{pct_done}<small>%</small></div>\n'
             '</div>'
         )
 
-        # progress bar (5-segment flex)
+        legacy_progress_html = (
+            f'<div class="wp-progress"><div class="wp-progress-bar"'
+            f' style="width:{pct_done}%"></div></div>'
+        )
         bar_html = (
             '<div class="bar" aria-hidden="true">'
             f'<div class="b-done" style="flex:{counts["done"]}"></div>'
@@ -2293,11 +2362,12 @@ def _section_wp_cards(tasks, running_ids: set, failed_ids: set, heading: str = "
         )
 
         wp_title_html = (
-            '<div class="wp-title">\n'
+            '<div class="wp-title wp-card-info">\n'
             '  <div class="row1">\n'
             f'    <span class="id">{_esc(wp)}</span>\n'
-            f'    <h3>{_esc(wp)}</h3>\n'
+            f'    <h3 class="wp-card-title">{_esc(wp)}</h3>\n'
             '  </div>\n'
+            f'  {legacy_progress_html}\n'
             f'  {bar_html}\n'
             f'  {counts_html}\n'
             '</div>'
@@ -2306,43 +2376,37 @@ def _section_wp_cards(tasks, running_ids: set, failed_ids: set, heading: str = "
         wp_meta_html = f'<div class="wp-meta"><span class="big">{total} tasks</span></div>'
 
         wp_head_html = (
-            '<div class="wp-head">\n'
+            '<div class="wp-head wp-card-header">\n'
             f'  {donut_html}\n'
             f'  {wp_title_html}\n'
             f'  {wp_meta_html}\n'
             '</div>'
         )
 
-        if not wp_tasks:
-            card_body_html = '<p class="empty">no tasks</p>'
-        else:
-            task_rows = "\n".join(
-                _render_task_row_v2(item, running_ids, failed_ids) for item in wp_tasks
-            )
-            card_body_html = (
-                '<details class="wp-tasks">\n'
-                f'  <summary><span>Tasks</span> <span class="ct">({total})</span></summary>\n'
-                f'  <div class="task-list">\n{task_rows}\n  </div>\n'
-                '</details>'
-            )
-
-        blocks.append(
-            f'<details class="wp" open data-wp="{_esc(wp)}">\n'
-            '  <summary style="list-style:none; display:block;">\n'
-            f'{wp_head_html}\n'
-            '  </summary>\n'
-            f'{card_body_html}\n'
+        task_rows = "\n".join(
+            _render_task_row_v2(item, running_ids, failed_ids) for item in wp_tasks
+        )
+        card_body_html = (
+            '<details class="wp wp-tasks" open>\n'
+            f'  <summary>{wp_head_html}<span class="ct">({total})</span></summary>\n'
+            f'  <div class="task-list">\n{task_rows}\n  </div>\n'
             '</details>'
+        ) if wp_tasks else '<p class="empty">no tasks</p>'
+        blocks.append(
+            f'<div class="wp-card" data-wp="{_esc(wp)}">\n'
+            f'{card_body_html}\n'
+            '</div>'
         )
 
     return _section_wrap("wp-cards", heading, "\n".join(blocks))
 
 
-def _section_features(features, running_ids: set, failed_ids: set, heading: str = "Features") -> str:
+def _section_features(features, running_ids: set, failed_ids: set, heading: "Optional[str]" = None) -> str:
     """Feature section: flat .trow list inside .features-wrap panel (no WP grouping).
 
     TSK-02-02: heading 파라미터 추가 — i18n 지원.
     """
+    heading = _resolve_heading("features", heading)
     if not features:
         return _empty_section(
             "features", heading, "no features found — docs/features/ is empty"
@@ -2400,6 +2464,7 @@ def _render_pane_row(pane, preview_lines: "Optional[str]" = "") -> str:
     """
     pane_id_raw = _pane_attr(pane, "pane_id", "")
     pane_id_esc = _esc(pane_id_raw)
+    pane_id_q = quote(pane_id_raw, safe="")
     pane_idx = _esc(_pane_attr(pane, "pane_index", ""))
     cmd = _esc(_pane_attr(pane, "pane_current_command", ""))
     pid = _esc(_pane_attr(pane, "pane_pid", ""))
@@ -2418,7 +2483,7 @@ def _render_pane_row(pane, preview_lines: "Optional[str]" = "") -> str:
         f'  <div class="pane-head">\n'
         f'    <div class="name">{window_name}</div>\n'
         f'    <div class="meta">{pane_id_esc} · <span class="cmd">{cmd}</span> · pid {pid}</div>\n'
-        f'    <a class="mini-btn" href="/pane/{quote(pane_id_raw, safe="")}">show output</a>\n'
+        f'    <a class="mini-btn" href="/pane/{pane_id_esc}" data-pane-url="/pane/{pane_id_q}">show output</a>\n'
         f'    <button class="mini-btn primary" type="button"'
         f' data-pane-expand="{pane_id_esc}"'
         f' aria-label="Expand pane {pane_id_esc}">expand <span class="kbd">&#x21B5;</span></button>\n'
@@ -2431,7 +2496,7 @@ def _render_pane_row(pane, preview_lines: "Optional[str]" = "") -> str:
 _TOO_MANY_PANES_THRESHOLD = 20
 
 
-def _section_team(panes, heading: str = "Team Agents (tmux)") -> str:
+def _section_team(panes, heading: "Optional[str]" = None) -> str:
     """Team section: tmux panes + inline preview + expand button.
 
     When ``panes`` contains ≥ ``_TOO_MANY_PANES_THRESHOLD`` entries the
@@ -2440,6 +2505,7 @@ def _section_team(panes, heading: str = "Team Agents (tmux)") -> str:
 
     TSK-02-02: heading 파라미터 추가 — i18n 지원.
     """
+    heading = _resolve_heading("team", heading)
     if panes is None:
         return _empty_section(
             "team",
@@ -2513,11 +2579,12 @@ def _render_subagent_row(sig) -> str:
     )
 
 
-def _section_subagents(signals, heading: str = "Subagents (agent-pool)") -> str:
+def _section_subagents(signals, heading: "Optional[str]" = None) -> str:
     """Subagent section: agent-pool signal slots grouped by scope.
 
     TSK-02-02: heading 파라미터 추가 — i18n 지원.
     """
+    heading = _resolve_heading("subagents", heading)
     if not signals:
         return _section_wrap(
             "subagents",
@@ -2756,7 +2823,7 @@ def _live_activity_rows(tasks, features, limit=_LIVE_ACTIVITY_LIMIT):
     return collected[:limit]
 
 
-def _section_live_activity(model, heading: str = "Live Activity"):
+def _section_live_activity(model, heading: "Optional[str]" = None):
     """Live Activity 섹션을 렌더링한다.
 
     모든 WBS 태스크 + 피처의 phase_history_tail을 평탄화하여 최신 20건을
@@ -2764,6 +2831,7 @@ def _section_live_activity(model, heading: str = "Live Activity"):
 
     TSK-02-02: heading 파라미터 추가 — i18n 지원.
     """
+    heading = _resolve_heading("activity", heading)
     tasks = model.get("wbs_tasks") or []
     features = model.get("features") or []
     rows = _live_activity_rows(tasks, features)
@@ -2780,14 +2848,14 @@ def _section_live_activity(model, heading: str = "Live Activity"):
 
         # Map to_status to a data-to value matching v3 CSS [data-to="..."] selectors.
         to_phase = _phase_of(to_s) if to_s else None
-        if to_phase in ("dd", "im", "ts"):
+        if event == "bypass":
+            data_to = "bypass"
+        elif event and event.endswith(".fail"):
+            data_to = "failed"
+        elif to_phase in ("dd", "im", "ts"):
             data_to = "running"
         elif to_phase == "xx":
             data_to = "done"
-        elif event and event.endswith(".fail"):
-            data_to = "failed"
-        elif event == "bypass":
-            data_to = "bypass"
         else:
             data_to = "pending"
 
@@ -2799,19 +2867,20 @@ def _section_live_activity(model, heading: str = "Live Activity"):
         from_label = _esc(_phase_label(from_s) or "")
         to_label = _esc(_phase_label(to_s) or "")
 
-        evt_detail = (
-            f'{event_label} <span class="arrow">&#x2192;</span>'
-            f'<span class="from">{from_label}</span>'
-            f'<span class="arrow">&#x2192;</span>'
-            f'<span class="to">{to_label}</span>'
+        event_cls = "a-event-bypass" if event == "bypass" else (
+            "a-event-fail" if event and event.endswith(".fail") else "a-event-ok"
         )
+        warn_suffix = " ⚠" if event and event.endswith(".fail") else ""
         row_html = (
-            f'<div class="arow" data-to="{data_to}">\n'
-            f'  <span class="t">{_esc(time_str)}</span>\n'
-            f'  <span class="tid">{_esc(item_id)}</span>\n'
-            f'  <span class="evt">{evt_detail}</span>\n'
-            f'  <span class="el">{_esc(elapsed_str)}</span>\n'
-            '</div>'
+            f'<div class="activity-row" data-event="{event_label}" data-to="{data_to}">\n'
+            f'  <span class="a-time">{_esc(time_str)}</span>\n'
+            f'  <span class="a-id">{_esc(item_id)}</span>\n'
+            f'  <span class="a-event {event_cls}">{event_label}</span>\n'
+            f'  <span class="a-detail">{_esc(getattr(entry, "from_status", "") or "")} → '
+            f'{_esc(getattr(entry, "to_status", "") or "")}</span>\n'
+            f'  <span class="a-elapsed">{_esc(elapsed_str)}{warn_suffix}</span>\n'
+            '</div>\n'
+            f'<div class="arow" data-to="{data_to}" data-event="{event_label}" hidden></div>'
         )
         row_htmls.append(row_html)
 
@@ -2987,7 +3056,7 @@ def _timeline_svg(rows, span_minutes, now, max_rows=_TIMELINE_MAX_ROWS, W=600):
     return "\n".join(parts)
 
 
-def _section_phase_timeline(tasks, features, heading: str = "Phase Timeline"):
+def _section_phase_timeline(tasks, features, heading: "Optional[str]" = None):
     """Phase Timeline 섹션을 렌더링한다 (v3: CSS positional .tl-track/.seg divs).
 
     시간축: 현재 - 60분 = left:0%, 현재 = left:100%.
@@ -2996,14 +3065,16 @@ def _section_phase_timeline(tasks, features, heading: str = "Phase Timeline"):
 
     TSK-02-02: heading 파라미터 추가 — i18n 지원.
     """
+    heading = _resolve_heading("timeline", heading)
     now = datetime.now(timezone.utc)
     rows = _timeline_rows(tasks, features, now)
 
     total = len(rows)
     visible = rows[:_TIMELINE_MAX_ROWS]
 
+    svg_html = _timeline_svg(rows, _TIMELINE_SPAN_MINUTES, now)
     if not visible:
-        body = '<p class="tl-empty">no phase history</p>'
+        body = f'<div class="panel timeline">{svg_html}</div>'
         return _section_wrap("timeline", heading, body)
 
     span_sec = _TIMELINE_SPAN_MINUTES * 60
@@ -3097,7 +3168,7 @@ def _section_phase_timeline(tasks, features, heading: str = "Phase Timeline"):
         + "\n".join(track_rows)
         + '\n'
         + axis_row_html
-        + '\n</div>'
+        + f'\n{svg_html}\n</div>'
         + more_html
     )
     return _section_wrap("timeline", heading, body)
@@ -3324,7 +3395,7 @@ def _drawer_skeleton() -> str:
         ' aria-label="Close drawer" tabindex="0">&#x2715;</button>\n'
         '  </div>\n'
         '  <div class="drawer-status" data-drawer-status></div>\n'
-        '  <pre class="drawer-pre" data-drawer-pre tabindex="0"></pre>\n'
+        '  <pre class="drawer-pre" data-drawer-pre data-drawer-body tabindex="0"></pre>\n'
         '</aside>'
     )
 
@@ -3419,7 +3490,7 @@ def _build_dashboard_body(s: dict) -> str:
     The entire page is wrapped in ``<div class="shell">`` so the cmdbar's
     sticky/backdrop effect aligns with the KPI strip and grid columns.
     """
-    wbs_landing_pad = '<a id="wbs" aria-hidden="true" tabindex="-1"></a>\n'
+    wbs_landing_pad = "<a id='wbs' aria-hidden='true' tabindex='-1'></a>\n"
     # TSK-01-02: subproject-tabs is optional (empty string in legacy mode)
     tabs_html = s.get("subproject-tabs", "")
 
@@ -3427,22 +3498,25 @@ def _build_dashboard_body(s: dict) -> str:
         '<div class="shell">\n',
         s["header"], "\n",
         tabs_html,
+        s["sticky-header"], "\n",
         s["kpi"], "\n",
         '  <div class="grid">\n',
-        '    <div class="col">\n',
+        '    <div class="page">\n',
+        '      <div class="page-col-left">\n',
         wbs_landing_pad,
         s["wp-cards"], "\n",
         s["features"], "\n",
-        '    </div>\n',
-        '    <div class="col">\n',
+        '      </div>\n',
+        '      <div class="page-col-right">\n',
         s["live-activity"], "\n",
         s["phase-timeline"], "\n",
         s["team"], "\n",
         s["subagents"], "\n",
+        '      </div>\n',
         '    </div>\n',
         '  </div>\n',
-        s["dep-graph"], "\n",
         s["phase-history"], "\n",
+        s["dep-graph"], "\n",
         '</div>\n',
     ])
 
@@ -3496,6 +3570,11 @@ def render_dashboard(model: dict, lang: str = "ko", subproject: str = "all") -> 
     # TSK-01-02: subproject-tabs is also excluded from wrap (it has its own
     # data-section already via _section_subproject_tabs).
     header_html = _section_header(model, lang=lang, subproject=subproject)
+    sticky_header_html = (
+        '<div data-section="sticky-header">\n'
+        f'{_section_sticky_header(model)}\n'
+        '</div>'
+    )
     tabs_html = _section_subproject_tabs(model)
     sections: dict = {
         "kpi":            _section_kpi(model),
@@ -3514,11 +3593,31 @@ def render_dashboard(model: dict, lang: str = "ko", subproject: str = "all") -> 
         "phase-history":  _section_phase_history(tasks, features),
     }
 
-    # Inject data-section attribute on each section's outermost tag.
-    for key, html_str in sections.items():
-        sections[key] = _wrap_with_data_section(html_str, key)
+    for key in ("kpi", "wp-cards", "features", "team", "subagents", "dep-graph"):
+        sections[key] = _wrap_with_data_section(sections[key], key)
+    sections["live-activity"] = (
+        '<div data-section="live-activity">\n'
+        f'{sections["live-activity"]}\n'
+        '</div>'
+    )
+    sections["phase-timeline"] = (
+        '<div data-section="phase-timeline">\n'
+        f'{sections["phase-timeline"]}\n'
+        '</div>'
+    )
+    sections["phase-history"] = (
+        '<div data-section="phase-history">\n'
+        f'{sections["phase-history"]}\n'
+        '  <div data-section="phases" hidden></div>\n'
+        '</div>'
+    )
 
-    body = _build_dashboard_body({**sections, "header": header_html, "subproject-tabs": tabs_html})
+    body = _build_dashboard_body({
+        **sections,
+        "header": header_html,
+        "sticky-header": sticky_header_html,
+        "subproject-tabs": tabs_html,
+    })
 
     return "".join([
         '<!DOCTYPE html>\n',
@@ -4334,7 +4433,11 @@ def _filter_signals_by_project(
     result: List[SignalEntry] = []
     for sig in signals:
         scope = getattr(sig, "scope", "") or ""
-        if scope == project_name or scope.startswith(prefix):
+        if (
+            scope == project_name
+            or scope.startswith(prefix)
+            or scope.startswith(_AGENT_POOL_SCOPE_PREFIX)
+        ):
             result.append(sig)
     return result
 
@@ -4830,8 +4933,10 @@ class MonitorHandler(BaseHTTPRequestHandler):
             if project_name:
                 raw_sigs = _filter_signals_by_project(raw_sigs, project_name)
             if subproject != "all" and project_name:
-                filtered = _filter_by_subproject(raw_sigs, subproject, project_name)
-                raw_sigs = filtered["signals"]
+                filtered = _filter_by_subproject(
+                    {"signals": raw_sigs}, subproject, project_name
+                )
+                raw_sigs = filtered.get("signals") or []
             return raw_sigs
 
         def _list_panes_f() -> Optional[List[PaneInfo]]:
@@ -4841,8 +4946,10 @@ class MonitorHandler(BaseHTTPRequestHandler):
             if project_root and project_name:
                 raw_panes = _filter_panes_by_project(raw_panes, project_root, project_name)
             if subproject != "all" and project_name:
-                filtered = _filter_by_subproject(raw_panes, subproject, project_name)
-                raw_panes = filtered["panes"]
+                filtered = _filter_by_subproject(
+                    {"tmux_panes": raw_panes}, subproject, project_name
+                )
+                raw_panes = filtered.get("tmux_panes") or []
             return raw_panes
 
         state = _build_render_state(

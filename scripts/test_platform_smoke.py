@@ -17,6 +17,7 @@ test_platform_smoke.py — 4-플랫폼 Smoke 테스트 (TSK-04-03)
 
 import json
 import pathlib
+import re
 import subprocess
 import sys
 import tempfile
@@ -97,11 +98,13 @@ def _port_available(port: int) -> bool:
 
 
 def _has_main_section(body: str) -> bool:
-    """HTML body에 wbs/team/features 섹션 중 하나 이상이 존재하면 True."""
-    return (
-        '<section id="wbs">' in body
-        or '<section id="team">' in body
-        or '<section id="features">' in body
+    """HTML body에 wbs/team/features 섹션 중 하나 이상이 존재하면 True.
+
+    `<section id="X">` 또는 `<section id="X" data-section="X">`처럼 추가 속성이
+    붙은 형태 모두 허용한다 (TSK-01-06 data-section 추가 이후).
+    """
+    return bool(
+        re.search(r'<section\s+id="(?:wbs|team|features)"[^>]*>', body)
     )
 
 
