@@ -938,7 +938,9 @@ def _filter_by_subproject(state: dict, sp: str, project_name: str) -> dict:
 
     **signal** (``state["signals"]`` 리스트):
     - ``scope`` 가 ``{project_name}-{sp}`` 와 정확히 일치하거나
-    - ``scope`` 가 ``{project_name}-{sp}-`` 로 시작하면 통과.
+    - ``scope`` 가 ``{project_name}-{sp}-`` 로 시작하거나
+    - ``scope`` 가 ``agent-pool:`` 로 시작하면 (세션-로컬 풀은 서브프로젝트 범위 밖)
+      통과.
 
     반환 값은 동일한 ``state`` dict (in-place 수정).
     """
@@ -960,6 +962,7 @@ def _filter_by_subproject(state: dict, sp: str, project_name: str) -> dict:
             if (
                 _signal_scope(s) == prefix
                 or _signal_scope(s).startswith(prefix_dash)
+                or _signal_scope(s).startswith(_AGENT_POOL_SCOPE_PREFIX)
             )
         ]
 
