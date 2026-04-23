@@ -1275,9 +1275,9 @@ summary::-webkit-details-marker{ display:none; }
 .shell{
   position: relative;
   z-index: 2;
-  max-width: 1440px;
-  margin: 0 auto;
-  padding: 0 20px 0;
+  max-width: none;
+  margin: 0;
+  padding: 0 24px 0;
 }
 
 /* ---------- 1. Command Bar ---------- */
@@ -1548,7 +1548,12 @@ summary::-webkit-details-marker{ display:none; }
 .col{ min-width: 0; display:flex; flex-direction:column; gap: 0; }
 
 /* ---------- 4. WP Cards ---------- */
-.wp-stack{ display:flex; flex-direction:column; gap: 14px; }
+.wp-stack{
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(520px, 1fr));
+  gap: 14px;
+  align-items: start;
+}
 .wp{
   background: var(--bg-1);
   border: 1px solid var(--line);
@@ -2588,9 +2593,12 @@ def _kpi_counts(tasks, features, signals) -> dict:
                       if getattr(item, "status", None) == "[xx]" and getattr(item, "id", None)}
     raw_done = state_done_ids | _signal_set(signals, "done")
 
-    # Apply priority filter: each id is counted only in the highest-priority bucket
-    failed_ids = (raw_failed & all_ids) - bypass_ids
-    running_ids = (raw_running & all_ids) - bypass_ids - failed_ids
+    # Apply priority filter: each id is counted only in the highest-priority bucket.
+    # state.json is the source of truth — a task declared terminal ([xx] or bypassed)
+    # must not be counted as running/failed even if stale signal files linger. This
+    # defends against the worker path that creates `.done` without deleting `.running`.
+    failed_ids = (raw_failed & all_ids) - bypass_ids - state_done_ids
+    running_ids = (raw_running & all_ids) - bypass_ids - failed_ids - state_done_ids
     done_ids = (raw_done & all_ids) - bypass_ids - failed_ids - running_ids
 
     n_bypass = len(bypass_ids)  # bypass_ids is already a subset of all_ids
@@ -3642,7 +3650,7 @@ def _section_dep_graph(lang: str = "ko", subproject: str = "all") -> str:
         f'    {summary_html}\n'
         '  </div>\n'
         '  <div class="dep-graph-wrap">\n'
-        '    <div id="dep-graph-canvas" style="height:640px;"></div>\n'
+        '    <div id="dep-graph-canvas" style="height:clamp(640px, 78vh, 1400px);"></div>\n'
         f'    {legend_html}\n'
         '  </div>\n'
         f'{scripts_html}\n'
@@ -4639,6 +4647,20 @@ def render_dashboard(model: dict, lang: str = "ko", subproject: str = "all") -> 
     panes = model.get("tmux_panes")
     ap_sigs = model.get("agent_pool_signals") or []
 
+    # Defense-in-depth: state.json is source of truth. A task declared terminal
+    # ([xx] complete or bypassed) must not render as running/failed even if a
+    # stale .running/.failed signal lingers in the shared dir (worker completion
+    # path historically wrote `.done` without deleting `.running`). Dashboard
+    # rows, WP card counts, and filter chips all consume these sets.
+    _terminal_ids = {
+        getattr(it, "id", None)
+        for it in (list(tasks) + list(features))
+        if getattr(it, "id", None)
+        and (getattr(it, "status", None) == "[xx]" or getattr(it, "bypassed", False))
+    }
+    running_ids = running_ids - _terminal_ids
+    failed_ids = failed_ids - _terminal_ids
+
     # Build each section HTML.  ``header`` is excluded from data-section
     # injection (it is nav metadata, not a JS partial-update target).
     # TSK-01-02: subproject-tabs is also excluded from wrap (it has its own
@@ -5257,6 +5279,9 @@ def _build_graph_payload(
             "last_event_at": task.last_event_at,
             "elapsed_seconds": task.elapsed_seconds,
             "is_running_signal": task.id in running_ids_set,
+            # TSK-05-02: filter predicate support fields
+            "domain": task.domain if task.domain is not None else "-",
+            "model": task.model if task.model is not None else "-",
         })
 
     # Build edges from task depends relationships

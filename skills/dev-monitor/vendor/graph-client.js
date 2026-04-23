@@ -1,5 +1,5 @@
 // graph-client.js — Dependency Graph 클라이언트 (TSK-04-02)
-// cytoscape + dagre LR + nodeHtmlLabel, 2초 폴링, diff delta. IIFE. ES2020. ≤350 LOC.
+// cytoscape + dagre LR + nodeHtmlLabel, 2초 폴링, diff delta. IIFE. ES2020.
 (function () {
   "use strict";
 
@@ -21,6 +21,10 @@
   const FIT_MAX  = 1.2;
   const WHEEL_STORAGE_KEY = "dep-graph-wheel-enabled";
 
+  // -- 필터 상수 (TSK-05-02) --
+  const FILTER_OPACITY_DIM = 0.3;
+  const FILTER_OPACITY_ON  = 1.0;
+
   // -- 상태 --
   let cy = null;
   let SP = "all";
@@ -29,6 +33,9 @@
   let _popoverEl = null;
   let _initialFitDone = false;
   let hoverTimer = null;
+
+  // -- 필터 상태 (TSK-05-02) --
+  let _filterPredicate = null;
 
   // -- XSS 방지 헬퍼 --
   function escapeHtml(s) {
@@ -175,14 +182,57 @@
           if (cy.zoom() > FIT_MAX) cy.zoom(FIT_MAX);
           _initialFitDone = true;
         }
+        // layout 완료 후 필터 재적용 (비동기 경로) — TSK-05-02
+        if (_filterPredicate) applyFilter(_filterPredicate);
       });
       layout.run();
+    } else {
+      // 노드 상태만 변경된 동기 완료 경로 — TSK-05-02
+      if (_filterPredicate) applyFilter(_filterPredicate);
     }
 
     if (popoverNodeId) {
       const ele = cy.getElementById(popoverNodeId);
       if (ele.length) renderPopover(ele);
     }
+  }
+
+  // -- 필터 헬퍼: 엣지 스타일 적용 --
+  // isMatch=true  → 원래 색상 + opacity 1.0 복원
+  // isMatch=false → 회색(--ink-3) + opacity 0.3 dim
+  function _applyEdgeStyle(edge, isMatch) {
+    if (isMatch) {
+      edge.style("line-color", edge.data("color") || COLOR.edge_default);
+      edge.style("opacity", FILTER_OPACITY_ON);
+    } else {
+      edge.style("line-color", "var(--ink-3)");
+      edge.style("opacity", FILTER_OPACITY_DIM);
+    }
+  }
+
+  // -- 필터: 노드/엣지 opacity 제어 (TSK-05-02) --
+  // predicate: (node: CytoscapeNode) => boolean | null (null = 필터 해제, 전체 복원)
+  function applyFilter(predicate) {
+    _filterPredicate = predicate;
+
+    if (!predicate) {
+      // null → 전체 노드/엣지 opacity 1.0 복원
+      cy.nodes().forEach(node => node.style("opacity", FILTER_OPACITY_ON));
+      cy.edges().forEach(edge => _applyEdgeStyle(edge, true));
+      return;
+    }
+
+    // predicate 적용: 노드
+    cy.nodes().forEach(node => {
+      node.style("opacity", predicate(node) ? FILTER_OPACITY_ON : FILTER_OPACITY_DIM);
+    });
+
+    // 엣지: 양 끝 노드 모두 match인 경우만 정상 색상 + opacity 1.0
+    cy.edges().forEach(edge => {
+      const srcMatch = predicate(edge.source());
+      const tgtMatch = predicate(edge.target());
+      _applyEdgeStyle(edge, srcMatch && tgtMatch);
+    });
   }
 
   // -- 요약 갱신 --
@@ -403,4 +453,8 @@
   } else {
     window.addEventListener("load", init);
   }
+
+  // -- 전역 노출 (TSK-05-02): 기존 window.depGraph 속성 보존 병합 --
+  window.depGraph = window.depGraph || {};
+  window.depGraph.applyFilter = applyFilter;
 })();
