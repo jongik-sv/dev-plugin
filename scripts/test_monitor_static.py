@@ -152,12 +152,32 @@ class TestIsStaticPath(unittest.TestCase):
     def test_double_dot_in_middle(self):
         self.assertFalse(_is_static_path("/static/..%2Fsecrets"))
 
-    def test_whitelist_constant_has_four_entries(self):
-        # TSK-04-01: cytoscape-node-html-label.min.js 추가 후 5개 (이전: 4)
+    def test_whitelist_constant_has_five_entries(self):
+        # TSK-04-01: cytoscape-node-html-label.min.js 추가 후 5개
         self.assertEqual(len(_get_static_whitelist()), 5)
 
     def test_prefix_constant(self):
         self.assertEqual(_get_static_prefix(), "/static/")
+
+
+# ---------------------------------------------------------------------------
+# 헬퍼: vendor 디렉터리 fixture (모듈 레벨 — 중복 setup 제거)
+# ---------------------------------------------------------------------------
+
+def _make_vendor_dir(tmp_path: Path) -> Path:
+    """tmp_path 아래에 vendor 구조를 만들고 현재 whitelist 5종 파일을 모두 생성한다.
+
+    개별 테스트 클래스에 중복 정의된 동일 setup 로직을 통합한 모듈 헬퍼.
+    """
+    vendor = tmp_path / "skills" / "dev-monitor" / "vendor"
+    vendor.mkdir(parents=True)
+    (vendor / "cytoscape.min.js").write_text("/* cytoscape */", encoding="utf-8")
+    (vendor / "dagre.min.js").write_text("/* dagre */", encoding="utf-8")
+    (vendor / "cytoscape-dagre.min.js").write_text("/* dagre adapter */", encoding="utf-8")
+    (vendor / "graph-client.js").write_text("", encoding="utf-8")  # placeholder
+    label_content = "/* cytoscape-node-html-label v2.0.1 */\n(function(){})();"
+    (vendor / "cytoscape-node-html-label.min.js").write_text(label_content, encoding="utf-8")
+    return vendor
 
 
 # ---------------------------------------------------------------------------
@@ -167,23 +187,14 @@ class TestIsStaticPath(unittest.TestCase):
 class TestHandleStatic(unittest.TestCase):
     """_handle_static() — 실제 파일 IO + HTTP 응답 헤더."""
 
-    def _make_vendor_dir(self, tmp_path: Path) -> Path:
-        """tmp_path 아래에 vendor 구조를 만들고 테스트용 JS 파일 생성."""
-        vendor = tmp_path / "skills" / "dev-monitor" / "vendor"
-        vendor.mkdir(parents=True)
-        (vendor / "cytoscape.min.js").write_text("/* cytoscape */", encoding="utf-8")
-        (vendor / "dagre.min.js").write_text("/* dagre */", encoding="utf-8")
-        (vendor / "cytoscape-dagre.min.js").write_text("/* dagre adapter */", encoding="utf-8")
-        (vendor / "graph-client.js").write_text("", encoding="utf-8")  # placeholder
-        return vendor
-
     def test_static_route_whitelist_allows_vendor_js(self):
-        """화이트리스트 4종 파일 → HTTP 200."""
+        """화이트리스트 5종 파일 → HTTP 200."""
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
-            self._make_vendor_dir(tmp_path)
+            _make_vendor_dir(tmp_path)
             server = MockServer(plugin_root=tmp)
-            for fname in ("cytoscape.min.js", "dagre.min.js", "cytoscape-dagre.min.js", "graph-client.js"):
+            for fname in ("cytoscape.min.js", "dagre.min.js", "cytoscape-dagre.min.js",
+                          "graph-client.js", "cytoscape-node-html-label.min.js"):
                 handler = MockHandler(server=server)
                 _handle_static(handler, f"/static/{fname}")
                 self.assertEqual(handler._response_code, 200, f"{fname} 는 200이어야 한다")
@@ -201,7 +212,7 @@ class TestHandleStatic(unittest.TestCase):
         """Content-Type: application/javascript; charset=utf-8."""
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
-            self._make_vendor_dir(tmp_path)
+            _make_vendor_dir(tmp_path)
             server = MockServer(plugin_root=tmp)
             handler = MockHandler(server=server)
             _handle_static(handler, "/static/cytoscape.min.js")
@@ -214,7 +225,7 @@ class TestHandleStatic(unittest.TestCase):
         """Cache-Control: public, max-age=3600."""
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
-            self._make_vendor_dir(tmp_path)
+            _make_vendor_dir(tmp_path)
             server = MockServer(plugin_root=tmp)
             handler = MockHandler(server=server)
             _handle_static(handler, "/static/dagre.min.js")
@@ -227,7 +238,7 @@ class TestHandleStatic(unittest.TestCase):
         """응답 본문이 파일 내용과 일치."""
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
-            self._make_vendor_dir(tmp_path)
+            _make_vendor_dir(tmp_path)
             server = MockServer(plugin_root=tmp)
             handler = MockHandler(server=server)
             _handle_static(handler, "/static/cytoscape.min.js")
@@ -238,7 +249,7 @@ class TestHandleStatic(unittest.TestCase):
         """graph-client.js 빈 placeholder → 200, 본문 0바이트 허용."""
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
-            self._make_vendor_dir(tmp_path)
+            _make_vendor_dir(tmp_path)
             server = MockServer(plugin_root=tmp)
             handler = MockHandler(server=server)
             _handle_static(handler, "/static/graph-client.js")
@@ -403,25 +414,11 @@ class TestNodeHtmlLabelStaticRoute(unittest.TestCase):
     test_static_route_serves_node_html_label (design.md QA 체크리스트 항목 1)
     """
 
-    def _make_vendor_dir_with_node_html_label(self, tmp_path: Path) -> Path:
-        """tmp_path 아래에 vendor 구조를 만들고 node-html-label 파일 포함."""
-        vendor = tmp_path / "skills" / "dev-monitor" / "vendor"
-        vendor.mkdir(parents=True)
-        # 기존 4종
-        (vendor / "cytoscape.min.js").write_text("/* cytoscape */", encoding="utf-8")
-        (vendor / "dagre.min.js").write_text("/* dagre */", encoding="utf-8")
-        (vendor / "cytoscape-dagre.min.js").write_text("/* dagre adapter */", encoding="utf-8")
-        (vendor / "graph-client.js").write_text("", encoding="utf-8")
-        # TSK-04-01 신규
-        label_content = "/* cytoscape-node-html-label v2.0.1 */\n(function(){})();"
-        (vendor / "cytoscape-node-html-label.min.js").write_text(label_content, encoding="utf-8")
-        return vendor
-
     def test_static_route_serves_node_html_label(self):
         """GET /static/cytoscape-node-html-label.min.js → HTTP 200."""
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
-            self._make_vendor_dir_with_node_html_label(tmp_path)
+            _make_vendor_dir(tmp_path)
             server = MockServer(plugin_root=tmp)
             handler = MockHandler(server=server)
             _handle_static(handler, "/static/cytoscape-node-html-label.min.js")
@@ -435,7 +432,7 @@ class TestNodeHtmlLabelStaticRoute(unittest.TestCase):
         """Content-Type: application/javascript; charset=utf-8."""
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
-            self._make_vendor_dir_with_node_html_label(tmp_path)
+            _make_vendor_dir(tmp_path)
             server = MockServer(plugin_root=tmp)
             handler = MockHandler(server=server)
             _handle_static(handler, "/static/cytoscape-node-html-label.min.js")
@@ -448,7 +445,7 @@ class TestNodeHtmlLabelStaticRoute(unittest.TestCase):
         """응답 바디가 비어있지 않음 (최소 100 bytes)."""
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
-            self._make_vendor_dir_with_node_html_label(tmp_path)
+            _make_vendor_dir(tmp_path)
             server = MockServer(plugin_root=tmp)
             handler = MockHandler(server=server)
             _handle_static(handler, "/static/cytoscape-node-html-label.min.js")
@@ -484,7 +481,7 @@ class TestNodeHtmlLabelStaticRoute(unittest.TestCase):
         """기존 /static/*.js 요청 regression 없음 — 기존 4종 파일 모두 200."""
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
-            self._make_vendor_dir_with_node_html_label(tmp_path)
+            _make_vendor_dir(tmp_path)
             server = MockServer(plugin_root=tmp)
             for fname in (
                 "cytoscape.min.js",
@@ -516,14 +513,9 @@ class TestDepGraphScriptLoadOrder(unittest.TestCase):
     기대 순서: dagre → cytoscape → cytoscape-node-html-label → cytoscape-dagre → graph-client
     """
 
-    def _import_server_mod(self):
-        # test_monitor_static.py 상단에서 이미 _mod 로 로드됨
-        return _mod
-
     def _get_section_html(self):
         """_section_dep_graph 호출 결과 HTML을 반환."""
-        mod = self._import_server_mod()
-        return mod._section_dep_graph(subproject="all", lang="en")
+        return _mod._section_dep_graph(subproject="all", lang="en")
 
     def test_dep_graph_script_load_order(self):
         """script 태그 순서: dagre → cytoscape → cytoscape-node-html-label → cytoscape-dagre → graph-client."""
