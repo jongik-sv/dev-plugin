@@ -115,14 +115,17 @@ def test_fold_restore_on_patch(js):
 # __foldBound 중복 방지 패턴 검증
 # ---------------------------------------------------------------------------
 def test_fold_bind_idempotent(js):
-    assert "__foldBound" in js, (
-        "_DASHBOARD_JS에 __foldBound 플래그가 없습니다 (중복 리스너 방지 패턴 미구현)."
+    # TSK-00-01: _foldBound(단일 언더스코어) 또는 __foldBound(이중) 모두 허용
+    has_flag = "_foldBound" in js or "__foldBound" in js
+    assert has_flag, (
+        "_DASHBOARD_JS에 _foldBound / __foldBound 플래그가 없습니다 (중복 리스너 방지 패턴 미구현)."
     )
-    # bindFoldListeners 함수 내에 __foldBound 확인 패턴이 있어야 함
+    # bindFoldListeners 함수 내에 플래그 확인 패턴이 있어야 함
     bind_region = _extract_function_body(js, "bindFoldListeners", 800)
     assert bind_region is not None, "bindFoldListeners 함수가 없습니다."
-    assert "__foldBound" in bind_region, (
-        "bindFoldListeners 함수 내에 __foldBound 플래그 확인이 없습니다."
+    has_flag_in_bind = "_foldBound" in bind_region or "__foldBound" in bind_region
+    assert has_flag_in_bind, (
+        "bindFoldListeners 함수 내에 _foldBound / __foldBound 플래그 확인이 없습니다."
     )
 
 
@@ -145,8 +148,10 @@ def test_fold_key_prefix(js):
 def test_fold_apply_states(js):
     apply_region = _extract_function_body(js, "applyFoldStates", 800)
     assert apply_region is not None, "applyFoldStates 함수가 없습니다."
-    assert "details[data-wp]" in apply_region, (
-        "applyFoldStates가 'details[data-wp]'를 쿼리하지 않습니다."
+    # TSK-00-01: 범용화로 셀렉터가 [data-fold-key]로 변경됨. 구 details[data-wp]도 허용.
+    has_selector = "details[data-wp]" in apply_region or "[data-fold-key]" in apply_region
+    assert has_selector, (
+        "applyFoldStates가 'details[data-wp]' 또는 '[data-fold-key]' 셀렉터를 쿼리하지 않습니다."
     )
     has_remove = "removeAttribute('open')" in apply_region or 'removeAttribute("open")' in apply_region
     has_set = "setAttribute('open'" in apply_region or 'setAttribute("open"' in apply_region

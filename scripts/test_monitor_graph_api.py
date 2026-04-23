@@ -781,5 +781,193 @@ class TestMonitorHandlerGraphRoute(unittest.TestCase):
         self.assertIn("graph", src.lower(), "do_GET에 /api/graph 라우팅 없음")
 
 
+# ---------------------------------------------------------------------------
+# TSK-00-02: /api/graph payload v4 field tests
+# ---------------------------------------------------------------------------
+
+
+class TestSerializePhaseHistoryTailForGraph(unittest.TestCase):
+    """_serialize_phase_history_tail_for_graph 순수 함수 검증."""
+
+    def setUp(self):
+        self.fn = getattr(monitor_server, "_serialize_phase_history_tail_for_graph", None)
+        if self.fn is None:
+            self.skipTest("_serialize_phase_history_tail_for_graph 미존재 (구현 전)")
+
+    def _make_entry(self, event="design.ok", from_s="[  ]", to_s="[dd]", at="2026-04-23T00:00:00Z", elapsed=10.0):
+        return PhaseEntry(event=event, from_status=from_s, to_status=to_s, at=at, elapsed_seconds=elapsed)
+
+    def test_empty_input_returns_empty_list(self):
+        """None 또는 빈 리스트 → []."""
+        self.assertEqual(self.fn(None), [])
+        self.assertEqual(self.fn([]), [])
+
+    def test_single_entry_converted_correctly(self):
+        """단일 PhaseEntry → 정확한 dict 키/값 변환."""
+        entry = self._make_entry()
+        result = self.fn([entry])
+        self.assertEqual(len(result), 1)
+        d = result[0]
+        self.assertIn("event", d)
+        self.assertIn("from", d)
+        self.assertIn("to", d)
+        self.assertIn("at", d)
+        self.assertIn("elapsed_seconds", d)
+        self.assertEqual(d["event"], "design.ok")
+        self.assertEqual(d["from"], "[  ]")
+        self.assertEqual(d["to"], "[dd]")
+        self.assertEqual(d["at"], "2026-04-23T00:00:00Z")
+        self.assertEqual(d["elapsed_seconds"], 10.0)
+
+    def test_internal_keys_not_exposed(self):
+        """from_status / to_status 같은 내부 이름이 응답에 노출되지 않는다."""
+        entry = self._make_entry()
+        result = self.fn([entry])
+        d = result[0]
+        self.assertNotIn("from_status", d)
+        self.assertNotIn("to_status", d)
+
+    def test_limit_3_applied(self):
+        """4개 이상 입력 시 기본 limit=3으로 마지막 3개만 반환."""
+        entries = [self._make_entry(event=f"e{i}", at=f"2026-04-{i+1:02d}T00:00:00Z") for i in range(5)]
+        result = self.fn(entries)
+        self.assertEqual(len(result), 3)
+        # 마지막 3개 (인덱스 2, 3, 4)
+        self.assertEqual(result[0]["event"], "e2")
+        self.assertEqual(result[1]["event"], "e3")
+        self.assertEqual(result[2]["event"], "e4")
+
+    def test_limit_param_respected(self):
+        """limit 파라미터를 커스텀으로 지정 가능."""
+        entries = [self._make_entry(event=f"e{i}") for i in range(10)]
+        result = self.fn(entries, limit=5)
+        self.assertEqual(len(result), 5)
+
+    def test_elapsed_seconds_none_preserved(self):
+        """elapsed_seconds=None은 그대로 null로 보존된다."""
+        entry = PhaseEntry(event="x", from_status="a", to_status="b", at="2026-01-01T00:00:00Z", elapsed_seconds=None)
+        result = self.fn([entry])
+        self.assertIsNone(result[0]["elapsed_seconds"])
+
+    def test_order_preserved_ascending(self):
+        """반환 순서는 시간 오름차순(입력 순서) 유지."""
+        entries = [self._make_entry(event=f"e{i}", at=f"2026-04-{i+1:02d}T00:00:00Z") for i in range(3)]
+        result = self.fn(entries)
+        self.assertEqual([d["event"] for d in result], ["e0", "e1", "e2"])
+
+
+class TestApiGraphPayloadV4Fields(unittest.TestCase):
+    """TSK-00-02 test_api_graph_payload_v4_fields_present:
+    모든 노드에 5개 신규 필드가 존재한다."""
+
+    def setUp(self):
+        self.fn = getattr(monitor_server, "_build_graph_payload", None)
+        if self.fn is None:
+            self.skipTest("_build_graph_payload 미존재")
+
+    def _graph_stats(self, task_ids=None):
+        ids = task_ids or []
+        return {
+            "max_chain_depth": 1,
+            "critical_path": {"nodes": ids[:1], "edges": []},
+            "bottleneck_ids": [],
+            "fan_in_map": {},
+            "fan_out_map": {},
+            "fan_in_top": [],
+            "fan_in_ge_3_count": 0,
+            "diamond_patterns": [],
+            "diamond_count": 0,
+            "review_candidates": [],
+            "total": len(ids),
+        }
+
+    def test_api_graph_payload_v4_fields_present(self):
+        """모든 노드에 5개 신규 필드 존재: phase_history_tail, last_event, last_event_at,
+        elapsed_seconds, is_running_signal."""
+        tasks = [
+            _make_task("TSK-01-01", status="[xx]"),
+            _make_task("TSK-01-02", status="[dd]"),
+            _make_task("TSK-01-03", status=None),
+        ]
+        graph_stats = self._graph_stats([t.id for t in tasks])
+        payload = self.fn(tasks, [], graph_stats, "/proj/docs", "all")
+        for node in payload["nodes"]:
+            for field in ("phase_history_tail", "last_event", "last_event_at", "elapsed_seconds", "is_running_signal"):
+                self.assertIn(field, node, f"노드 '{node['id']}' 에 '{field}' 필드 누락")
+
+    def test_api_graph_payload_v4_fields_defaults_when_no_state(self):
+        """state.json 없는 task(기본값 사용): phase_history_tail=[], 나머지=null."""
+        task = _make_task("TSK-01-01", status=None)
+        # phase_history_tail 기본값은 [] (이미 _make_task에서 설정)
+        graph_stats = self._graph_stats(["TSK-01-01"])
+        payload = self.fn([task], [], graph_stats, "/proj/docs", "all")
+        node = payload["nodes"][0]
+        self.assertEqual(node["phase_history_tail"], [])
+        self.assertIsNone(node["last_event"])
+        self.assertIsNone(node["last_event_at"])
+        self.assertIsNone(node["elapsed_seconds"])
+        self.assertIs(node["is_running_signal"], False)
+
+    def test_api_graph_is_running_signal_reflects_signal_file(self):
+        """TSK-00-02 test_api_graph_is_running_signal_reflects_signal_file:
+        .running signal이 존재하는 task는 is_running_signal=True, 없으면 False."""
+        task_run = _make_task("TSK-01-01", status=None)
+        task_idle = _make_task("TSK-01-02", status=None)
+
+        running_signal = _make_signal("TSK-01-01", "running")
+        graph_stats = self._graph_stats(["TSK-01-01", "TSK-01-02"])
+
+        # With signal
+        payload = self.fn([task_run, task_idle], [running_signal], graph_stats, "/proj/docs", "all")
+        nodes_by_id = {n["id"]: n for n in payload["nodes"]}
+        self.assertTrue(nodes_by_id["TSK-01-01"]["is_running_signal"])
+        self.assertFalse(nodes_by_id["TSK-01-02"]["is_running_signal"])
+
+        # Without signal
+        payload2 = self.fn([task_run, task_idle], [], graph_stats, "/proj/docs", "all")
+        nodes_by_id2 = {n["id"]: n for n in payload2["nodes"]}
+        self.assertFalse(nodes_by_id2["TSK-01-01"]["is_running_signal"])
+        self.assertFalse(nodes_by_id2["TSK-01-02"]["is_running_signal"])
+
+    def test_api_graph_phase_history_tail_limit_3(self):
+        """TSK-00-02 test_api_graph_phase_history_tail_limit_3:
+        4개 이상 엔트리가 있어도 3개만 반환하며 마지막 3개다."""
+        entries = [
+            PhaseEntry(event=f"e{i}", from_status="a", to_status="b",
+                       at=f"2026-04-{i+1:02d}T00:00:00Z", elapsed_seconds=float(i))
+            for i in range(5)
+        ]
+        task = WorkItem(
+            id="TSK-01-01", kind="wbs", title="test", path="/x",
+            status="[dd]", started_at=None, completed_at=None,
+            elapsed_seconds=None, bypassed=False, bypassed_reason=None,
+            last_event=None, last_event_at=None,
+            phase_history_tail=entries,
+            wp_id="WP-01", depends=[], error=None,
+        )
+        graph_stats = self._graph_stats(["TSK-01-01"])
+        payload = self.fn([task], [], graph_stats, "/proj/docs", "all")
+        node = payload["nodes"][0]
+        tail = node["phase_history_tail"]
+        self.assertEqual(len(tail), 3)
+        # 마지막 3개 (e2, e3, e4)
+        self.assertEqual(tail[0]["event"], "e2")
+        self.assertEqual(tail[1]["event"], "e3")
+        self.assertEqual(tail[2]["event"], "e4")
+
+    def test_existing_fields_not_modified(self):
+        """기존 10개 필드가 값/타입 변경 없이 유지된다."""
+        task = _make_task("TSK-01-01", status="[xx]", wp_id="WP-01", depends=["TSK-00-01"])
+        graph_stats = self._graph_stats(["TSK-01-01"])
+        payload = self.fn([task], [], graph_stats, "/proj/docs", "all")
+        node = payload["nodes"][0]
+        for field in ("id", "label", "status", "is_critical", "is_bottleneck",
+                      "fan_in", "fan_out", "bypassed", "wp_id", "depends"):
+            self.assertIn(field, node, f"기존 필드 '{field}' 누락")
+        self.assertEqual(node["id"], "TSK-01-01")
+        self.assertEqual(node["wp_id"], "WP-01")
+        self.assertEqual(node["depends"], ["TSK-00-01"])
+
+
 if __name__ == "__main__":
     unittest.main()
