@@ -66,6 +66,15 @@ Step 0를 생략하면 E2E 테스트가 클릭할 진입점이 없어 Red를 낼
 
 이 보고는 `build.fail` 이벤트로 기록되어 status가 `[dd]`에 머무른다 (상태 역전 없음). 사용자는 design.md를 보완한 뒤 `/dev-build`로 재진입하거나 `/dev-design`으로 재설계를 지시할 수 있다.
 
+### [im] 완료 후 — Merge Preview 파일 기록
+
+**`[im]` 단계 완료 직후 (상태 전이 전) 1회 실행한다.** 실패해도 Task 실패로 간주하지 않는다. **결과를 읽거나 해석하지 마시오** — 이 명령의 stdout/JSON을 LLM이 확인하거나 판단 근거로 사용하지 않는다.
+
+```bash
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/merge-preview.py --output {DOCS_DIR}/tasks/{TSK-ID}/merge-preview.json \
+  --remote origin --target main || true
+```
+
 ### Step 1 — 단위 테스트
 
 1. design.md의 QA 체크리스트 기반으로 단위 테스트를 먼저 작성한다. QA 체크리스트가 base이며, 프로젝트 기존 테스트 관례·도메인 표준 패턴을 반영하여 필요한 edge case를 추가할 수 있다. QA에 없는 테스트를 추가한 경우 결과 보고의 "비고"에 목록과 추가 이유를 기록한다.

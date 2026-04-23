@@ -34,6 +34,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from dataclasses import asdict, dataclass, field, is_dataclass
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -3074,6 +3075,76 @@ def _render_task_row_v2(item, running_ids: set, failed_ids: set, lang: str = "ko
     )
 
 
+def _merge_badge(ws: dict, lang: str = "ko") -> str:
+    """WP 머지 준비도 뱃지 HTML 반환 (TSK-04-03).
+
+    Args:
+        ws: merge-status dict. 키: state, stale, pending_count, conflict_count, wp_id, conflicts.
+            누락 시 graceful degradation (unknown fallback).
+        lang: 'ko' | 'en'
+
+    Returns:
+        <button class="merge-badge" data-state="{state}" data-wp="{wp_id}" ...> HTML 문자열.
+    """
+    state = ws.get("state") or "unknown"
+    stale = ws.get("stale", False)
+    wp_id = ws.get("wp_id", "")
+    pending_count = ws.get("pending_count", 0)
+    conflict_count = ws.get("conflict_count", 0)
+
+    if state == "ready":
+        emoji = "🟢"
+        label = "머지 가능" if lang == "ko" else "Ready"
+    elif state == "waiting":
+        emoji = "🟡"
+        label = f"{pending_count} Task 대기" if lang == "ko" else f"{pending_count} pending"
+    elif state == "conflict":
+        emoji = "🔴"
+        label = f"{conflict_count} 파일 충돌 예상" if lang == "ko" else f"{conflict_count} conflicts"
+    elif state == "stale":
+        emoji = "🔘"
+        label = "확인 필요 (stale)" if lang == "ko" else "Stale"
+    else:
+        emoji = "🔘"
+        label = "확인 필요" if lang == "ko" else "Unknown"
+        state = "unknown"
+
+    stale_mark = '<span class="stale">⚠ stale</span>' if stale else ""
+    wp_attr = f' data-wp="{_esc(wp_id)}"' if wp_id else ""
+
+    return (
+        f'<button class="merge-badge" data-state="{_esc(state)}"{wp_attr}'
+        f' aria-label="merge {_esc(state)}">'
+        f'{emoji} {_esc(label)}{stale_mark}'
+        f'</button>'
+    )
+
+
+def _load_wp_merge_states(docs_dir: str) -> dict:
+    """docs_dir/wp-state/{WP-ID}/merge-status.json 파일을 mtime 기반으로 일괄 읽기 (TSK-04-03).
+
+    Returns:
+        {WP-ID: merge_status_dict} — 파일 없거나 파싱 실패 시 해당 WP 제외.
+    """
+    result: dict = {}
+    wp_state_dir = Path(docs_dir) / "wp-state"
+    if not wp_state_dir.is_dir():
+        return result
+    for wp_dir in wp_state_dir.iterdir():
+        if not wp_dir.is_dir():
+            continue
+        status_file = wp_dir / "merge-status.json"
+        if not status_file.is_file():
+            continue
+        try:
+            data = json.loads(status_file.read_text(encoding="utf-8"))
+            result[wp_dir.name] = data
+        except Exception:
+            # 파싱 실패 → 해당 WP 무시 (graceful degradation)
+            pass
+    return result
+
+
 def _section_wp_cards(
     tasks,
     running_ids: set,
@@ -3081,6 +3152,7 @@ def _section_wp_cards(
     heading: "Optional[str]" = None,
     wp_titles: "Optional[dict]" = None,
     lang: str = "ko",
+    wp_merge_state: "Optional[dict]" = None,
 ) -> str:
     """WP card section: tasks grouped by wp_id, each WP as a v3 .wp card.
 
@@ -3148,11 +3220,16 @@ def _section_wp_cards(
         )
 
         wp_label = wp_titles.get(wp) or wp
+        # 머지 준비도 뱃지 — wp_id 누락 시 현재 wp 값으로 보정
+        _raw_ms = (wp_merge_state or {}).get(wp, {})
+        _wp_ms = _raw_ms if _raw_ms.get("wp_id") else dict(_raw_ms, wp_id=wp)
+        badge_html = _merge_badge(_wp_ms, lang)
         wp_title_html = (
             '<div class="wp-title wp-card-info">\n'
-            '  <div class="row1">\n'
+            '  <div class="row1" style="display:flex;align-items:center;gap:8px;">\n'
             f'    <span class="id">{_esc(wp)}</span>\n'
             f'    <h3 class="wp-card-title">{_esc(wp_label)}</h3>\n'
+            f'    {badge_html}\n'
             '  </div>\n'
             f'  {bar_html}\n'
             f'  {counts_html}\n'
@@ -4580,12 +4657,16 @@ def render_dashboard(model: dict, lang: str = "ko", subproject: str = "all") -> 
         if getattr(t, "domain", None)
     })
     filter_bar_html = _section_filter_bar(lang, distinct_domains)
+    # TSK-04-03: docs_dir에서 WP별 merge-status 일괄 로드
+    _docs_dir = model.get("docs_dir") or model.get("subproject") or ""
+    _wp_merge_state = _load_wp_merge_states(_docs_dir) if _docs_dir else {}
     sections: dict = {
         "kpi":            _section_kpi(model),
         "wp-cards":       _section_wp_cards(tasks, running_ids, failed_ids,
                                             heading=_t(lang, "work_packages"),
                                             wp_titles=model.get("wp_titles") or {},
-                                            lang=lang),
+                                            lang=lang,
+                                            wp_merge_state=_wp_merge_state),
         "features":       _section_features(features, running_ids, failed_ids,
                                             heading=_t(lang, "features"),
                                             lang=lang),
@@ -5550,6 +5631,160 @@ def _handle_api_task_detail(handler) -> None:
         _json_error(handler, 500, str(exc))
 
 
+# ---------------------------------------------------------------------------
+# /api/merge-status endpoint (TSK-04-02)
+# ---------------------------------------------------------------------------
+
+_API_MERGE_STATUS_PATH = "/api/merge-status"
+_MERGE_STATUS_FILENAME = "merge-status.json"
+_MERGE_STALE_SECONDS = 1800
+
+
+def _is_api_merge_status_path(path: str) -> bool:
+    """Return True iff path matches /api/merge-status exactly (query allowed)."""
+    if not isinstance(path, str):
+        return False
+    return urlsplit(path).path == _API_MERGE_STATUS_PATH
+
+
+def _badge_label_for_state(state: str) -> str:
+    """Return a human-readable badge label for a merge state."""
+    return {
+        "ready": "\U0001f7e2 머지 가능",
+        "waiting": "\U0001f7e1 대기 중",
+        "conflict": "\U0001f534 충돌",
+    }.get(state, "⚫ 알 수 없음")
+
+
+def _load_merge_status_file(path: "Path") -> "Optional[dict]":
+    """Load and return a merge-status.json file. Returns None on error."""
+    try:
+        raw = path.read_text(encoding="utf-8", errors="replace")
+        return json.loads(raw)
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _is_merge_status_stale(path: "Path", data: dict) -> bool:
+    """Compute is_stale from file mtime. Falls back to data field on OSError."""
+    try:
+        return (time.time() - path.stat().st_mtime) > _MERGE_STALE_SECONDS
+    except OSError:
+        return data.get("is_stale", False)
+
+
+def _load_merge_status(docs_dir: str, wp_id: "Optional[str]") -> "tuple[object, int]":
+    """Load merge-status.json for a single WP or all WPs.
+
+    Returns (payload, status_code).
+    - wp_id=None: returns list of summary dicts (conflicts excluded)
+    - wp_id specified: returns full dict including conflicts, or ({}, 404) if missing
+    """
+    wp_state_dir = Path(docs_dir) / "wp-state"
+
+    if wp_id:
+        # Single WP detail
+        status_file = wp_state_dir / wp_id / _MERGE_STATUS_FILENAME
+        if not status_file.exists():
+            return ({}, 404)
+        data = _load_merge_status_file(status_file)
+        if data is None:
+            return ({}, 404)
+        # Recalculate is_stale from file mtime (consistent after server restarts)
+        data["is_stale"] = _is_merge_status_stale(status_file, data)
+        return (data, 200)
+    else:
+        # All WPs summary (no conflicts array)
+        summary = []
+        if not wp_state_dir.exists():
+            return (summary, 200)
+        try:
+            entries = list(wp_state_dir.iterdir())
+        except OSError:
+            return (summary, 200)
+        for entry in sorted(entries):
+            if not entry.is_dir():
+                continue
+            status_file = entry / _MERGE_STATUS_FILENAME
+            if not status_file.exists():
+                continue
+            data = _load_merge_status_file(status_file)
+            if data is None:
+                continue
+            # Summary: exclude full conflicts array
+            row = {
+                "wp_id": data.get("wp_id", entry.name),
+                "state": data.get("state", "unknown"),
+                "pending_count": data.get("pending_count", 0),
+                "conflict_count": data.get("conflict_count", 0),
+                "is_stale": _is_merge_status_stale(status_file, data),
+            }
+            summary.append(row)
+        return (summary, 200)
+
+
+def _collect_merge_summary(docs_dir: str) -> dict:
+    """Collect WP merge state summaries for /api/state bundle.
+
+    Returns {wp_id: {state, badge_label, pending_count, conflict_count, is_stale}}.
+    Does NOT include full conflicts array.
+    """
+    wp_state_dir = Path(docs_dir) / "wp-state"
+    result = {}
+    if not wp_state_dir.exists():
+        return result
+    try:
+        entries = list(wp_state_dir.iterdir())
+    except OSError:
+        return result
+    for entry in entries:
+        if not entry.is_dir():
+            continue
+        status_file = entry / _MERGE_STATUS_FILENAME
+        if not status_file.exists():
+            continue
+        data = _load_merge_status_file(status_file)
+        if data is None:
+            continue
+        state = data.get("state", "unknown")
+        wp = data.get("wp_id", entry.name)
+        result[wp] = {
+            "state": state,
+            "badge_label": _badge_label_for_state(state),
+            "pending_count": data.get("pending_count", 0),
+            "conflict_count": data.get("conflict_count", 0),
+            "is_stale": _is_merge_status_stale(status_file, data),
+        }
+    return result
+
+
+def _handle_api_merge_status(handler) -> None:
+    """Handle GET /api/merge-status."""
+    try:
+        raw_path = getattr(handler, "path", "") or ""
+        qs = urlsplit(raw_path).query
+        qp = parse_qs(qs, keep_blank_values=False)
+        raw_sp = (qp.get("subproject") or ["all"])[0] or "all"
+        wp_param: "Optional[str]" = (qp.get("wp") or [None])[0] or None
+
+        base_docs_dir = _server_attr(handler, "docs_dir")
+        available_subprojects = discover_subprojects(base_docs_dir)
+        if raw_sp != "all" and raw_sp not in available_subprojects:
+            raw_sp = "all"
+        effective_docs_dir = _resolve_effective_docs_dir(base_docs_dir, raw_sp)
+
+        payload, status_code = _load_merge_status(effective_docs_dir, wp_param)
+
+        if status_code == 404:
+            _json_error(handler, 404, f"WP not found: {wp_param!r}")
+            return
+
+        _json_response(handler, status_code, payload)
+    except Exception as exc:
+        sys.stderr.write(f"/api/merge-status error: {exc!r}\n")
+        _json_error(handler, 500, str(exc))
+
+
 def _task_panel_css() -> str:
     """CSS for task slide panel (TSK-02-04)."""
     return (
@@ -5584,6 +5819,22 @@ def _task_panel_css() -> str:
         "padding:8px;margin:4px 0 0;font-family:var(--font-mono,monospace);}"
         ".log-empty{font-size:12px;color:var(--ink-3,#585b70);padding:4px 0;}"
         ".log-trunc{font-size:10px;color:var(--ink-3,#585b70);margin-left:8px;}"
+        # TSK-04-03: merge-badge + merge preview panel CSS
+        ".merge-badge{display:inline-flex;align-items:center;gap:4px;"
+        "padding:2px 8px;border-radius:12px;cursor:pointer;"
+        "font-size:11px;font-weight:600;border:1px solid transparent;"
+        "flex-shrink:0;white-space:nowrap;background:none;}"
+        ".merge-badge[data-state=\"ready\"]{background:var(--done,#22c55e20);color:var(--done,#22c55e);border-color:var(--done,#22c55e);}"
+        ".merge-badge[data-state=\"waiting\"]{background:var(--run,#eab30820);color:var(--run,#eab308);border-color:var(--run,#eab308);}"
+        ".merge-badge[data-state=\"conflict\"]{background:var(--fail,#ef444420);color:var(--fail,#ef4444);border-color:var(--fail,#ef4444);}"
+        ".merge-badge[data-state=\"stale\"]{background:transparent;color:var(--ink-3,#cdd6f4);border:1px dashed var(--ink-3,#cdd6f4);}"
+        ".merge-badge[data-state=\"unknown\"]{background:transparent;color:var(--ink-3,#585b70);border-color:var(--ink-3,#585b70);}"
+        ".merge-badge .stale{font-size:10px;opacity:.8;}"
+        ".merge-stale-banner{padding:6px 10px;background:var(--run,#eab30820);border:1px solid var(--run,#eab308);border-radius:4px;font-size:12px;margin-bottom:12px;}"
+        ".merge-ready-banner{padding:6px 10px;background:var(--done,#22c55e20);border:1px solid var(--done,#22c55e);border-radius:4px;font-size:12px;margin-bottom:12px;}"
+        ".merge-conflict-file li.disabled{color:var(--ink-3,#585b70);}"
+        ".merge-conflict-file li.disabled code{opacity:.6;}"
+        ".merge-hunk-preview{max-height:120px;overflow:auto;font-size:11px;font-family:var(--font-mono,monospace);background:var(--bg-1,#181825);border-radius:4px;padding:6px;white-space:pre-wrap;word-break:break-all;margin-top:4px;}"
     )
 
 
@@ -5648,14 +5899,77 @@ function openTaskPanel(taskId){
       var b=document.getElementById('task-panel-body');
       if(b)b.innerHTML=renderWbsSection(data.wbs_section_md||'')+renderStateJson(data.state||{})+renderArtifacts(data.artifacts||[])+renderLogs(data.logs||[]);
       var p=document.getElementById('task-panel'),o=document.getElementById('task-panel-overlay');
-      if(p)p.classList.add('open');if(o)o.removeAttribute('hidden');
+      if(p){p.classList.add('open');p.dataset.panelMode='task';}if(o)o.removeAttribute('hidden');
     }).catch(function(e){console.error('task-panel error',e);});
 }
 function closeTaskPanel(){
   var p=document.getElementById('task-panel'),o=document.getElementById('task-panel-overlay');
   if(p)p.classList.remove('open');if(o)o.setAttribute('hidden','');
 }
+function renderMergePreview(ms){
+  var html='';
+  if(ms.stale){html+='<div class="merge-stale-banner">⚠ 스캔 결과가 30분 이상 경과 — 재스캔 필요</div>';}
+  var state=ms.state||'unknown';
+  if(state==='ready'){
+    html+='<div class="merge-ready-banner">✅ 모든 Task 완료 · 충돌 없음</div>';
+  }else if(state==='waiting'){
+    html+='<h4>§ 대기 중인 Task</h4><ul>';
+    var pts=ms.pending_tasks||[];
+    for(var i=0;i<pts.length;i++){html+='<li>'+escapeHtml(pts[i].id||'')+' ('+escapeHtml(pts[i].phase||'')+')</li>';}
+    html+='</ul>';
+  }else if(state==='conflict'){
+    html+='<h4>§ 충돌 파일</h4><ul class="merge-conflict-file">';
+    var conflicts=ms.conflicts||[];
+    var autoFiles=ms.auto_merge_files||[];
+    var hunkCount=0;
+    for(var i=0;i<conflicts.length;i++){
+      var c=conflicts[i];var fname=c.file||c.path||'';
+      var isAuto=autoFiles.indexOf(fname)>=0;
+      if(isAuto){
+        html+='<li class="disabled"><code>'+escapeHtml(fname)+'</code> <span>auto-merge 드라이버 적용 예정</span></li>';
+      }else{
+        html+='<li><code>'+escapeHtml(fname)+'</code>';
+        if(c.hunks&&hunkCount<5){
+          var hunks=c.hunks.slice(0,5-hunkCount);
+          for(var j=0;j<hunks.length;j++){
+            html+='<pre class="merge-hunk-preview">'+escapeHtml(hunks[j])+'</pre>';
+            hunkCount++;
+          }
+        }
+        html+='</li>';
+      }
+    }
+    html+='</ul>';
+  }else{
+    html+='<p>스캔 데이터 없음 — <code>scripts/merge-preview-scanner.py</code> 를 실행하세요.</p>';
+  }
+  return html;
+}
+function openMergePanel(wpId){
+  var sp='all';try{var m=location.search.match(/[?&]subproject=([^&]+)/);if(m)sp=m[1];}catch(e){}
+  var panel=document.getElementById('task-panel');
+  var title=document.getElementById('task-panel-title');
+  var body=document.getElementById('task-panel-body');
+  var overlay=document.getElementById('task-panel-overlay');
+  function _showPanel(contentHtml){
+    if(body)body.innerHTML=contentHtml;
+    if(panel){panel.dataset.panelMode='merge';panel.classList.add('open');}
+    if(overlay)overlay.removeAttribute('hidden');
+  }
+  fetch('/api/merge-status?wp='+encodeURIComponent(wpId)+'&subproject='+encodeURIComponent(sp))
+    .then(function(r){return r.json();})
+    .then(function(ms){
+      if(title)title.textContent=wpId+' — 머지 프리뷰';
+      _showPanel(renderMergePreview(ms));
+    })
+    .catch(function(err){
+      _showPanel('<p>머지 상태 로드 실패: '+escapeHtml(String(err))+'</p>');
+    });
+}
 document.addEventListener('click',function(e){
+  var badge=e.target.closest?e.target.closest('.merge-badge'):null;
+  if(!badge&&e.target.classList&&e.target.classList.contains('merge-badge'))badge=e.target;
+  if(badge){openMergePanel(badge.getAttribute('data-wp')||'');return;}
   var btn=e.target.closest?e.target.closest('.expand-btn'):null;
   if(!btn&&e.target.classList&&e.target.classList.contains('expand-btn'))btn=e.target;
   if(btn){openTaskPanel(btn.getAttribute('data-task-id')||'');return;}
@@ -6068,6 +6382,7 @@ def _build_state_snapshot(
         "shared_signals": _asdict_or_none(raw["shared_signals"]),
         "agent_pool_signals": _asdict_or_none(raw["agent_pool_signals"]),
         "tmux_panes": _asdict_or_none(raw["tmux_panes"]),
+        "merge_summary": _collect_merge_summary(docs_dir),
     }
 
 
@@ -6288,6 +6603,8 @@ class MonitorHandler(BaseHTTPRequestHandler):
             self._route_api_state()
         elif _is_api_task_detail_path(self.path):
             _handle_api_task_detail(self)
+        elif _is_api_merge_status_path(self.path):
+            _handle_api_merge_status(self)
         elif _is_pane_api_path(path):
             pane_id = _extract_pane_id(path, _API_PANE_PATH_PREFIX)
             _handle_pane_api(self, pane_id)

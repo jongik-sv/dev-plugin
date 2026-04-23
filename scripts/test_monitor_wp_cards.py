@@ -375,10 +375,13 @@ class SectionWpCardsSingleTaskTests(unittest.TestCase):
         self.fn = monitor_server._section_wp_cards
 
     def test_single_done_task_renders_one_wp_card(self):
-        """QA: <details data-wp="WP-XX"> 1개 존재 (v3: wp-card → details.wp)."""
+        """QA: <details data-wp="WP-XX"> 1개 존재 (v3: wp-card → details.wp).
+
+        TSK-04-03: merge-badge도 data-wp 속성을 가지므로 <details data-wp= 패턴으로 카운트.
+        """
         task = _make_task(tsk_id="TSK-01-01", status="[xx]", wp_id="WP-01")
         html = self.fn([task], set(), set())
-        self.assertEqual(html.count('data-wp="WP-01"'), 1)
+        self.assertEqual(html.count('<details class="wp'), 1)
 
     def test_single_done_task_row_has_done_class(self):
         """QA: task-row done CSS 클래스 포함."""
@@ -447,7 +450,8 @@ class SectionWpCardsMixedStateTests(unittest.TestCase):
     def test_mixed_7_tasks_single_wp_card(self):
         tasks = self._make_mixed_tasks()
         html = self.fn(tasks, {"T4"}, {"T5"})
-        self.assertEqual(html.count('data-wp="WP-01"'), 1)
+        # TSK-04-03: merge-badge도 data-wp 속성을 가지므로 <details data-wp= 패턴으로 카운트
+        self.assertEqual(html.count('<details class="wp'), 1)
 
     def test_bypass_task_row_has_bypass_class(self):
         """QA: bypassed Task의 task-row에 bypass CSS 클래스 포함."""
@@ -489,8 +493,8 @@ class SectionWpCardsMultiWpTests(unittest.TestCase):
             _make_task("T2", wp_id="WP-02"),
         ]
         html = self.fn(tasks, set(), set())
-        self.assertEqual(html.count('data-wp="WP-01"'), 1)
-        self.assertEqual(html.count('data-wp="WP-02"'), 1)
+        # TSK-04-03: merge-badge도 data-wp 속성을 가지므로 <details data-wp= 패턴으로 카운트
+        self.assertEqual(html.count('<details class="wp'), 2)
 
     def test_task_order_preserved_within_wp(self):
         """QA: Task ID 순서 보존 (v1 _group_preserving_order 사용)."""
