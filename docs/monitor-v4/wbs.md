@@ -476,7 +476,7 @@ monitor-server, monitor-launcher
 - category: development
 - domain: frontend
 - model: sonnet
-- status: [dd]
+- status: [xx]
 - priority: medium
 - assignee: -
 - schedule: 2026-04-26 ~ 2026-04-26

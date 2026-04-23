@@ -1196,5 +1196,84 @@ class TskTooltipE2ETests(unittest.TestCase):
         self.assertIn("setupTaskTooltip", html, "setupTaskTooltip 이 HTML script 블록에 없음")
 
 
+@unittest.skipUnless(_SERVER_UP, f"monitor-server not reachable at {_E2E_URL}")
+class TaskModelChipE2ETests(unittest.TestCase):
+    """TSK-02-05: Model chip + escalation flag E2E tests.
+
+    Reachability gate: 메뉴/사이드바/탭 클릭 경로(기존 TSK-02-03 진입 경로 재사용)로
+    대시보드 메인(/)에 도달, 작업 패키지 섹션에서 모델 칩 + ⚡ 플래그 검증.
+    """
+
+    def _get_html(self, path: str = "/") -> str:
+        with urllib.request.urlopen(_E2E_URL + path, timeout=5) as resp:
+            return resp.read().decode("utf-8")
+
+    def test_model_chip_present_in_trow(self) -> None:
+        """대시보드 메인 GET / HTML에 .model-chip 요소가 최소 1개 존재한다.
+
+        클릭 경로: 대시보드 메인(/) 로드 → 작업 패키지 섹션의 trow 확인.
+        """
+        html = self._get_html("/")
+        self.assertIn('class="model-chip"', html,
+                      "model-chip span이 GET / 응답에 없음")
+        self.assertIn('data-model=', html,
+                      "model-chip의 data-model 속성이 없음")
+
+    def test_model_chip_valid_data_model_values(self) -> None:
+        """model-chip의 data-model 값이 opus/sonnet/haiku 중 하나다."""
+        html = self._get_html("/")
+        valid_models = {'opus', 'sonnet', 'haiku'}
+        found_valid = any(
+            f'data-model="{m}"' in html for m in valid_models
+        )
+        self.assertTrue(found_valid,
+                        f"data-model 값이 {valid_models} 중 하나여야 함")
+
+    def test_state_summary_has_phase_models(self) -> None:
+        """data-state-summary JSON에 phase_models, model, retry_count, escalated 키가 있다."""
+        html = self._get_html("/")
+        # data-state-summary 속성 추출
+        m = re.search(r"data-state-summary='([^']*)'", html)
+        if not m:
+            self.skipTest("data-state-summary 속성이 없음 (trow 없음)")
+        import html as html_lib
+        raw = html_lib.unescape(m.group(1))
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError as e:
+            self.fail(f"data-state-summary JSON 파싱 실패: {e}")
+        # TSK-02-05 신규 필드
+        for key in ("model", "retry_count", "phase_models", "escalated"):
+            self.assertIn(key, data, f"data-state-summary에 TSK-02-05 키 누락: {key}")
+        # phase_models 4키 검증
+        pm = data.get("phase_models", {})
+        for pkey in ("design", "build", "test", "refactor"):
+            self.assertIn(pkey, pm, f"phase_models에 키 누락: {pkey}")
+
+    def test_model_chip_css_in_response(self) -> None:
+        """GET / 응답 CSS에 .model-chip 규칙이 포함된다."""
+        html = self._get_html("/")
+        self.assertIn('.model-chip', html,
+                      ".model-chip CSS 규칙이 응답 HTML에 없음")
+
+    def test_escalation_flag_css_in_response(self) -> None:
+        """GET / 응답 CSS에 .escalation-flag 규칙이 포함된다."""
+        html = self._get_html("/")
+        self.assertIn('.escalation-flag', html,
+                      ".escalation-flag CSS 규칙이 응답 HTML에 없음")
+
+    def test_render_phase_models_js_in_script(self) -> None:
+        """GET / 응답 <script> 블록에 renderPhaseModels 함수가 포함된다."""
+        html = self._get_html("/")
+        self.assertIn('renderPhaseModels', html,
+                      "renderPhaseModels JS 함수가 응답 HTML에 없음")
+
+    def test_phase_models_dl_class_in_js(self) -> None:
+        """renderPhaseModels JS에 'phase-models' dl 클래스 설정이 포함된다."""
+        html = self._get_html("/")
+        self.assertIn('phase-models', html,
+                      "phase-models CSS 클래스가 응답 HTML에 없음")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -447,6 +447,7 @@ class WorkItem:
     wp_id: Optional[str] = None
     depends: List[str] = field(default_factory=list)
     error: Optional[str] = None
+    model: Optional[str] = None  # TSK-02-05: wbs.md `- model:` 필드
 
 
 def _cap_error(text: Optional[str]) -> str:
@@ -532,9 +533,10 @@ _WBS_TSK_RE = re.compile(r"^###\s+(TSK-[\w-]+)\s*:\s*(.+?)\s*$", re.MULTILINE)
 
 
 def _load_wbs_title_map(docs_dir: Path):
-    """docs_dir/wbs.md 를 한 번 읽어 ``{TSK-ID: (title, wp_id, depends)}`` 반환.
+    """docs_dir/wbs.md 를 한 번 읽어 ``{TSK-ID: (title, wp_id, depends, model)}`` 반환.
 
     파싱 실패(파일 없음/IO 오류/크기 초과)는 조용히 빈 맵 fallback.
+    TSK-02-05: model 필드도 함께 파싱한다 (``- model: {value}`` 라인).
     """
     wbs_path = docs_dir / "wbs.md"
     try:
@@ -555,27 +557,30 @@ def _load_wbs_title_map(docs_dir: Path):
     current_tsk: Optional[str] = None
     current_title: Optional[str] = None
     current_depends: List[str] = []
+    current_model: Optional[str] = None
 
-    def _commit(tsk, title, wp, depends):
+    def _commit(tsk, title, wp, depends, mdl):
         if tsk:
-            result[tsk] = (title, wp, depends)
+            result[tsk] = (title, wp, depends, mdl)
 
     for raw_line in text.splitlines():
         line = raw_line.rstrip()
         m_wp = _WBS_WP_RE.match(line)
         if m_wp:
-            _commit(current_tsk, current_title, current_wp, current_depends)
+            _commit(current_tsk, current_title, current_wp, current_depends, current_model)
             current_wp = m_wp.group(1)
             current_tsk = None
             current_title = None
             current_depends = []
+            current_model = None
             continue
         m_tsk = _WBS_TSK_RE.match(line)
         if m_tsk:
-            _commit(current_tsk, current_title, current_wp, current_depends)
+            _commit(current_tsk, current_title, current_wp, current_depends, current_model)
             current_tsk = m_tsk.group(1)
             current_title = m_tsk.group(2).strip() or None
             current_depends = []
+            current_model = None
             continue
         stripped = line.lstrip()
         if stripped.startswith("- depends:"):
@@ -586,7 +591,11 @@ def _load_wbs_title_map(docs_dir: Path):
                 current_depends = [
                     token.strip() for token in rest.split(",") if token.strip()
                 ]
-    _commit(current_tsk, current_title, current_wp, current_depends)
+        elif stripped.startswith("- model:"):
+            rest = stripped[len("- model:"):].strip()
+            if rest and rest != "-":
+                current_model = rest
+    _commit(current_tsk, current_title, current_wp, current_depends, current_model)
     return result
 
 
@@ -749,22 +758,43 @@ def scan_tasks(docs_dir: Path) -> List[WorkItem]:
 
     - tasks 디렉터리가 없으면 ``[]`` 반환 (예외 없음).
     - 파싱 실패한 state.json 은 ``error`` 가 채워진 ``WorkItem`` 으로 반환.
-    - wbs.md 가 있으면 title/wp_id/depends 를 함께 채운다 (1회 파싱).
+    - wbs.md 가 있으면 title/wp_id/depends/model 을 함께 채운다 (1회 파싱).
     - wbs.md 에 선언됐지만 state.json 이 아직 없는 Task 는 pending placeholder
       WorkItem 으로 추가된다 (디스크 쓰기 없음, wbs.md 문서 순서 유지).
+    TSK-02-05: model 필드를 title_map 에서 채운다.
     """
     docs_dir = Path(docs_dir)
     title_map = _load_wbs_title_map(docs_dir)
 
     def _task_lookup(item_id, _state_path):
-        return title_map.get(item_id, (None, None, []))
+        entry = title_map.get(item_id)
+        if entry is None:
+            return None, None, []
+        # entry는 (title, wp_id, depends, model) 4-tuple (TSK-02-05)
+        if len(entry) == 4:
+            return entry[0], entry[1], entry[2]
+        return entry[0], entry[1], entry[2]
 
     items = _scan_dir(docs_dir, "tasks", "wbs", _task_lookup)
+    # model 필드 후처리: _scan_dir은 lookup 반환(3-tuple)만 처리하므로 여기서 채운다
+    for it in items:
+        if it.id in title_map:
+            entry = title_map[it.id]
+            if len(entry) == 4:
+                object.__setattr__(it, "model", entry[3]) if hasattr(it, "__dataclass_fields__") else None
+                # dataclass는 frozen이 아니므로 직접 설정 가능
+                it.model = entry[3]
     seen = {it.id for it in items}
-    for tsk_id, (title, wp_id, depends) in title_map.items():
+    for tsk_id, entry in title_map.items():
         if tsk_id in seen:
             continue
-        items.append(_make_workitem_placeholder(tsk_id, "wbs", title, wp_id, depends))
+        title = entry[0] if entry else None
+        wp_id = entry[1] if entry else None
+        depends = entry[2] if entry else []
+        mdl = entry[3] if len(entry) == 4 else None
+        placeholder = _make_workitem_placeholder(tsk_id, "wbs", title, wp_id, depends)
+        placeholder.model = mdl
+        items.append(placeholder)
     return items
 
 
@@ -2188,6 +2218,31 @@ body[data-filter="bypass"]  .trow:not([data-status="bypass"]) { display: none; }
 #trow-tooltip dl{ margin:0; }
 #trow-tooltip dt{ color:var(--ink-3); font-size:10px; margin-top:6px; }
 #trow-tooltip dd{ margin:0; color:var(--ink); }
+
+/* ---------- TSK-02-05: model chip + escalation flag ---------- */
+.model-chip{
+  display:inline-block;
+  padding:1px 6px;
+  margin-left:6px;
+  font:10px/1.4 var(--font-mono);
+  border-radius:3px;
+  background:var(--bg-3);
+  color:var(--ink-2);
+  border:1px solid var(--border);
+  vertical-align:middle;
+}
+.model-chip[data-model="opus"]{ background:#3b2f4a; color:#e8d8ff; border-color:#6b4a8a; }
+.model-chip[data-model="sonnet"]{ background:#2a3a4a; color:#cce0f0; border-color:#3a6080; }
+.model-chip[data-model="haiku"]{ background:#2a3f30; color:#c8e6c9; border-color:#3a6040; }
+.escalation-flag{
+  margin-left:4px;
+  color:var(--pending);
+  font-size:11px;
+  vertical-align:middle;
+}
+/* phase-models dl in tooltip */
+#trow-tooltip dl.phase-models dt{ color:var(--ink-3); font-size:10px; margin-top:4px; }
+#trow-tooltip dl.phase-models dd{ margin:0; color:var(--ink); font-size:11px; }
 """
 
 def _minify_css(css: str) -> str:
@@ -2265,6 +2320,68 @@ def _retry_count(item) -> int:
         if isinstance(event, str) and event.endswith(".fail"):
             count += 1
     return count
+
+
+# ---------------------------------------------------------------------------
+# TSK-02-05: DDTR phase model helpers
+# ---------------------------------------------------------------------------
+
+def _MAX_ESCALATION() -> int:
+    """환경변수 MAX_ESCALATION(기본 2)을 안전하게 파싱한다.
+
+    매 호출마다 환경변수를 재읽어 테스트의 monkeypatch.setenv 즉시 반영.
+    음수/0/비숫자/빈 문자열 → 기본값 2 폴백.
+    """
+    raw = os.environ.get("MAX_ESCALATION", "").strip()
+    try:
+        val = int(raw)
+        if val > 0:
+            return val
+    except (ValueError, TypeError):
+        pass
+    return 2
+
+
+def _test_phase_model(item) -> str:
+    """retry_count 기반으로 Test phase 모델을 결정한다 (TSK-02-05 TRD §3.10).
+
+    규칙:
+    - rc >= _MAX_ESCALATION() → 'opus'
+    - rc >= 1 → 'sonnet'
+    - 그 외 → 'haiku'
+    """
+    rc = _retry_count(item)
+    if rc >= _MAX_ESCALATION():
+        return "opus"
+    if rc >= 1:
+        return "sonnet"
+    return "haiku"
+
+
+def _phase_models_for(item) -> dict:
+    """DDTR 4개 phase별 모델 dict 반환 (TSK-02-05 TRD §3.10).
+
+    Keys: design, build, test, refactor.
+    - design: item.model (wbs.md 필드) 또는 'sonnet' 폴백
+    - build, refactor: 'sonnet' 고정
+    - test: _test_phase_model(item) (retry_count 기반)
+    """
+    design_model = getattr(item, "model", None) or "sonnet"
+    return {
+        "design": design_model,
+        "build": "sonnet",
+        "test": _test_phase_model(item),
+        "refactor": "sonnet",
+    }
+
+
+# DDTR phase model 람다 테이블 (TRD §3.10 — Dep-Graph 노드 향후 소비용)
+_DDTR_PHASE_MODELS = {
+    "dd": lambda t: getattr(t, "model", None) or "sonnet",
+    "im": lambda t: "sonnet",
+    "ts": _test_phase_model,
+    "xx": lambda t: "sonnet",
+}
 
 
 def _status_badge(status: Optional[str], bypassed: bool, running: bool, failed: bool) -> str:
@@ -2845,9 +2962,10 @@ def _clean_title(title) -> str:
 
 
 def _build_state_summary_json(item) -> dict:
-    """state.json 요약 dict 를 생성한다 (TSK-02-03).
+    """state.json 요약 dict 를 생성한다 (TSK-02-03 + TSK-02-05 확장).
 
     포함 필드: status, last_event, last_event_at, elapsed (int초), phase_tail (최근 3개).
+    TSK-02-05 추가 필드: model, retry_count, phase_models, escalated.
     item 에 필드가 없으면 graceful default (빈 문자열/None/0/[]).
     """
     status = getattr(item, "status", None)
@@ -2870,12 +2988,21 @@ def _build_state_summary_json(item) -> dict:
         }
         for e in history_tail[-3:]
     ]
+    # TSK-02-05: model chip + escalation badge fields
+    item_model = getattr(item, "model", None) or "sonnet"
+    rc = _retry_count(item)
+    escalated = rc >= _MAX_ESCALATION()
+    pm = _phase_models_for(item)
     return {
         "status": status,
         "last_event": last_event,
         "last_event_at": last_event_at,
         "elapsed": elapsed,
         "phase_tail": phase_tail,
+        "model": item_model,
+        "retry_count": rc,
+        "phase_models": pm,
+        "escalated": escalated,
     }
 
 
@@ -2927,7 +3054,20 @@ def _render_task_row_v2(item, running_ids: set, failed_ids: set, lang: str = "ko
     elapsed_raw = _format_elapsed(item, lang=lang)
     elapsed_display = elapsed_raw if elapsed_raw != "-" else "—"
 
-    flags_inner = '<span class="flag f-crit">bypass</span>' if bypassed else ""
+    # TSK-02-05: escalation flag (⚡) — prepend before bypass flag
+    rc = _retry_count(item)
+    escalated = rc >= _MAX_ESCALATION()
+    escalation_span = (
+        '<span class="escalation-flag" aria-label="escalated">⚡</span>'
+        if escalated else ""
+    )
+    bypass_span = '<span class="flag f-crit">bypass</span>' if bypassed else ""
+    flags_inner = escalation_span + bypass_span
+
+    # TSK-02-05: model chip — inserted after clean_title in ttitle cell
+    item_model_raw = getattr(item, "model", None) or "sonnet"
+    model_esc = _esc(item_model_raw)
+    model_chip = f'<span class="model-chip" data-model="{model_esc}">{model_esc}</span>'
 
     clean_title = _esc(_clean_title(title))
 
@@ -2945,9 +3085,9 @@ def _render_task_row_v2(item, running_ids: set, failed_ids: set, lang: str = "ko
         f'  <div class="tid id">{_esc(item_id)}</div>\n'
         f'  <div class="badge"{badge_title_attr}>{_esc(badge_text)}</div>\n'
         '  <span class="spinner" aria-hidden="true"></span>\n'
-        f'  <div class="ttitle title">{clean_title}</div>\n'
+        f'  <div class="ttitle title">{clean_title}{model_chip}</div>\n'
         f'  <div class="elapsed">{_esc(elapsed_display)}</div>\n'
-        f'  <div class="retry">×{_retry_count(item)}</div>\n'
+        f'  <div class="retry">×{rc}</div>\n'
         f'  <div class="flags">{flags_inner}</div>\n'
         f'  {expand_btn}\n'
         '</div>'
@@ -4161,11 +4301,32 @@ _DASHBOARD_JS = """\
 })();
 
 /* TSK-02-03: Task hover tooltip — setupTaskTooltip IIFE */
+/* TSK-02-05: renderPhaseModels 확장 추가 */
 (function setupTaskTooltip(){
   var tip=document.getElementById('trow-tooltip');
   if(!tip)return;
   var _timer=null;
   var _current=null;
+
+  /* TSK-02-05: phase model 4행 <dl> 렌더러 */
+  function renderPhaseModels(pm,escalated,retry_count){
+    if(!pm)return null;
+    var dl=document.createElement('dl');
+    dl.className='phase-models';
+    function pmrow(label,value){
+      var dt=document.createElement('dt');dt.textContent=label;
+      var dd=document.createElement('dd');dd.textContent=value||'—';
+      dl.appendChild(dt);dl.appendChild(dd);
+    }
+    pmrow('Design',pm.design);
+    pmrow('Build',pm.build);
+    var testLine=escalated
+      ?'haiku → '+pm.test+' (retry #'+retry_count+') ⚡'
+      :pm.test;
+    pmrow('Test',testLine);
+    pmrow('Refactor',pm.refactor);
+    return dl;
+  }
 
   function renderTooltipHtml(data){
     var dl=document.createElement('dl');
@@ -4187,7 +4348,12 @@ _DASHBOARD_JS = """\
         dl.appendChild(dd2);
       });
     }
-    return dl;
+    /* TSK-02-05: phase models section */
+    var pmDl=renderPhaseModels(data.phase_models,data.escalated,data.retry_count);
+    var frag=document.createDocumentFragment();
+    frag.appendChild(dl);
+    if(pmDl){frag.appendChild(pmDl);}
+    return frag;
   }
 
   function show(el,data){
