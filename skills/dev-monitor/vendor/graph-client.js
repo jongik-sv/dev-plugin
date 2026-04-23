@@ -59,11 +59,19 @@
   function nodeHtmlTemplate(nd) {
     const statusKey = getStatusKey(nd);
     const classes = ["dep-node", `status-${statusKey}`];
-    if (nd.is_critical)  classes.push("critical");
+    if (nd.is_critical)   classes.push("critical");
     if (nd.is_bottleneck) classes.push("bottleneck");
-    const nodeId    = escapeHtml(nd.id || "");
-    const nodeTitle = escapeHtml(nd.label || nd.id || "");
-    return `<div class="${classes.join(" ")}"><span class="dep-node-id">${nodeId}</span><span class="dep-node-title">${nodeTitle}</span></div>`;
+    const nodeId     = escapeHtml(nd.id || "");
+    const nodeTitle  = escapeHtml(nd.label || nd.id || "");
+    const isRunning  = !!nd.is_running_signal;
+    const spinner    = isRunning ? '<span class="node-spinner"></span>' : "";
+    const dataRunning = isRunning ? "true" : "false";
+    return (
+      `<div class="${classes.join(" ")}" data-running="${dataRunning}">` +
+      `<span class="dep-node-id">${nodeId}</span>` +
+      `<span class="dep-node-title">${nodeTitle}</span>` +
+      `${spinner}</div>`
+    );
   }
 
   // -- 노드 스타일 --
@@ -89,6 +97,7 @@
       fan_in: nd.fan_in, fan_out: nd.fan_out,
       bypassed: nd.bypassed, wp_id: nd.wp_id,
       label: nd.label,
+      is_running_signal: nd.is_running_signal,
       _raw: nd,
     }});
   }
@@ -103,6 +112,7 @@
     ele.data("is_critical", nd.is_critical);
     ele.data("is_bottleneck", nd.is_bottleneck);
     ele.data("label", nd.label);
+    ele.data("is_running_signal", nd.is_running_signal);
     ele.data("_raw", nd);
     ele.toggleClass("bottleneck", !!nd.is_bottleneck);
   }
@@ -330,7 +340,7 @@
     if (typeof cy.nodeHtmlLabel === "function") {
       cy.nodeHtmlLabel([{
         query: "node",
-        tpl: function(data) { return nodeHtmlTemplate(data); },
+        tpl: nodeHtmlTemplate,
       }]);
     }
 
