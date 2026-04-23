@@ -32,15 +32,25 @@
       .replace(/'/g, "&#39;");
   }
 
+  // -- 상태 키 정규화 헬퍼 --
+  // WBS 상태 코드([xx], [im], 등)를 COLOR/CSS 키(done/running/failed/bypassed/pending)로 변환.
+  // nodeHtmlTemplate과 nodeStyle이 공유한다.
+  function getStatusKey(node) {
+    if (node.bypassed) return "bypassed";
+    const s = node.status;
+    if (s === "[xx]" || s === "done")                          return "done";
+    if (s === "[im]" || s === "[ts]" || s === "[dd]"
+        || s === "running")                                    return "running";
+    if (s === "failed" || s === "[fail]")                      return "failed";
+    if (s === "bypassed")                                      return "bypassed";
+    return s || "pending";
+  }
+
   // -- 노드 HTML 템플릿 --
   function nodeHtmlTemplate(nd) {
-    const statusRaw = nd.bypassed ? "bypassed"
-                    : nd.status === "[xx]" ? "done"
-                    : (nd.status === "[im]" || nd.status === "[ts]" || nd.status === "[dd]") ? "running"
-                    : (nd.status === "failed" || nd.status === "[fail]") ? "failed"
-                    : nd.status || "pending";
-    const classes = ["dep-node", `status-${statusRaw}`];
-    if (nd.is_critical) classes.push("critical");
+    const statusKey = getStatusKey(nd);
+    const classes = ["dep-node", `status-${statusKey}`];
+    if (nd.is_critical)  classes.push("critical");
     if (nd.is_bottleneck) classes.push("bottleneck");
     const nodeId    = escapeHtml(nd.id || "");
     const nodeTitle = escapeHtml(nd.label || nd.id || "");
@@ -54,12 +64,8 @@
 
   // -- 노드 스타일 --
   function nodeStyle(node) {
-    const color = node.bypassed ? COLOR.bypassed
-                : node.status === "[xx]" ? COLOR.done
-                : (node.status === "[im]" || node.status === "[ts]") ? COLOR.running
-                : node.status === "[dd]" ? COLOR.running
-                : (node.status === "failed" || node.status === "[fail]") ? COLOR.failed
-                : COLOR.pending;
+    const key    = getStatusKey(node);
+    const color  = COLOR[key] || COLOR.pending;
     const isCrit = node.is_critical;
     return {
       color,

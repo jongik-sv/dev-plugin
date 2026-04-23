@@ -1958,6 +1958,29 @@ body[data-filter="bypass"]  .trow:not([data-status="bypass"]) { display: none; }
 @keyframes fade-in{from{opacity:0; transform:translateY(-4px);}to{opacity:1; transform:translateY(0);}}
 @media (prefers-reduced-motion: reduce){ .arow{ animation: none; } }
 
+/* ---------- dep-node HTML 레이블 (TSK-04-02) ---------- */
+/* cytoscape-node-html-label 플러그인이 각 노드 위에 오버레이하는 2줄 카드 */
+.dep-node {
+  display: flex; flex-direction: column; align-items: flex-start;
+  width: 176px; height: 50px; padding: 4px 8px; box-sizing: border-box;
+  border-radius: 4px; border-left: 3px solid transparent;
+  font-family: var(--mono); font-size: 10px; line-height: 1.4;
+  background: var(--bg-2); border-color: var(--line-2);
+  pointer-events: none;
+}
+.dep-node-id    { font-weight: 700; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.dep-node-title { font-weight: 400; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+/* status strip: 좌측 테두리 색상 */
+.dep-node.status-done      { border-left-color: #22c55e; }
+.dep-node.status-running   { border-left-color: #eab308; }
+.dep-node.status-pending   { border-left-color: #94a3b8; }
+.dep-node.status-failed    { border-left-color: #ef4444; }
+.dep-node.status-bypassed  { border-left-color: #a855f7; }
+/* 크리티컬 노드: ID 글자색 강조 */
+.dep-node.critical .dep-node-id { color: #ef4444; }
+/* 병목 노드: 배경 틴트 (color-mix 미지원 구형 브라우저는 투명 fallback — AC 허용 범위) */
+.dep-node.bottleneck { background: color-mix(in srgb, #eab308 8%, var(--bg-2)); }
+
 /* ---------- dep-graph summary chips (TSK-04-04) ---------- */
 /* AC-32: color values match #dep-graph-legend inline style hex 1:1 */
 #dep-graph-summary {
