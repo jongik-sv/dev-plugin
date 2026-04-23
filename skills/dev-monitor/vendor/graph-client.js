@@ -5,6 +5,7 @@
 
   // -- 상수 --
   const POLL_MS = 2000;
+  const HOVER_DWELL_MS = 2000;
   const COLOR = {
     done:          "#22c55e",
     running:       "#eab308",
@@ -27,6 +28,7 @@
   let popoverNodeId = null;
   let _popoverEl = null;
   let _initialFitDone = false;
+  let hoverTimer = null;
 
   // -- XSS 방지 헬퍼 --
   function escapeHtml(s) {
@@ -41,15 +43,16 @@
   // -- 상태 키 정규화 헬퍼 --
   // WBS 상태 코드([xx], [im], 등)를 COLOR/CSS 키(done/running/failed/bypassed/pending)로 변환.
   // nodeHtmlTemplate과 nodeStyle이 공유한다.
+  // 상태 문자열 → 내부 키 lookup table
+  const _STATUS_MAP = {
+    "[xx]": "done", "done": "done",
+    "[im]": "running", "[ts]": "running", "[dd]": "running", "running": "running",
+    "failed": "failed", "[fail]": "failed",
+  };
+
   function getStatusKey(node) {
     if (node.bypassed) return "bypassed";
-    const s = node.status;
-    if (s === "[xx]" || s === "done")                          return "done";
-    if (s === "[im]" || s === "[ts]" || s === "[dd]"
-        || s === "running")                                    return "running";
-    if (s === "failed" || s === "[fail]")                      return "failed";
-    if (s === "bypassed")                                      return "bypassed";
-    return s || "pending";
+    return _STATUS_MAP[node.status] || node.status || "pending";
   }
 
   // -- 노드 HTML 템플릿 --
@@ -60,12 +63,7 @@
     if (nd.is_bottleneck) classes.push("bottleneck");
     const nodeId    = escapeHtml(nd.id || "");
     const nodeTitle = escapeHtml(nd.label || nd.id || "");
-    return (
-      `<div class="${classes.join(" ")}">`
-      + `<span class="dep-node-id">${nodeId}</span>`
-      + `<span class="dep-node-title">${nodeTitle}</span>`
-      + `</div>`
-    );
+    return `<div class="${classes.join(" ")}"><span class="dep-node-id">${nodeId}</span><span class="dep-node-title">${nodeTitle}</span></div>`;
   }
 
   // -- 노드 스타일 --
@@ -78,6 +76,46 @@
       borderColor: isCrit ? COLOR.edge_critical : color,
       borderWidth: isCrit ? 2 : 0,
     };
+  }
+
+  // -- delta 노드 추가 --
+  function _addNode(nd, style) {
+    cy.add({ group: "nodes", data: {
+      id: nd.id,
+      color: style.color, borderWidth: style.borderWidth,
+      borderColor: style.borderColor,
+      status: nd.status, is_critical: nd.is_critical,
+      is_bottleneck: nd.is_bottleneck,
+      fan_in: nd.fan_in, fan_out: nd.fan_out,
+      bypassed: nd.bypassed, wp_id: nd.wp_id,
+      label: nd.label,
+      _raw: nd,
+    }});
+  }
+
+  // -- delta 노드 갱신 --
+  function _updateNode(nd, style) {
+    const ele = cy.getElementById(nd.id);
+    ele.data("color", style.color);
+    ele.data("borderWidth", style.borderWidth);
+    ele.data("borderColor", style.borderColor);
+    ele.data("status", nd.status);
+    ele.data("is_critical", nd.is_critical);
+    ele.data("is_bottleneck", nd.is_bottleneck);
+    ele.data("label", nd.label);
+    ele.data("_raw", nd);
+    ele.toggleClass("bottleneck", !!nd.is_bottleneck);
+  }
+
+  // -- delta 엣지 추가 --
+  function _addEdge(ed) {
+    const eid = ed.id || `${ed.source}__${ed.target}`;
+    cy.add({ group: "edges", data: {
+      id: eid, source: ed.source, target: ed.target,
+      color: ed.is_critical ? COLOR.edge_critical : COLOR.edge_default,
+      width: ed.is_critical ? 3 : 1,
+      is_critical: ed.is_critical,
+    }});
   }
 
   // -- delta 적용 --
@@ -101,46 +139,19 @@
     });
 
     cy.batch(() => {
-      // 노드 추가/갱신
       nodes.forEach(nd => {
         const style = nodeStyle(nd);
         if (!curNodeIds.has(nd.id)) {
-          cy.add({ group: "nodes", data: {
-            id: nd.id,
-            color: style.color, borderWidth: style.borderWidth,
-            borderColor: style.borderColor,
-            status: nd.status, is_critical: nd.is_critical,
-            is_bottleneck: nd.is_bottleneck,
-            fan_in: nd.fan_in, fan_out: nd.fan_out,
-            bypassed: nd.bypassed, wp_id: nd.wp_id,
-            label: nd.label,
-            _raw: nd,
-          }});
+          _addNode(nd, style);
           topoChanged = true;
         } else {
-          const ele = cy.getElementById(nd.id);
-          ele.data("color", style.color);
-          ele.data("borderWidth", style.borderWidth);
-          ele.data("borderColor", style.borderColor);
-          ele.data("status", nd.status);
-          ele.data("is_critical", nd.is_critical);
-          ele.data("is_bottleneck", nd.is_bottleneck);
-          ele.data("label", nd.label);
-          ele.data("_raw", nd);
-          ele.toggleClass("bottleneck", !!nd.is_bottleneck);
+          _updateNode(nd, style);
         }
       });
-
-      // 엣지 추가
       edges.forEach(ed => {
         const eid = ed.id || `${ed.source}__${ed.target}`;
         if (!curEdgeIds.has(eid)) {
-          cy.add({ group: "edges", data: {
-            id: eid, source: ed.source, target: ed.target,
-            color: ed.is_critical ? COLOR.edge_critical : COLOR.edge_default,
-            width: ed.is_critical ? 3 : 1,
-            is_critical: ed.is_critical,
-          }});
+          _addEdge(ed);
           topoChanged = true;
         }
       });
@@ -149,7 +160,6 @@
     if (topoChanged) {
       const layout = cy.layout({ name: "dagre", rankDir: "LR", nodeSep: 60, rankSep: 120 });
       layout.one("layoutstop", () => {
-        // 첫 레이아웃 종료 시점에만 fit 호출 (maxZoom 캡) — 이후는 사용자 pan/zoom 존중
         if (!_initialFitDone && cy.nodes().length > 0) {
           cy.fit(undefined, 40);
           if (cy.zoom() > FIT_MAX) cy.zoom(FIT_MAX);
@@ -212,23 +222,29 @@
     return _popoverEl;
   }
 
-  function renderPopover(ele) {
-    const raw = ele.data("_raw") || {};
-    const pop = ensurePopover();
-    const hist = (raw.phase_history || []).slice(-3).reverse()
-      .map(h => `${h.event}: ${h.from_status || "?"}→${h.to_status || "?"}`)
-      .join("<br>");
-    pop.innerHTML = (
-      "<strong>" + (ele.data("label") || ele.id()) + "</strong><br>"
-      + "status: " + (raw.status || "-") + "<br>"
-      + "depends: " + ((raw.depends || []).join(", ") || "-") + "<br>"
-      + (hist ? "<br><em>history:</em><br>" + hist : "")
-    );
+  // -- 팝오버 위치 갱신 --
+  function _positionPopover(pop, ele) {
     const pos = ele.renderedPosition();
     const canvas = document.getElementById("dep-graph-canvas");
     const rect = canvas ? canvas.getBoundingClientRect() : { left: 0, top: 0 };
     pop.style.left = (rect.left + pos.x + 12) + "px";
     pop.style.top  = (rect.top + pos.y + window.scrollY - 10) + "px";
+  }
+
+  function renderPopover(ele, source) {
+    source = source || "tap";
+    const raw = ele.data("_raw") || {};
+    const pop = ensurePopover();
+    const label = escapeHtml(ele.data("label") || ele.id());
+    const status = raw.status || "-";
+    const depends = (raw.depends || []).join(", ") || "-";
+    const hist = (raw.phase_history || []).slice(-3).reverse()
+      .map(h => `${h.event}: ${h.from_status || "?"}→${h.to_status || "?"}`)
+      .join("<br>");
+    pop.innerHTML = `<strong>${label}</strong><br>status: ${status}<br>depends: ${depends}`
+      + (hist ? `<br><br><em>history:</em><br>${hist}` : "");
+    pop.setAttribute("data-source", source);
+    _positionPopover(pop, ele);
     pop.style.display = "block";
   }
 
@@ -321,12 +337,30 @@
     cy.on("tap", "node", evt => {
       const ele = evt.target;
       popoverNodeId = ele.id();
-      renderPopover(ele);
+      renderPopover(ele, "tap");
     });
     cy.on("tap", evt => {
       if (evt.target === cy) hidePopover();
     });
+    cy.on("mouseover", "node", evt => {
+      const ele = evt.target;
+      clearTimeout(hoverTimer);
+      hoverTimer = setTimeout(() => {
+        const check = cy.getElementById(ele.id());
+        if (check.length) {
+          popoverNodeId = ele.id();
+          renderPopover(ele, "hover");
+        }
+      }, HOVER_DWELL_MS);
+    });
+    cy.on("mouseout", "node", () => {
+      clearTimeout(hoverTimer);
+      if (_popoverEl && _popoverEl.getAttribute("data-source") === "hover") {
+        hidePopover();
+      }
+    });
     cy.on("pan zoom", () => {
+      clearTimeout(hoverTimer);
       if (popoverNodeId) {
         const ele = cy.getElementById(popoverNodeId);
         if (ele.length) renderPopover(ele);
