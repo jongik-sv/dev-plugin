@@ -41,6 +41,7 @@ touch {SHARED_SIGNAL_DIR}/{TSK-ID}.running
    ```bash
    HASH=$(git rev-parse --short HEAD)
    echo "커밋: ${HASH}" > {SHARED_SIGNAL_DIR}/{TSK-ID}.done.tmp && mv {SHARED_SIGNAL_DIR}/{TSK-ID}.done.tmp {SHARED_SIGNAL_DIR}/{TSK-ID}.done
+   rm -f {SHARED_SIGNAL_DIR}/{TSK-ID}.running
    ```
 3. 다음 지시가 올 때까지 대기. 추가 Task를 스스로 시작하지 마라.
 
@@ -50,9 +51,11 @@ touch {SHARED_SIGNAL_DIR}/{TSK-ID}.running
 2. 실패 시그널 생성 (반드시 Bash 도구로 실행, **절대 경로 사용**):
    ```bash
    echo '에러: {에러 내용 5줄 이내}' > {SHARED_SIGNAL_DIR}/{TSK-ID}.failed.tmp && mv {SHARED_SIGNAL_DIR}/{TSK-ID}.failed.tmp {SHARED_SIGNAL_DIR}/{TSK-ID}.failed
+   rm -f {SHARED_SIGNAL_DIR}/{TSK-ID}.running
    ```
 3. 다음 지시가 올 때까지 대기.
 
 ⚠️ 성공이든 실패든, 반드시 .done 또는 .failed 시그널 파일을 생성하라. 시그널 없이 종료하면 리더가 무한 대기한다.
+⚠️ .done/.failed 생성 직후 반드시 `.running`을 삭제하라 — stale `.running`은 대시보드가 태스크를 "실행 중"으로 오인하게 만든다.
 ⚠️ 상대 경로(../.signals/) 사용 금지 — worktree에서 의도한 위치로 해석되지 않는다.
 ```
