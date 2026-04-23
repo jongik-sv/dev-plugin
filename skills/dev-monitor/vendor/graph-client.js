@@ -166,7 +166,7 @@
       const span = el.querySelector(`[data-stat="${k}"]`);
       if (span) span.textContent = getStat(stats, k);
     });
-    const depth = getStat(stats, "critical_path_depth", "critical_depth");
+    const depth = getStat(stats, "critical_path_length");
     const bottleneck = getStat(stats, "bottleneck_count");
     let extra = el.querySelector(".dep-graph-summary-extra");
     if (!extra) {
@@ -174,7 +174,12 @@
       extra.className = "dep-graph-summary-extra";
       el.appendChild(extra);
     }
-    extra.textContent = ` | 크리티컬 패스 깊이 ${depth} | 병목 Task ${bottleneck}개`;
+    const _lang = new URLSearchParams(window.location.search).get("lang") || "ko";
+    if (_lang === "en") {
+      extra.textContent = ` | Critical path depth ${depth} | Bottleneck tasks ${bottleneck}`;
+    } else {
+      extra.textContent = ` | 크리티컬 패스 깊이 ${depth} | 병목 Task ${bottleneck}개`;
+    }
   }
 
   // -- 팝오버 --

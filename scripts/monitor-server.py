@@ -2011,10 +2011,10 @@ body[data-filter="bypass"]  .trow:not([data-status="bypass"]) { display: none; }
 }
 .dep-node.status-failed .dep-node-id { color: var(--fail); }
 .dep-node.status-bypassed {
-  border-left-color: var(--ink-4);
-  --_tint: color-mix(in srgb, var(--ink-4) 8%, transparent);
+  border-left-color: #a855f7;
+  --_tint: color-mix(in srgb, #a855f7 10%, transparent);
 }
-.dep-node.status-bypassed .dep-node-id { color: var(--ink-4); }
+.dep-node.status-bypassed .dep-node-id { color: #a855f7; }
 /* --- 모디파이어: critical (붉은 글로우 + border) --- */
 .dep-node.critical {
   border-color: var(--fail);
