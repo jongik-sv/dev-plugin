@@ -21,7 +21,7 @@ import json
 USAGE = """\
 Usage: args-parse.py <skill> [arguments...]
 
-Skills: dev, dev-design, dev-build, dev-test, dev-refactor, dev-team, wbs, feat
+Skills: dev, dev-design, dev-build, dev-test, dev-refactor, dev-team, dev-seq, wbs, feat
 
 Output: JSON with parsed arguments
   {
@@ -40,6 +40,7 @@ Examples:
   args-parse.py dev "feat:login-2fa --only design"
   args-parse.py feat "login-2fa add 2FA to login"
   args-parse.py dev-team "p1 WP-01 WP-02 --team-size 5"
+  args-parse.py dev-seq "p1 WP-01 WP-02 --on-fail strict"
 """
 
 FEAT_NAME_RE = re.compile(r"^[a-z][a-z0-9-]*$")
@@ -116,6 +117,11 @@ def main():
                 opt_model = tokens[idx]
         elif tok == "--team-size":
             idx += 1
+            if skill == "dev-seq":
+                print(json.dumps({
+                    "error": "/dev-seq는 --team-size 옵션을 지원하지 않습니다 (항상 1명 순차 실행). 병렬 개발이 필요하면 /dev-team을 사용하세요.",
+                }, ensure_ascii=False), file=sys.stderr)
+                sys.exit(1)
             if idx < len(tokens):
                 try:
                     opt_team_size = int(tokens[idx])
@@ -186,10 +192,10 @@ def main():
     if not source:
         source = "wbs"
 
-    # dev-team은 WBS 모드 전용 (Feature 모드 병렬화 미지원)
-    if skill == "dev-team" and source == "feat":
+    # dev-team / dev-seq는 WBS 모드 전용 (Feature 모드 미지원)
+    if skill in ("dev-team", "dev-seq") and source == "feat":
         print(json.dumps({
-            "error": "/dev-team은 WBS 모드 전용입니다. Feature 모드 병렬화는 지원하지 않습니다. Feature 개발은 /feat {NAME}으로 순차 실행하세요.",
+            "error": f"/{skill}은 WBS 모드 전용입니다. Feature 개발은 /feat {{NAME}}으로 실행하세요.",
         }, ensure_ascii=False), file=sys.stderr)
         sys.exit(1)
 
