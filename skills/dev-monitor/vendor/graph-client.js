@@ -63,7 +63,9 @@
     if (nd.is_bottleneck) classes.push("bottleneck");
     const nodeId    = escapeHtml(nd.id || "");
     const nodeTitle = escapeHtml(nd.label || nd.id || "");
-    return `<div class="${classes.join(" ")}"><span class="dep-node-id">${nodeId}</span><span class="dep-node-title">${nodeTitle}</span></div>`;
+    const isRunning = !!nd.is_running_signal;
+    const spinner = isRunning ? '<span class="node-spinner"></span>' : '';
+    return `<div class="${classes.join(" ")}" data-running="${isRunning}">${spinner}<span class="dep-node-id">${nodeId}</span><span class="dep-node-title">${nodeTitle}</span></div>`;
   }
 
   // -- 노드 스타일 --
@@ -88,6 +90,7 @@
       is_bottleneck: nd.is_bottleneck,
       fan_in: nd.fan_in, fan_out: nd.fan_out,
       bypassed: nd.bypassed, wp_id: nd.wp_id,
+      is_running_signal: nd.is_running_signal,
       label: nd.label,
       _raw: nd,
     }});
@@ -102,6 +105,7 @@
     ele.data("status", nd.status);
     ele.data("is_critical", nd.is_critical);
     ele.data("is_bottleneck", nd.is_bottleneck);
+    ele.data("is_running_signal", nd.is_running_signal);
     ele.data("label", nd.label);
     ele.data("_raw", nd);
     ele.toggleClass("bottleneck", !!nd.is_bottleneck);
@@ -393,4 +397,30 @@
   } else {
     window.addEventListener("load", init);
   }
+
+  // -- TSK-05-01: applyFilter export -- expose via window.depGraph.applyFilter
+  // Predicate receives nodeId (string) and returns true to show, false to fade.
+  let _filterPredicate = null;
+
+  // Helper: returns true if the given nodeId passes the current filter predicate.
+  function _isVisible(nodeId) {
+    return !_filterPredicate || _filterPredicate(nodeId);
+  }
+
+  function applyFilter(predicate) {
+    _filterPredicate = predicate || null;
+    if (!cy) return;
+    cy.nodes().forEach(node => {
+      node.style("opacity", _isVisible(node.id()) ? 1 : 0.3);
+    });
+    cy.edges().forEach(edge => {
+      const show = _isVisible(edge.source().id()) && _isVisible(edge.target().id());
+      edge.style("line-color", show ? undefined : "#94a3b8");
+      edge.style("opacity", show ? 1 : 0.2);
+    });
+  }
+
+  // Expose on window.depGraph namespace
+  if (!window.depGraph) window.depGraph = {};
+  window.depGraph.applyFilter = applyFilter;
 })();

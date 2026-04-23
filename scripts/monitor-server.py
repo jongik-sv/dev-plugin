@@ -446,6 +446,7 @@ class WorkItem:
     depends: List[str] = field(default_factory=list)
     error: Optional[str] = None
     model: Optional[str] = None  # TSK-02-05: wbs.md `- model:` 필드
+    domain: Optional[str] = None  # TSK-05-01: wbs.md `- domain:` 필드
 
 
 def _cap_error(text: Optional[str]) -> str:
@@ -531,10 +532,11 @@ _WBS_TSK_RE = re.compile(r"^###\s+(TSK-[\w-]+)\s*:\s*(.+?)\s*$", re.MULTILINE)
 
 
 def _load_wbs_title_map(docs_dir: Path):
-    """docs_dir/wbs.md 를 한 번 읽어 ``{TSK-ID: (title, wp_id, depends, model)}`` 반환.
+    """docs_dir/wbs.md 를 한 번 읽어 ``{TSK-ID: (title, wp_id, depends, model, domain)}`` 반환.
 
     파싱 실패(파일 없음/IO 오류/크기 초과)는 조용히 빈 맵 fallback.
     TSK-02-05: model 필드도 함께 파싱한다 (``- model: {value}`` 라인).
+    TSK-05-01: domain 필드도 함께 파싱한다 (``- domain: {value}`` 라인).
     """
     wbs_path = docs_dir / "wbs.md"
     try:
@@ -556,29 +558,32 @@ def _load_wbs_title_map(docs_dir: Path):
     current_title: Optional[str] = None
     current_depends: List[str] = []
     current_model: Optional[str] = None
+    current_domain: Optional[str] = None
 
-    def _commit(tsk, title, wp, depends, mdl):
+    def _commit(tsk, title, wp, depends, mdl, dom):
         if tsk:
-            result[tsk] = (title, wp, depends, mdl)
+            result[tsk] = (title, wp, depends, mdl, dom)
 
     for raw_line in text.splitlines():
         line = raw_line.rstrip()
         m_wp = _WBS_WP_RE.match(line)
         if m_wp:
-            _commit(current_tsk, current_title, current_wp, current_depends, current_model)
+            _commit(current_tsk, current_title, current_wp, current_depends, current_model, current_domain)
             current_wp = m_wp.group(1)
             current_tsk = None
             current_title = None
             current_depends = []
             current_model = None
+            current_domain = None
             continue
         m_tsk = _WBS_TSK_RE.match(line)
         if m_tsk:
-            _commit(current_tsk, current_title, current_wp, current_depends, current_model)
+            _commit(current_tsk, current_title, current_wp, current_depends, current_model, current_domain)
             current_tsk = m_tsk.group(1)
             current_title = m_tsk.group(2).strip() or None
             current_depends = []
             current_model = None
+            current_domain = None
             continue
         stripped = line.lstrip()
         if stripped.startswith("- depends:"):
@@ -593,7 +598,11 @@ def _load_wbs_title_map(docs_dir: Path):
             rest = stripped[len("- model:"):].strip()
             if rest and rest != "-":
                 current_model = rest
-    _commit(current_tsk, current_title, current_wp, current_depends, current_model)
+        elif stripped.startswith("- domain:"):
+            rest = stripped[len("- domain:"):].strip()
+            if rest and rest != "-":
+                current_domain = rest
+    _commit(current_tsk, current_title, current_wp, current_depends, current_model, current_domain)
     return result
 
 
@@ -768,20 +777,18 @@ def scan_tasks(docs_dir: Path) -> List[WorkItem]:
         entry = title_map.get(item_id)
         if entry is None:
             return None, None, []
-        # entry는 (title, wp_id, depends, model) 4-tuple (TSK-02-05)
-        if len(entry) == 4:
-            return entry[0], entry[1], entry[2]
+        # entry는 (title, wp_id, depends, model, domain) 5-tuple (TSK-05-01)
         return entry[0], entry[1], entry[2]
 
     items = _scan_dir(docs_dir, "tasks", "wbs", _task_lookup)
-    # model 필드 후처리: _scan_dir은 lookup 반환(3-tuple)만 처리하므로 여기서 채운다
+    # model, domain 필드 후처리: _scan_dir은 lookup 반환(3-tuple)만 처리하므로 여기서 채운다
     for it in items:
         if it.id in title_map:
             entry = title_map[it.id]
-            if len(entry) == 4:
-                object.__setattr__(it, "model", entry[3]) if hasattr(it, "__dataclass_fields__") else None
-                # dataclass는 frozen이 아니므로 직접 설정 가능
+            if len(entry) >= 4:
                 it.model = entry[3]
+            if len(entry) >= 5:
+                it.domain = entry[4]
     seen = {it.id for it in items}
     for tsk_id, entry in title_map.items():
         if tsk_id in seen:
@@ -789,9 +796,11 @@ def scan_tasks(docs_dir: Path) -> List[WorkItem]:
         title = entry[0] if entry else None
         wp_id = entry[1] if entry else None
         depends = entry[2] if entry else []
-        mdl = entry[3] if len(entry) == 4 else None
+        mdl = entry[3] if len(entry) >= 4 else None
+        dom = entry[4] if len(entry) >= 5 else None
         placeholder = _make_workitem_placeholder(tsk_id, "wbs", title, wp_id, depends)
         placeholder.model = mdl
+        placeholder.domain = dom
         items.append(placeholder)
     return items
 
@@ -2190,6 +2199,29 @@ body[data-filter="bypass"]  .trow:not([data-status="bypass"]) { display: none; }
 /* phase-models dl in tooltip */
 #trow-tooltip dl.phase-models dt{ color:var(--ink-3); font-size:10px; margin-top:4px; }
 #trow-tooltip dl.phase-models dd{ margin:0; color:var(--ink); font-size:11px; }
+/* TSK-05-01: filter-bar — sticky top, z-index 70 (below slide-panel:90, trow-tooltip:100) */
+.filter-bar{
+  position:sticky;
+  top:0;
+  z-index:70;
+  display:flex;
+  gap:8px;
+  padding:8px 12px;
+  background:var(--bg-1);
+  border-bottom:1px solid var(--border);
+  flex-wrap:wrap;
+}
+.filter-bar input,
+.filter-bar select,
+.filter-bar button{
+  font:12px var(--font-body);
+  padding:4px 8px;
+  background:var(--bg-2);
+  color:var(--ink-1);
+  border:1px solid var(--border);
+  border-radius:3px;
+}
+.filter-bar input{ min-width:140px; }
 """
 
 def _minify_css(css: str) -> str:
@@ -3013,6 +3045,9 @@ def _render_task_row_v2(item, running_ids: set, failed_ids: set, lang: str = "ko
     model_esc = _esc(item_model_raw)
     model_chip = f'<span class="model-chip" data-model="{model_esc}">{model_esc}</span>'
 
+    # TSK-05-01: data-domain attribute — used by client-side filter matchesRow()
+    domain_val = _esc(getattr(item, "domain", None) or "")
+
     clean_title = _esc(_clean_title(title))
 
     expand_btn = (
@@ -3024,6 +3059,7 @@ def _render_task_row_v2(item, running_ids: set, failed_ids: set, lang: str = "ko
 
     return (
         f'<div class="trow" data-status="{data_status}" data-phase="{data_phase}" data-running="{data_running}"'
+        f' data-domain="{domain_val}"'
         f" data-state-summary='{_state_summary_encoded}'>\n"
         '  <div class="statusbar"></div>\n'
         f'  <div class="tid id">{_esc(item_id)}</div>\n'
@@ -3893,6 +3929,10 @@ _DASHBOARD_JS = """\
     /* dep-graph is managed autonomously by graph-client.js; skip DOM replacement
        to prevent cytoscape canvas destruction on every 5-second dashboard poll. */
     if(name==='dep-graph')return;
+    /* TSK-05-01: filter-bar controls must survive auto-refresh DOM replacement.
+       The filter-bar section is static SSR content — inputs hold client state.
+       Replacing its innerHTML would lose user-typed query/select values. */
+    if(name==='filter-bar')return;
     if(name==='hdr'){
       /* Preserve chip aria-pressed states and refresh-toggle visual state
          across DOM replacement so client-side filter/toggle survive server push. */
@@ -4028,6 +4068,138 @@ _DASHBOARD_JS = """\
   }else{
     init();
   }
+})();
+
+/* TSK-05-01: Filter bar — currentFilters / matchesRow / applyFilters / syncUrl / loadFiltersFromUrl */
+/* patchSection monkey-patch for filter survival across 5-second auto-refresh */
+(function setupFilterBar(){
+  'use strict';
+  /* ---- 5 core filter functions ---- */
+  function currentFilters(){
+    var q      =(document.getElementById('fb-q')||{value:''}).value.trim().toLowerCase();
+    var status =(document.getElementById('fb-status')||{value:''}).value;
+    var domain =(document.getElementById('fb-domain')||{value:''}).value;
+    var model  =(document.getElementById('fb-model')||{value:''}).value;
+    return {q:q,status:status,domain:domain,model:model};
+  }
+  function matchesRow(trow,f){
+    /* q: substring match on task-id OR .ttitle text, case-insensitive */
+    if(f.q){
+      var taskId=(trow.dataset.taskId||'').toLowerCase();
+      var titleEl=trow.querySelector('.ttitle');
+      var titleText=titleEl?titleEl.textContent.toLowerCase():'';
+      if(taskId.indexOf(f.q)===-1&&titleText.indexOf(f.q)===-1)return false;
+    }
+    /* status: exact match on data-status OR data-phase */
+    if(f.status){
+      var ds=trow.dataset.status||'';
+      var dp=trow.dataset.phase||'';
+      if(ds!==f.status&&dp!==f.status)return false;
+    }
+    /* domain: exact match on data-domain */
+    if(f.domain){
+      if((trow.dataset.domain||'')!==f.domain)return false;
+    }
+    /* model: exact match on .model-chip data-model */
+    if(f.model){
+      var chip=trow.querySelector('.model-chip');
+      if((chip?chip.dataset.model||'':'')!==f.model)return false;
+    }
+    return true;
+  }
+  function applyFilters(){
+    var f=currentFilters();
+    /* .trow[data-task-id] — Task rows only. Live-activity rows have no data-task-id. */
+    document.querySelectorAll('.trow[data-task-id]').forEach(function(trow){
+      trow.style.display=matchesRow(trow,f)?'':'none';
+    });
+    /* Dep-Graph filter — optional, guard for missing depGraph */
+    if(window.depGraph&&typeof window.depGraph.applyFilter==='function'){
+      window.depGraph.applyFilter(function(nodeId){
+        /* nodeId matches task id — show node if no q filter or task matches */
+        if(!f.q&&!f.domain&&!f.model&&!f.status)return true;
+        var trow=document.querySelector('.trow[data-task-id="'+nodeId+'"]');
+        if(!trow)return true;/* unknown node — keep visible */
+        return matchesRow(trow,f);
+      });
+    }
+  }
+  /* Apply filters and sync URL — shared by all event handlers */
+  function applyAndSync(){applyFilters();syncUrl(currentFilters());}
+  function syncUrl(f){
+    var url=new URL(window.location.href);
+    var sp=url.searchParams;
+    /* Set or delete each filter param; preserve subproject/lang/other params */
+    if(f.q){sp.set('q',f.q);}else{sp.delete('q');}
+    if(f.status){sp.set('status',f.status);}else{sp.delete('status');}
+    if(f.domain){sp.set('domain',f.domain);}else{sp.delete('domain');}
+    if(f.model){sp.set('model',f.model);}else{sp.delete('model');}
+    history.replaceState(null,'',url.toString());
+  }
+  /* Get the 4 filter control DOM elements */
+  function _fbEls(){
+    return {
+      q:document.getElementById('fb-q'),
+      st:document.getElementById('fb-status'),
+      dm:document.getElementById('fb-domain'),
+      md:document.getElementById('fb-model')
+    };
+  }
+  function loadFiltersFromUrl(){
+    var sp=new URLSearchParams(window.location.search);
+    var els=_fbEls();
+    if(els.q&&sp.has('q')){els.q.value=sp.get('q');}
+    if(els.st&&sp.has('status')){els.st.value=sp.get('status');}
+    if(els.dm&&sp.has('domain')){els.dm.value=sp.get('domain');}
+    if(els.md&&sp.has('model')){els.md.value=sp.get('model');}
+  }
+  /* ---- event bindings (document-level delegation — survives DOM replacement) ---- */
+  document.addEventListener('input',function(e){
+    if(e.target&&e.target.id==='fb-q'){applyAndSync();}
+  });
+  document.addEventListener('change',function(e){
+    var id=e.target&&e.target.id;
+    if(id==='fb-status'||id==='fb-domain'||id==='fb-model'){applyAndSync();}
+  });
+  document.addEventListener('click',function(e){
+    if(e.target&&e.target.id==='fb-reset'){
+      var els=_fbEls();
+      if(els.q)els.q.value='';
+      if(els.st)els.st.value='';
+      if(els.dm)els.dm.value='';
+      if(els.md)els.md.value='';
+      applyAndSync();
+    }
+  });
+  /* ---- patchSection monkey-patch — filter survival across auto-refresh ---- */
+  /* Extract helper: registers monkey-patch once (sentinel guard). */
+  function _registerPatchWrap(){
+    if(window.patchSection&&!window.patchSection.__filterWrapped){
+      var _orig=window.patchSection;
+      window.patchSection=function(name,html){
+        _orig.call(this,name,html);
+        /* wp-cards and live-activity may contain .trow[data-task-id] rows.
+           Live-activity rows have no data-task-id so applyFilters() is harmless. */
+        if(name==='wp-cards'||name==='live-activity'){applyFilters();}
+      };
+      window.patchSection.__filterWrapped=true;
+    }
+  }
+  _registerPatchWrap();
+  /* ---- initial load sequence (DOMContentLoaded) ---- */
+  function initFilterBar(){
+    loadFiltersFromUrl();
+    applyFilters();
+    /* Re-register monkey-patch here if patchSection was not yet available at IIFE run time. */
+    _registerPatchWrap();
+  }
+  if(document.readyState==='loading'){
+    document.addEventListener('DOMContentLoaded',initFilterBar);
+  }else{
+    initFilterBar();
+  }
+  /* Expose for external access (e.g. dev-test verification) */
+  window.filterBar={currentFilters:currentFilters,matchesRow:matchesRow,applyFilters:applyFilters,syncUrl:syncUrl,loadFiltersFromUrl:loadFiltersFromUrl};
 })();
 
 /* TSK-02-03: Task hover tooltip — setupTaskTooltip IIFE */
@@ -4235,6 +4407,75 @@ def _section_subproject_tabs(model: dict) -> str:
     return f'<nav class="subproject-tabs" data-section="subproject-tabs">{inner}</nav>\n'
 
 
+def _section_filter_bar(lang: str, distinct_domains: list) -> str:
+    """TSK-05-01: Render the sticky filter bar section HTML.
+
+    Renders a ``<div class="filter-bar" data-section="filter-bar" role="search">``
+    container with 4 filter controls + reset button:
+    - #fb-q: text input (search keyword, case-insensitive)
+    - #fb-status: select (running/done/failed/bypass/pending)
+    - #fb-domain: select (distinct domains from wbs.md)
+    - #fb-model: select (opus/sonnet/haiku)
+    - #fb-reset: reset button
+
+    i18n: lang 파라미터 기반 label 텍스트 분기 (ko / en).
+
+    Note: data-section="filter-bar" attribute lets patchSection identify this section,
+    but the JS monkey-patch skips filter-bar replacement so filter controls persist.
+    """
+    lang = _normalize_lang(lang)
+    is_ko = lang == "ko"
+
+    q_placeholder   = "🔍 검색 (ID / 제목)" if is_ko else "🔍 Search (ID / title)"
+    status_header   = "상태" if is_ko else "Status"
+    domain_header   = "도메인" if is_ko else "Domain"
+    model_header    = "모델" if is_ko else "Model"
+    reset_label     = "✕ 초기화" if is_ko else "✕ Reset"
+    reset_aria      = "초기화" if is_ko else "Reset"
+
+    # #fb-status 고정 options
+    status_options = "".join([
+        f'<option value="">{_esc(status_header)}</option>',
+        '<option value="running">running</option>',
+        '<option value="done">done</option>',
+        '<option value="failed">failed</option>',
+        '<option value="bypass">bypass</option>',
+        '<option value="pending">pending</option>',
+    ])
+
+    # #fb-domain dynamic options from distinct_domains
+    domain_options = "".join(
+        [f'<option value="">{_esc(domain_header)}</option>']
+        + [
+            f'<option value="{_esc(str(d))}">{_esc(str(d))}</option>'
+            for d in (distinct_domains or [])
+        ]
+    )
+
+    # #fb-model options
+    model_options = "".join([
+        f'<option value="">{_esc(model_header)}</option>',
+        '<option value="opus">opus</option>',
+        '<option value="sonnet">sonnet</option>',
+        '<option value="haiku">haiku</option>',
+    ])
+
+    return (
+        '<div class="filter-bar" data-section="filter-bar" role="search">\n'
+        f'  <input id="fb-q" type="search" placeholder="{_esc(q_placeholder)}"'
+        '   autocomplete="off" aria-label="Search">\n'
+        f'  <select id="fb-status" aria-label="{_esc(status_header)}">'
+        f'{status_options}</select>\n'
+        f'  <select id="fb-domain" aria-label="{_esc(domain_header)}">'
+        f'{domain_options}</select>\n'
+        f'  <select id="fb-model" aria-label="{_esc(model_header)}">'
+        f'{model_options}</select>\n'
+        f'  <button id="fb-reset" type="button" aria-label="{_esc(reset_aria)}">'
+        f'{_esc(reset_label)}</button>\n'
+        '</div>'
+    )
+
+
 def _build_dashboard_body(s: dict) -> str:
     """Assemble section HTMLs into the ``<body>`` inner content string (v3 layout).
 
@@ -4250,10 +4491,14 @@ def _build_dashboard_body(s: dict) -> str:
     # TSK-01-02: subproject-tabs is optional (empty string in legacy mode)
     tabs_html = s.get("subproject-tabs", "")
 
+    # TSK-05-01: filter-bar — sticky header below tabs, above kpi
+    filter_bar_html = s.get("filter-bar", "")
+
     return "".join([
         '<div class="shell">\n',
         s["header"], "\n",
         tabs_html,
+        filter_bar_html, "\n",
         s["kpi"], "\n",
         '  <div class="grid">\n',
         '    <div class="col">\n',
@@ -4328,6 +4573,13 @@ def render_dashboard(model: dict, lang: str = "ko", subproject: str = "all") -> 
         '</div>'
     )
     tabs_html = _section_subproject_tabs(model)
+    # TSK-05-01: distinct_domains for filter-bar domain select options
+    distinct_domains = sorted({
+        getattr(t, "domain", None) or ""
+        for t in tasks
+        if getattr(t, "domain", None)
+    })
+    filter_bar_html = _section_filter_bar(lang, distinct_domains)
     sections: dict = {
         "kpi":            _section_kpi(model),
         "wp-cards":       _section_wp_cards(tasks, running_ids, failed_ids,
@@ -4365,6 +4617,7 @@ def render_dashboard(model: dict, lang: str = "ko", subproject: str = "all") -> 
         "header": header_html,
         "sticky-header": sticky_header_html,
         "subproject-tabs": tabs_html,
+        "filter-bar": filter_bar_html,
     })
 
     return "".join([
@@ -5943,12 +6196,20 @@ def _handle_api_state(
             or os.path.basename(project_root)
             or ""
         )
+        # TSK-05-01: distinct_domains for filter-bar domain select
+        _wbs_tasks: List[WorkItem] = payload.get("wbs_tasks") or []
+        distinct_domains: List[str] = sorted({
+            getattr(t, "domain", None) or ""
+            for t in _wbs_tasks
+            if getattr(t, "domain", None)
+        })
         payload = {
             **payload,
             "subproject": subproject,
             "available_subprojects": available_subprojects,
             "is_multi_mode": is_multi_mode,
             "project_name": project_name,
+            "distinct_domains": distinct_domains,
         }
         # generated_at / project_root / docs_dir are already in payload
         # (from _build_state_snapshot), so they satisfy the "7 fields" count.
