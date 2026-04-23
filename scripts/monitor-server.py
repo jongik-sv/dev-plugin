@@ -2854,10 +2854,12 @@ def _build_state_summary_json(item) -> dict:
     last_event = getattr(item, "last_event", None)
     last_event_at = getattr(item, "last_event_at", None)
     elapsed_raw = getattr(item, "elapsed_seconds", None)
-    elapsed = int(elapsed_raw) if isinstance(elapsed_raw, (int, float)) and not isinstance(elapsed_raw, bool) else 0
+    elapsed = (
+        int(elapsed_raw)
+        if isinstance(elapsed_raw, (int, float)) and not isinstance(elapsed_raw, bool)
+        else 0
+    )
     history_tail = getattr(item, "phase_history_tail", []) or []
-    # 최근 3개만 추출
-    tail = history_tail[-3:] if len(history_tail) > 3 else history_tail
     phase_tail = [
         {
             "event": getattr(e, "event", None),
@@ -2866,7 +2868,7 @@ def _build_state_summary_json(item) -> dict:
             "at": getattr(e, "at", None),
             "elapsed_seconds": getattr(e, "elapsed_seconds", None),
         }
-        for e in tail
+        for e in history_tail[-3:]
     ]
     return {
         "status": status,

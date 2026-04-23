@@ -2523,6 +2523,209 @@ class TskSpinnerTests(unittest.TestCase):
         self.assertIn('.trow[data-running="true"] .spinner', css)
 
 
+class TskTooltipStateSummaryTests(unittest.TestCase):
+    """TSK-02-03: Task hover 툴팁 단위 테스트."""
+
+    def _make_task_with_history(
+        self,
+        tsk_id="TSK-02-03",
+        status="[im]",
+        last_event="build.ok",
+        last_event_at="2026-04-23T05:00:00Z",
+        elapsed_seconds=120.0,
+        phase_history_tail=None,
+    ):
+        if phase_history_tail is None:
+            phase_history_tail = [
+                PhaseEntry(event="design.ok", from_status="[ ]", to_status="[dd]",
+                           at="2026-04-23T04:00:00Z", elapsed_seconds=60.0),
+                PhaseEntry(event="build.ok", from_status="[dd]", to_status="[im]",
+                           at="2026-04-23T05:00:00Z", elapsed_seconds=120.0),
+            ]
+        return _make_task(
+            tsk_id=tsk_id, status=status, last_event=last_event,
+            last_event_at=last_event_at, elapsed_seconds=elapsed_seconds,
+            phase_history_tail=phase_history_tail,
+        )
+
+    def _extract_state_summary(self, html_str):
+        import json, re
+        import html as _html
+        m = re.search(r"data-state-summary='([^']*(?:&#x27;[^']*)*)'", html_str)
+        if m is None:
+            return None
+        return json.loads(_html.unescape(m.group(1)))
+
+    def _make_model(self, tasks):
+        return {
+            "tasks": tasks, "features": [], "panes": [], "signals": [],
+            "running_ids": set(), "failed_ids": set(),
+            "subprojects": ["monitor-v4"], "current_subproject": "monitor-v4",
+            "wp_titles": {}, "subagent_count": 0, "team_size": 0,
+        }
+
+    def test_trow_has_data_state_summary_attribute(self):
+        task = self._make_task_with_history()
+        h = monitor_server._render_task_row_v2(task, set(), set())
+        self.assertIn("data-state-summary=", h)
+
+    def test_trow_data_state_summary_is_valid_json(self):
+        task = self._make_task_with_history()
+        h = monitor_server._render_task_row_v2(task, set(), set())
+        data = self._extract_state_summary(h)
+        self.assertIsNotNone(data, "data-state-summary 파싱 실패")
+        self.assertIsInstance(data, dict)
+
+    def test_trow_data_state_summary_has_required_keys(self):
+        task = self._make_task_with_history()
+        h = monitor_server._render_task_row_v2(task, set(), set())
+        data = self._extract_state_summary(h)
+        self.assertIsNotNone(data)
+        for key in ("status", "last_event", "last_event_at", "elapsed", "phase_tail"):
+            self.assertIn(key, data, f"필수 키 누락: {key}")
+
+    def test_trow_data_state_summary_status_matches_item(self):
+        task = self._make_task_with_history(status="[dd]")
+        h = monitor_server._render_task_row_v2(task, set(), set())
+        data = self._extract_state_summary(h)
+        self.assertIsNotNone(data)
+        self.assertEqual(data["status"], "[dd]")
+
+    def test_trow_data_state_summary_elapsed_is_int(self):
+        task = self._make_task_with_history(elapsed_seconds=90.7)
+        h = monitor_server._render_task_row_v2(task, set(), set())
+        data = self._extract_state_summary(h)
+        self.assertIsNotNone(data)
+        self.assertIsInstance(data["elapsed"], int)
+        self.assertEqual(data["elapsed"], 90)
+
+    def test_state_summary_phase_tail_is_last_three(self):
+        four = [
+            PhaseEntry(event="design.ok", from_status="[ ]", to_status="[dd]",
+                       at="2026-04-23T01:00:00Z", elapsed_seconds=30.0),
+            PhaseEntry(event="build.ok", from_status="[dd]", to_status="[im]",
+                       at="2026-04-23T02:00:00Z", elapsed_seconds=60.0),
+            PhaseEntry(event="test.ok", from_status="[im]", to_status="[ts]",
+                       at="2026-04-23T03:00:00Z", elapsed_seconds=90.0),
+            PhaseEntry(event="refactor.ok", from_status="[ts]", to_status="[xx]",
+                       at="2026-04-23T04:00:00Z", elapsed_seconds=120.0),
+        ]
+        task = self._make_task_with_history(phase_history_tail=four)
+        h = monitor_server._render_task_row_v2(task, set(), set())
+        data = self._extract_state_summary(h)
+        self.assertIsNotNone(data)
+        self.assertEqual(len(data["phase_tail"]), 3)
+        self.assertEqual(data["phase_tail"][0]["event"], "build.ok")
+        self.assertEqual(data["phase_tail"][2]["event"], "refactor.ok")
+
+    def test_state_summary_phase_tail_empty_when_no_history(self):
+        task = self._make_task_with_history(phase_history_tail=[])
+        h = monitor_server._render_task_row_v2(task, set(), set())
+        data = self._extract_state_summary(h)
+        self.assertIsNotNone(data)
+        self.assertEqual(data["phase_tail"], [])
+
+    def test_state_summary_phase_tail_items_have_expected_keys(self):
+        task = self._make_task_with_history()
+        h = monitor_server._render_task_row_v2(task, set(), set())
+        data = self._extract_state_summary(h)
+        self.assertIsNotNone(data)
+        self.assertTrue(len(data["phase_tail"]) > 0)
+        entry = data["phase_tail"][0]
+        for key in ("event", "from", "to", "at", "elapsed_seconds"):
+            self.assertIn(key, entry, f"phase_tail 원소 키 누락: {key}")
+
+    def test_state_summary_escapes_xss_in_last_event(self):
+        task = _make_task(tsk_id="TSK-02-03", status="[im]",
+                          last_event="<script>alert(1)</script>",
+                          last_event_at="2026-04-23T05:00:00Z")
+        h = monitor_server._render_task_row_v2(task, set(), set())
+        self.assertNotIn("<script>", h)
+        self.assertIn("&lt;script&gt;", h)
+
+    def test_state_summary_single_quote_payload_escaped(self):
+        task = _make_task(tsk_id="TSK-02-03", status="[im]",
+                          last_event="it's done",
+                          last_event_at="2026-04-23T05:00:00Z")
+        h = monitor_server._render_task_row_v2(task, set(), set())
+        self.assertIn("&#x27;", h)
+
+    def test_state_summary_null_last_event_when_none(self):
+        task = _make_task(tsk_id="TSK-02-03", status="[ ]",
+                          last_event=None, last_event_at=None,
+                          elapsed_seconds=None, phase_history_tail=[])
+        h = monitor_server._render_task_row_v2(task, set(), set())
+        data = self._extract_state_summary(h)
+        self.assertIsNotNone(data)
+        self.assertIsNone(data["last_event"])
+        self.assertIsNone(data["last_event_at"])
+
+    def test_trow_existing_structure_not_broken(self):
+        """data-state-summary 추가 후 기존 7개 child div 구조가 회귀 없음 — class 이름이 HTML 에 포함됨."""
+        task = self._make_task_with_history()
+        h = monitor_server._render_task_row_v2(task, set(), set())
+        # 각 클래스명이 HTML 어딘가에 존재하는지 확인 (multi-class 속성 포함)
+        for cls in ("statusbar", "tid", "badge", "spinner", "ttitle", "elapsed", "retry", "flags"):
+            self.assertIn(cls, h, f"기존 클래스 {cls} 누락")
+
+    def test_trow_tooltip_dom_in_body(self):
+        tasks = [self._make_task_with_history(tsk_id="TSK-02-03")]
+        h = render_dashboard(self._make_model(tasks))
+        count = h.count('<div id="trow-tooltip"')
+        self.assertEqual(count, 1, f"#trow-tooltip 이 {count}회 발견 (1회 이어야 함)")
+
+    def test_trow_tooltip_dom_has_role_tooltip(self):
+        tasks = [self._make_task_with_history(tsk_id="TSK-02-03")]
+        h = render_dashboard(self._make_model(tasks))
+        self.assertIn('<div id="trow-tooltip" role="tooltip"', h)
+
+    def test_trow_tooltip_dom_has_hidden_attribute(self):
+        tasks = [self._make_task_with_history(tsk_id="TSK-02-03")]
+        h = render_dashboard(self._make_model(tasks))
+        self.assertIn('<div id="trow-tooltip" role="tooltip" hidden', h)
+
+    def test_dashboard_css_has_trow_tooltip_rule(self):
+        self.assertIn("#trow-tooltip", monitor_server.DASHBOARD_CSS)
+
+    def test_dashboard_css_trow_tooltip_has_position_fixed(self):
+        self.assertIn("position:fixed", monitor_server.DASHBOARD_CSS)
+
+    def test_dashboard_css_trow_tooltip_has_pointer_events_none(self):
+        self.assertIn("pointer-events:none", monitor_server.DASHBOARD_CSS)
+
+    def test_dashboard_js_has_setup_task_tooltip(self):
+        self.assertIn("setupTaskTooltip", monitor_server._DASHBOARD_JS)
+
+    def test_dashboard_js_has_document_level_delegation(self):
+        js = monitor_server._DASHBOARD_JS
+        self.assertIn("mouseenter", js)
+        self.assertIn("closest", js)
+        self.assertIn("data-state-summary", js)
+
+    def test_dashboard_js_has_300ms_debounce(self):
+        js = monitor_server._DASHBOARD_JS
+        self.assertIn("300", js)
+        self.assertIn("setTimeout", js)
+
+    def test_dashboard_js_has_scroll_hide(self):
+        self.assertIn("scroll", monitor_server._DASHBOARD_JS)
+
+    def test_build_state_summary_json_helper_exists(self):
+        self.assertTrue(hasattr(monitor_server, "_build_state_summary_json"))
+        task = self._make_task_with_history()
+        self.assertIsInstance(monitor_server._build_state_summary_json(task), dict)
+
+    def test_encode_state_summary_attr_helper_exists(self):
+        self.assertTrue(hasattr(monitor_server, "_encode_state_summary_attr"))
+        result = monitor_server._encode_state_summary_attr({"status": "[im]"})
+        self.assertIsInstance(result, str)
+
+    def test_trow_tooltip_skeleton_helper_exists(self):
+        self.assertTrue(hasattr(monitor_server, "_trow_tooltip_skeleton"))
+        h = monitor_server._trow_tooltip_skeleton()
+        self.assertIn('id="trow-tooltip"', h)
+        self.assertIn('role="tooltip"', h)
+        self.assertIn("hidden", h)
 
 
 

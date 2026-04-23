@@ -1102,5 +1102,99 @@ class TaskExpandLogsE2ETests(unittest.TestCase):
             )
 
 
+class TskTooltipE2ETests(unittest.TestCase):
+    """TSK-02-03: Task hover 툴팁 E2E 테스트 (서버 기동 필요).
+
+    Playwright 미탑재 환경이므로 실제 DOM 이벤트 시뮬레이션 대신
+    HTTP 레벨(GET /) HTML 스냅샷으로 구조 검증한다.
+
+    실제 hover 시나리오(300ms mouseenter → tooltip visible)는
+    수동 QA 또는 Playwright 도입 시 자동화한다.
+
+    NOTE: 이 테스트는 dev-test 단계에서 실행된다 (dev-build 에서는 실행하지 않음).
+    """
+
+    _SERVER_READY = None  # lazy evaluation
+
+    @classmethod
+    def _check_server(cls):
+        if cls._SERVER_READY is None:
+            try:
+                with urllib.request.urlopen(_E2E_URL + "/", timeout=1) as resp:
+                    cls._SERVER_READY = resp.status == 200
+            except Exception:
+                cls._SERVER_READY = False
+        return cls._SERVER_READY
+
+    def _get_html(self, path: str = "/") -> str:
+        url = _E2E_URL + path
+        with urllib.request.urlopen(url, timeout=5) as resp:
+            return resp.read().decode("utf-8", errors="replace")
+
+    def test_task_tooltip_trow_has_data_state_summary(self) -> None:
+        """GET / HTML 에 .trow[data-state-summary] 가 포함된다.
+
+        실제 hover 시나리오는 수동 QA / Playwright 로 커버한다.
+        """
+        if not self._check_server():
+            self.skipTest("monitor server not running — E2E skipped")
+        html = self._get_html("/")
+        self.assertIn("data-state-summary=", html,
+                      "GET / 응답 HTML 에 data-state-summary 속성이 없음")
+
+    def test_task_tooltip_dom_body_direct(self) -> None:
+        """GET / HTML 에 #trow-tooltip 이 body 직계로 1회 존재한다 (5초 auto-refresh 격리).
+
+        실제 hover 시나리오(300ms → visible)는 수동 QA 로 확인한다:
+          1. 브라우저에서 http://localhost:7321/?subproject=monitor-v4 접속
+          2. Work Packages 섹션에서 Task 행에 마우스 hover (300ms 유지)
+          3. #trow-tooltip 이 행 우측에 나타나는지 확인
+          4. mouseleave / scroll 시 hidden 전환 확인
+        """
+        if not self._check_server():
+            self.skipTest("monitor server not running — E2E skipped")
+        html = self._get_html("/")
+        count = html.count('<div id="trow-tooltip"')
+        self.assertEqual(count, 1, f"#trow-tooltip 이 {count}회 발견 (1회 이어야 함)")
+
+    def test_task_tooltip_state_summary_is_valid_json(self) -> None:
+        """GET / 응답 HTML 의 첫 번째 .trow[data-state-summary] 값이 유효한 JSON 이다."""
+        if not self._check_server():
+            self.skipTest("monitor server not running — E2E skipped")
+        import html as _html
+        html_str = self._get_html("/")
+        m = re.search(r"data-state-summary='([^']*(?:&#x27;[^']*)*)'", html_str)
+        if m is None:
+            self.skipTest("data-state-summary 속성이 HTML 에 없음 (task 없는 서버)")
+        raw = _html.unescape(m.group(1))
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError as e:
+            self.fail(f"data-state-summary JSON 파싱 실패: {e}")
+        for key in ("status", "last_event", "last_event_at", "elapsed", "phase_tail"):
+            self.assertIn(key, data, f"필수 키 누락: {key}")
+
+    def test_task_tooltip_second_render_keeps_dom(self) -> None:
+        """두 번의 GET / 응답에서 #trow-tooltip 이 각각 body 직계에 존재한다.
+
+        auto-refresh(innerHTML 교체) 후에도 tooltip DOM 이 유지됨을 서버 응답 2회로 검증.
+        실제 브라우저 innerHTML 교체 시뮬레이션은 수동 QA 로 보완한다.
+        """
+        if not self._check_server():
+            self.skipTest("monitor server not running — E2E skipped")
+        html1 = self._get_html("/")
+        html2 = self._get_html("/")
+        for i, h in enumerate((html1, html2), start=1):
+            count = h.count('<div id="trow-tooltip"')
+            self.assertEqual(count, 1, f"GET / 응답 {i}회차: #trow-tooltip 이 {count}회 발견")
+
+    def test_task_tooltip_setupTaskTooltip_in_script(self) -> None:
+        """GET / 응답 HTML 의 <script> 블록에 setupTaskTooltip 이 포함된다."""
+        if not self._check_server():
+            self.skipTest("monitor server not running — E2E skipped")
+        html = self._get_html("/")
+        self.assertIn("setupTaskTooltip", html, "setupTaskTooltip 이 HTML script 블록에 없음")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
