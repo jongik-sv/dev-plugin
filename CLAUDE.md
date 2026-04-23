@@ -61,7 +61,7 @@ SKILL.md 예시에 필요한 쉘 명령은 **Python 래퍼 호출로 치환**해
 - `dev-design`, `dev-build`, `dev-test`, `dev-refactor`: Individual phase skills. Branch on `SOURCE` (wbs vs feat) — same DFA (`references/state-machine.json`), different requirement source and artifact location.
 
 **Layer 3 — Team parallel development** (combines Layer 1 + Layer 2):
-- `dev-team`: Distributes WP's Tasks across team-mode workers. Each worker runs the full DDTR cycle. Uses git worktrees per WP, merges back to main. **WBS only** — Feature mode is not supported for team parallelization.
+- `dev-team`: Distributes WP's Tasks across team-mode workers. Each worker runs the full DDTR cycle. Uses git worktrees per WP, merges back to main. **WBS only** — Feature mode is not supported for team parallelization. `--sequential` flag enables sequential-WP mode: WPs run one at a time (no worktrees, direct commit to current branch), but each WP's internal tasks still run in parallel across tmux panes.
 
 ### Key Patterns
 

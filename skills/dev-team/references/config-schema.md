@@ -16,6 +16,8 @@
   "wp_leader_model": "{WP_LEADER_MODEL}",
   "plugin_root": "{PLUGIN_ROOT}",
   "on_fail": "{ON_FAIL}",
+  "sequential_mode": false,
+  "current_branch": "{CURRENT_BRANCH}",
   "wps": [
     {
       "wp_id": "WP-01",
@@ -37,3 +39,5 @@
 | `wps[].tasks` | 해당 WP의 모든 TSK-ID 배열 (`[xx]` 포함 — 스크립트가 자동 필터링) |
 | `on_fail` | 테스트 실패 시 동작 모드: `strict`/`bypass`/`fast` (기본값: `bypass`) |
 | `wps[].execution_plan` | 2단계에서 산출한 레벨별 실행 계획 텍스트 |
+| `sequential_mode` | `true`: 워크트리 없이 현재 브랜치에서 직접 실행 (기본값: `false`). `--sequential` 플래그로 활성화. 순차 모드에서는 `wps` 배열에 WP 1개만 포함. |
+| `current_branch` | 팀리더가 `git rev-parse --abbrev-ref HEAD`로 취득한 현재 브랜치명. `sequential_mode=true`일 때 WP 리더 프롬프트의 `{MODE_NOTICE}`에 포함. 병렬 모드에서는 빈 문자열로 설정 가능. |

@@ -281,7 +281,7 @@ tmux 환경에서 WP 리더 + 팀원 pane 구조로 동작합니다.
 # 단일 WP 실행
 /dev-team WP-04
 
-# 복수 WP 동시 실행
+# 복수 WP 동시 실행 (병렬 + 워크트리)
 /dev-team WP-06 WP-07
 
 # WP 자동 선정 (실행 가능한 WP 자동 탐색)
@@ -294,6 +294,13 @@ tmux 환경에서 WP 리더 + 팀원 pane 구조로 동작합니다.
 /dev-team WP-04 --on-fail strict    # 강력 검증: 실패 시 즉시 중단
 /dev-team WP-04 --on-fail bypass    # 에스컬레이션 (기본값)
 /dev-team WP-04 --on-fail fast      # 속도 우선: 즉시 다음 진행
+
+# 순차 WP 모드 (--sequential / --seq / --one-wp-at-a-time)
+# WP 하나씩 순차 실행, 워크트리 없음, 현재 브랜치에 직접 커밋
+# WP 내부 팀원 병렬(tmux pane)은 유지
+/dev-team --sequential WP-01 WP-02 WP-03   # 인자 순서대로 순차 실행
+/dev-team --sequential                      # WP 자동 선정 후 순차 실행
+/dev-team --seq --team-size 5 WP-01         # 순차 모드 + 팀원 5명
 ```
 
 **아키텍처**:
@@ -307,6 +314,18 @@ tmux 환경에서 WP 리더 + 팀원 pane 구조로 동작합니다.
  └─ [tmux window: WP-05]
      └─ ... (동일 구조)
 ```
+
+#### 순차 WP 모드 (`--sequential`)
+
+병렬 WP 실행의 복잡도(머지 충돌, 리소스 부담)를 줄이면서도 WP 내부 팀원 병렬 속도는 유지하고 싶을 때 사용합니다.
+
+| 모드 | WP 간 | WP 내부 | 워크트리 | 머지 필요 |
+|------|-------|---------|---------|---------|
+| `/dev-team` (기본) | 병렬 | 병렬 | O (WP당) | O |
+| `/dev-team --sequential` | **순차** | 병렬 | 없음 | 없음 |
+| `/dev-seq` | 순차 | 순차 1명 | 없음 | 없음 |
+
+**주의**: `--sequential` 모드는 현재 브랜치에 직접 커밋합니다. 실행 전 `git status`로 미커밋 변경이 없는지 확인하세요.
 
 #### 테스트 실패 모드 (`--on-fail`)
 

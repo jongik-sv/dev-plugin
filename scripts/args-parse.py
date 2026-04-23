@@ -45,6 +45,14 @@ Examples:
 
 FEAT_NAME_RE = re.compile(r"^[a-z][a-z0-9-]*$")
 
+# NL keyword aliases for dev-team's --sequential flag.
+# Matched case-insensitively against bare tokens (not --flag).
+# Lets users type "/dev-team monitor-v4 순차실행" naturally instead of --sequential.
+SEQUENTIAL_NL_KEYWORDS = {
+    "순차", "순차실행", "순차-실행", "순차모드", "순차모드로",
+    "sequential", "seq",
+}
+
 
 def validate_feat_name(name: str) -> bool:
     return bool(FEAT_NAME_RE.match(name))
@@ -76,6 +84,7 @@ def main():
     opt_workdir = ""
     opt_leader = False
     opt_on_fail = "bypass"
+    opt_sequential = False
 
     tokens = args_str.split() if args_str.strip() else []
     idx = 0
@@ -87,6 +96,8 @@ def main():
             pass  # option, not subproject
         elif first.startswith("WP-") or first.startswith("TSK-") or first.startswith("feat:"):
             pass  # ID, not subproject
+        elif skill == "dev-team" and first.lower() in SEQUENTIAL_NL_KEYWORDS:
+            pass  # NL keyword for --sequential, not subproject
         elif os.path.isdir(os.path.join("docs", first)):
             subproject = first
             docs_dir = f"docs/{first}"
@@ -160,6 +171,10 @@ def main():
                 else:
                     print(json.dumps({"error": f"--on-fail 값은 strict, bypass, fast만 허용: {tokens[idx]}"}), file=sys.stderr)
                     sys.exit(1)
+        elif tok in ("--sequential", "--seq", "--one-wp-at-a-time"):
+            opt_sequential = True
+        elif skill == "dev-team" and tok.lower() in SEQUENTIAL_NL_KEYWORDS:
+            opt_sequential = True
         elif tok.startswith("TSK-"):
             tsk_id = tok
             source = "wbs"
@@ -248,6 +263,7 @@ def main():
             "workdir": opt_workdir,
             "leader": opt_leader,
             "on_fail": opt_on_fail,
+            "sequential": opt_sequential,
         },
     }
     print(json.dumps(result, ensure_ascii=False, indent=2))

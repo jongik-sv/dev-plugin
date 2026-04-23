@@ -7,6 +7,7 @@
 ```
 너는 {WP-ID} WP 리더이다.
 
+{MODE_NOTICE}
 ⚠️ 중요: 팀원은 반드시 tmux pane으로만 생성하라. Agent 도구로 팀원을 생성하지 마라.
 ⚠️ 중요: tmux 명령에 반드시 세션 prefix(`{SESSION}:{WT_NAME}`)를 사용하라. pane 식별은 pane_id(`%N`)를 사용하라.
 

@@ -132,6 +132,7 @@ def substitute_vars(text: str, **kwargs) -> str:
         "{INIT_FILE}": kwargs.get("init_file", ""),
         "{CLEANUP_FILE}": kwargs.get("cleanup_file", ""),
         "{ON_FAIL}": kwargs.get("on_fail", "bypass"),
+        "{MODE_NOTICE}": kwargs.get("mode_notice", ""),
     }
     model_display = model_override if model_override else "\uc5c6\uc74c"
     replacements['{MODEL_OVERRIDE}'] = model_display
@@ -195,6 +196,8 @@ def main():
     wp_leader_model = config.get("wp_leader_model", "sonnet")
     plugin_root = normalize_path(config["plugin_root"])
     on_fail = config.get("on_fail", "bypass")
+    sequential_mode = config.get("sequential_mode", False)
+    current_branch = config.get("current_branch", "")
 
     # Validate model names
     if model_override:
@@ -222,6 +225,13 @@ def main():
     if model_override:
         ddtr_prefix = f'\u26a0\ufe0f MODEL_OVERRIDE = "{model_override}" \u2014 \uc544\ub798 \ubaa8\ub4e0 Phase\uc758 model \ud30c\ub77c\ubbf8\ud130\uc5d0 \uc774 \uac12\uc744 \uc0ac\uc6a9\ud558\ub77c.\n\n'
 
+    # MODE_NOTICE: sequential mode inserts a branch-name advisory; parallel mode is empty.
+    branch_part = f"({current_branch})" if current_branch else ""
+    mode_notice = (
+        f"⚠️ 순차 모드: 워크트리 없음. 현재 브랜치{branch_part}에 직접 커밋하라. 머지 절차 없음."
+        if sequential_mode else ""
+    )
+
     sub_kwargs = dict(
         shared_signal_dir=shared_signal_dir,
         temp_dir=temp_dir,
@@ -231,6 +241,7 @@ def main():
         model_override=model_override,
         plugin_root=plugin_root,
         on_fail=on_fail,
+        mode_notice=mode_notice,
     )
 
     mux, mux_bin = detect_mux()
@@ -247,25 +258,30 @@ def main():
 
         print(f"=== [{wp_id}] setup start ===")
 
-        # --- 1. Worktree ---
-        wt_path = f".claude/worktrees/{wt_name}"
+        # --- 1. Worktree (or sequential_mode: use repo root directly) ---
         resume_mode = False
 
-        branch_check = run_cmd(["git", "branch", "--list", f"dev/{wt_name}"], capture=True, check=False)
-        if os.path.isdir(wt_path) and branch_check.stdout.strip():
-            # Health check: verify worktree is in a usable state
-            health = run_cmd(["git", "-C", wt_path, "status", "--porcelain"], capture=True, check=False)
-            if health.returncode != 0:
-                print(f"[{wp_id}] worktree: unhealthy, recreating ({wt_path})")
-                run_cmd(["git", "worktree", "remove", "--force", wt_path], check=False)
-                run_cmd(["git", "branch", "-D", f"dev/{wt_name}"], check=False)
-                run_cmd(["git", "worktree", "add", wt_path, "-b", f"dev/{wt_name}"])
-            else:
-                print(f"[{wp_id}] worktree: resume ({wt_path})")
-                resume_mode = True
+        if sequential_mode:
+            # Sequential mode: skip worktree/branch creation, use repo root directly
+            wt_path = "."
+            print(f"[{wp_id}] sequential_mode: skip worktree, wt_path=repo_root")
         else:
-            run_cmd(["git", "worktree", "add", wt_path, "-b", f"dev/{wt_name}"])
-            print(f"[{wp_id}] worktree: created ({wt_path})")
+            wt_path = f".claude/worktrees/{wt_name}"
+            branch_check = run_cmd(["git", "branch", "--list", f"dev/{wt_name}"], capture=True, check=False)
+            if os.path.isdir(wt_path) and branch_check.stdout.strip():
+                # Health check: verify worktree is in a usable state
+                health = run_cmd(["git", "-C", wt_path, "status", "--porcelain"], capture=True, check=False)
+                if health.returncode != 0:
+                    print(f"[{wp_id}] worktree: unhealthy, recreating ({wt_path})")
+                    run_cmd(["git", "worktree", "remove", "--force", wt_path], check=False)
+                    run_cmd(["git", "branch", "-D", f"dev/{wt_name}"], check=False)
+                    run_cmd(["git", "worktree", "add", wt_path, "-b", f"dev/{wt_name}"])
+                else:
+                    print(f"[{wp_id}] worktree: resume ({wt_path})")
+                    resume_mode = True
+            else:
+                run_cmd(["git", "worktree", "add", wt_path, "-b", f"dev/{wt_name}"])
+                print(f"[{wp_id}] worktree: created ({wt_path})")
 
         # --- 1b. rerere + merge drivers (idempotent, local .git/config only) ---
         init_rerere_script = os.path.join(script_dir, "init-git-rerere.py")
@@ -287,8 +303,36 @@ def main():
         # --- 2. Signal dir + restore ---
         os.makedirs(shared_signal_dir, exist_ok=True)
 
-        if resume_mode:
-            # Restore signals from completed tasks in worktrees
+        if sequential_mode:
+            # Sequential mode: no worktrees — restore signals from main wbs.md directly.
+            # Previous WP results are committed to main branch, so wbs.md reflects actual state.
+            # Use wbs-parse.py to get accurate per-task status (handles state.json as source-of-truth).
+            all_tasks_json = py_wbs(wbs_parse, wbs_path, "-", "--tasks-all")
+            all_tasks = json.loads(all_tasks_json) if all_tasks_json.strip() else []
+            for task_info in all_tasks:
+                tsk = task_info.get("tsk_id") or task_info.get("id", "")
+                if not tsk:
+                    continue
+                status = task_info.get("status", "")
+                done_path = os.path.join(shared_signal_dir, f"{tsk}.done")
+                design_done_path = os.path.join(shared_signal_dir, f"{tsk}-design.done")
+                # [xx] → restore both .done and -design.done
+                if "[xx]" in status:
+                    if not os.path.exists(done_path):
+                        pathlib.Path(done_path).write_text(
+                            "resumed-sequential\n", encoding="utf-8")
+                    if not os.path.exists(design_done_path):
+                        pathlib.Path(design_done_path).write_text(
+                            "resumed-sequential\n", encoding="utf-8")
+                # [dd] or [im] → design done, restore -design.done
+                elif "[dd]" in status or "[im]" in status:
+                    if not os.path.exists(design_done_path):
+                        pathlib.Path(design_done_path).write_text(
+                            "resumed-sequential\n", encoding="utf-8")
+            print(f"[{wp_id}] signals: sequential restore from wbs.md complete ({shared_signal_dir})")
+
+        elif resume_mode:
+            # Parallel mode resume: restore signals from completed tasks in worktrees
             for wt_dir in glob.glob(".claude/worktrees/*/"):
                 wt_wbs = os.path.join(wt_dir, docs_dir, "wbs.md")
                 if not os.path.isfile(wt_wbs):
@@ -458,21 +502,29 @@ def main():
         print(f"[{wp_id}] manifest: {manifest_path}")
 
         # --- 5. WP leader prompt (core + init + cleanup) ---
-        init_file_abs = os.path.abspath(f".claude/worktrees/{wt_name}-init.txt")
-        cleanup_file_abs = os.path.abspath(f".claude/worktrees/{wt_name}-cleanup.txt")
+        # sequential_mode=True: prompt files go to TEMP_DIR/seq-prompts/ (no worktrees dir)
+        # sequential_mode=False: prompt files go to .claude/worktrees/ (existing behavior)
+        if sequential_mode:
+            prompt_dir = os.path.join(temp_dir, "seq-prompts")
+        else:
+            prompt_dir = ".claude/worktrees"
+        os.makedirs(prompt_dir, exist_ok=True)
+
+        init_file_abs = os.path.abspath(os.path.join(prompt_dir, f"{wt_name}-init.txt"))
+        cleanup_file_abs = os.path.abspath(os.path.join(prompt_dir, f"{wt_name}-cleanup.txt"))
         var_kwargs = dict(wp_id=wp_id, team_size=team_size,
                           wt_name=wt_name, tsk_id="",
                           init_file=init_file_abs, cleanup_file=cleanup_file_abs,
                           **sub_kwargs)
 
-        wp_leader_out = f".claude/worktrees/{wt_name}-prompt.txt"
+        wp_leader_out = os.path.join(prompt_dir, f"{wt_name}-prompt.txt")
         # Always regenerate — settings like on_fail may change between runs
         content = wp_leader_raw
         content = substitute_vars(content, **var_kwargs)
         content = insert_blocks(
             content,
-            "[WP \ub0b4 \ubaa8\ub4e0 Task \ube14\ub85d", all_task_blocks,
-            "[\ud300\ub9ac\ub354\uac00 \uc0b0\ucd9c\ud55c \ub808\ubca8\ubcc4 \uc2e4\ud589 \uacc4\ud68d]", execution_plan,
+            "[WP 내 모든 Task 블록", all_task_blocks,
+            "[팀리더가 산출한 레벨별 실행 계획]", execution_plan,
         )
         tmp_out = wp_leader_out + ".tmp"
         with open(tmp_out, "w", encoding="utf-8", newline="\n") as f:
@@ -481,7 +533,7 @@ def main():
         print(f"[{wp_id}] leader: {wp_leader_out}")
 
         # Init file (read once at startup) — always regenerate
-        wp_init_out = f".claude/worktrees/{wt_name}-init.txt"
+        wp_init_out = os.path.join(prompt_dir, f"{wt_name}-init.txt")
         init_content = substitute_vars(wp_leader_init_raw, **var_kwargs)
         tmp_out = wp_init_out + ".tmp"
         with open(tmp_out, "w", encoding="utf-8", newline="\n") as f:
@@ -490,14 +542,13 @@ def main():
         print(f"[{wp_id}] leader-init: {wp_init_out}")
 
         # Cleanup file (read at end) — always regenerate
-        wp_cleanup_out = f".claude/worktrees/{wt_name}-cleanup.txt"
+        wp_cleanup_out = os.path.join(prompt_dir, f"{wt_name}-cleanup.txt")
         cleanup_content = substitute_vars(wp_leader_cleanup_raw, **var_kwargs)
         tmp_out = wp_cleanup_out + ".tmp"
         with open(tmp_out, "w", encoding="utf-8", newline="\n") as f:
             f.write(cleanup_content)
         os.replace(tmp_out, wp_cleanup_out)
         print(f"[{wp_id}] leader-cleanup: {wp_cleanup_out}")
-
         # --- 6. tmux/psmux spawn (team-mode compatible) ---
         # Use the same spawn pattern as team-mode: pass a shell command string
         # to new-window / split-window.  This works on both native tmux and
