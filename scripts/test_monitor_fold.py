@@ -1,0 +1,246 @@
+"""
+TSK-05-01: Fold 영속성 JS + patchSection 훅 확장 — 단위 테스트
+
+브라우저 비의존 방식으로 _DASHBOARD_JS 문자열 내 코드 존재 및 패턴을 검증한다.
+pytest -q scripts/test_monitor_fold.py
+"""
+import re
+import os
+import pytest
+
+# monitor-server.py를 import 하여 _DASHBOARD_JS 추출
+_SERVER_PATH = os.path.join(os.path.dirname(__file__), "monitor-server.py")
+
+
+def _load_dashboard_js():
+    """monitor-server 모듈에서 _DASHBOARD_JS 문자열을 추출한다."""
+    with open(_SERVER_PATH, encoding="utf-8") as f:
+        source = f.read()
+    m = re.search(r'_DASHBOARD_JS\s*=\s*"""(.*?)"""', source, re.DOTALL)
+    if not m:
+        m = re.search(r"_DASHBOARD_JS\s*=\s*'''(.*?)'''", source, re.DOTALL)
+    if not m:
+        pytest.fail("_DASHBOARD_JS 변수를 monitor-server.py에서 찾을 수 없습니다.")
+    return m.group(1)
+
+
+def _load_server_source():
+    """monitor-server.py 전체 소스를 반환한다."""
+    with open(_SERVER_PATH, encoding="utf-8") as f:
+        return f.read()
+
+
+def _extract_function_body(source, func_name, max_chars=4000):
+    """source에서 func_name 함수 시작부터 max_chars까지 반환한다."""
+    start = source.find(f"function {func_name}(")
+    if start == -1:
+        return None
+    return source[start : start + max_chars]
+
+
+def _extract_patchSection_body(js):
+    """patchSection 함수 전체 블록을 반환한다.
+
+    patchSection은 여러 개의 중첩 if 분기(hdr, wp-cards 등)를 가지므로
+    단순 정규식으로 끝 위치를 찾기 어렵다.
+    대신 patchSection 시작부터 다음 주석 섹션 헤더 또는 다음 function까지를 반환한다.
+    """
+    start = js.find("function patchSection(")
+    if start == -1:
+        return None
+    # "/* ---- drawer control" 이 patchSection 직후에 위치함
+    end_markers = [
+        "/* ---- drawer control",
+        "\n  function _setDrawerOpen(",
+    ]
+    end = -1
+    for marker in end_markers:
+        pos = js.find(marker, start)
+        if pos != -1:
+            if end == -1 or pos < end:
+                end = pos
+    if end == -1:
+        return js[start : start + 4000]
+    return js[start:end]
+
+
+@pytest.fixture(scope="module")
+def js():
+    return _load_dashboard_js()
+
+
+@pytest.fixture(scope="module")
+def server_source():
+    return _load_server_source()
+
+
+# ---------------------------------------------------------------------------
+# test_fold_localstorage_write
+# AC-22: toggle 시 localStorage 키 값 정상 저장
+# _DASHBOARD_JS에 writeFold 함수 정의와 localStorage.setItem 호출이 존재한다.
+# ---------------------------------------------------------------------------
+def test_fold_localstorage_write(js):
+    assert "writeFold" in js, "_DASHBOARD_JS에 writeFold 함수가 없습니다."
+    assert "localStorage.setItem" in js, "_DASHBOARD_JS에 localStorage.setItem 호출이 없습니다."
+
+
+# ---------------------------------------------------------------------------
+# test_fold_restore_on_patch
+# AC-23: 5초 auto-refresh 후 접힌 상태 유지
+# patchSection 함수 내에 applyFoldStates 및 bindFoldListeners 호출이 존재하며,
+# wp-cards 관련 분기 내에 위치한다.
+# ---------------------------------------------------------------------------
+def test_fold_restore_on_patch(js):
+    # patchSection 함수가 존재해야 함
+    assert "patchSection" in js, "_DASHBOARD_JS에 patchSection 함수가 없습니다."
+    assert "applyFoldStates" in js, "_DASHBOARD_JS에 applyFoldStates 호출이 없습니다."
+    assert "bindFoldListeners" in js, "_DASHBOARD_JS에 bindFoldListeners 호출이 없습니다."
+
+    patch_body_region = _extract_patchSection_body(js)
+    assert patch_body_region is not None, "patchSection 함수를 찾을 수 없습니다."
+
+    assert "wp-cards" in patch_body_region, (
+        "patchSection 함수에 'wp-cards' 분기가 없습니다."
+    )
+    assert "applyFoldStates" in patch_body_region, (
+        "patchSection 함수에 applyFoldStates 호출이 없습니다."
+    )
+    assert "bindFoldListeners" in patch_body_region, (
+        "patchSection 함수에 bindFoldListeners 호출이 없습니다."
+    )
+
+
+# ---------------------------------------------------------------------------
+# test_fold_bind_idempotent
+# __foldBound 중복 방지 패턴 검증
+# ---------------------------------------------------------------------------
+def test_fold_bind_idempotent(js):
+    assert "__foldBound" in js, (
+        "_DASHBOARD_JS에 __foldBound 플래그가 없습니다 (중복 리스너 방지 패턴 미구현)."
+    )
+    # bindFoldListeners 함수 내에 __foldBound 확인 패턴이 있어야 함
+    bind_region = _extract_function_body(js, "bindFoldListeners", 800)
+    assert bind_region is not None, "bindFoldListeners 함수가 없습니다."
+    assert "__foldBound" in bind_region, (
+        "bindFoldListeners 함수 내에 __foldBound 플래그 확인이 없습니다."
+    )
+
+
+# ---------------------------------------------------------------------------
+# test_fold_key_prefix
+# FOLD_KEY_PREFIX 상수 정의 검증
+# ---------------------------------------------------------------------------
+def test_fold_key_prefix(js):
+    assert "FOLD_KEY_PREFIX" in js, "_DASHBOARD_JS에 FOLD_KEY_PREFIX 상수가 없습니다."
+    assert "dev-monitor:fold:" in js, (
+        "_DASHBOARD_JS에 'dev-monitor:fold:' 키 프리픽스 값이 없습니다."
+    )
+
+
+# ---------------------------------------------------------------------------
+# test_fold_apply_states
+# applyFoldStates 함수가 details[data-wp]를 쿼리하고
+# removeAttribute('open') 또는 setAttribute('open','') 호출을 포함한다.
+# ---------------------------------------------------------------------------
+def test_fold_apply_states(js):
+    apply_region = _extract_function_body(js, "applyFoldStates", 800)
+    assert apply_region is not None, "applyFoldStates 함수가 없습니다."
+    assert "details[data-wp]" in apply_region, (
+        "applyFoldStates가 'details[data-wp]'를 쿼리하지 않습니다."
+    )
+    has_remove = "removeAttribute('open')" in apply_region or 'removeAttribute("open")' in apply_region
+    has_set = "setAttribute('open'" in apply_region or 'setAttribute("open"' in apply_region
+    assert has_remove or has_set, (
+        "applyFoldStates에 removeAttribute('open') 또는 setAttribute('open',...) 호출이 없습니다."
+    )
+
+
+# ---------------------------------------------------------------------------
+# test_fold_init_hook
+# init() 함수 내 startMainPoll() 직전에 applyFoldStates 호출이 존재한다.
+# ---------------------------------------------------------------------------
+def test_fold_init_hook(js):
+    init_region = _extract_function_body(js, "init", 1500)
+    assert init_region is not None, "init 함수가 없습니다."
+    assert "applyFoldStates" in init_region, (
+        "init 함수 내에 applyFoldStates 호출이 없습니다."
+    )
+    assert "bindFoldListeners" in init_region, (
+        "init 함수 내에 bindFoldListeners 호출이 없습니다."
+    )
+    # startMainPoll() 보다 앞에 applyFoldStates가 등장해야 함
+    apply_pos = init_region.find("applyFoldStates")
+    start_poll_pos = init_region.find("startMainPoll()")
+    assert apply_pos != -1 and start_poll_pos != -1, (
+        "init 내 applyFoldStates 또는 startMainPoll()을 찾을 수 없습니다."
+    )
+    assert apply_pos < start_poll_pos, (
+        "init 함수에서 applyFoldStates가 startMainPoll() 이후에 위치합니다 (순서 오류)."
+    )
+
+
+# ---------------------------------------------------------------------------
+# test_fold_try_catch
+# readFold와 writeFold 각각에 try{...}catch 블록이 존재한다.
+# ---------------------------------------------------------------------------
+def test_fold_try_catch(js):
+    # readFold 내 try/catch
+    read_region = _extract_function_body(js, "readFold", 400)
+    assert read_region is not None, "readFold 함수가 없습니다."
+    assert "try{" in read_region or "try {" in read_region, (
+        "readFold 함수에 try/catch 블록이 없습니다."
+    )
+    assert "catch(" in read_region, (
+        "readFold 함수에 catch 블록이 없습니다."
+    )
+    # writeFold 내 try/catch
+    write_region = _extract_function_body(js, "writeFold", 400)
+    assert write_region is not None, "writeFold 함수가 없습니다."
+    assert "try{" in write_region or "try {" in write_region, (
+        "writeFold 함수에 try/catch 블록이 없습니다."
+    )
+    assert "catch(" in write_region, (
+        "writeFold 함수에 catch 블록이 없습니다."
+    )
+
+
+# ---------------------------------------------------------------------------
+# test_fold_server_default_open
+# 서버 _section_wp_cards Python 함수가 details 요소를 open attribute와 함께 렌더링한다.
+# (서버 계약 변경 없음 확인)
+# ---------------------------------------------------------------------------
+def test_fold_server_default_open(server_source):
+    # _section_wp_cards 함수 내에 <details open 또는 <details ... open이 있어야 함
+    func_start = server_source.find("def _section_wp_cards(")
+    assert func_start != -1, "_section_wp_cards 함수를 찾을 수 없습니다."
+    # 다음 def 까지
+    next_def = server_source.find("\ndef ", func_start + 1)
+    if next_def == -1:
+        func_region = server_source[func_start:]
+    else:
+        func_region = server_source[func_start:next_def]
+    # <details ... open 패턴이 있어야 함 (속성 순서 무관)
+    has_details_open = bool(
+        re.search(r"<details\b[^>]*\bopen\b", func_region)
+        or re.search(r"details[^'\"]*open", func_region)
+    )
+    assert has_details_open, (
+        "_section_wp_cards 함수에서 <details ... open> 기본값 렌더링 패턴이 없습니다 "
+        "(서버 계약 변경 금지)."
+    )
+
+
+# ---------------------------------------------------------------------------
+# 통합 테스트 (브라우저 필요 — skip 마커)
+# AC-23, AC-24는 브라우저 자동화로만 검증 가능하므로 dev-test 단계에서 수행
+# ---------------------------------------------------------------------------
+@pytest.mark.skip(reason="브라우저 필요 — AC-23 (5초 auto-refresh 후 fold 유지). dev-test E2E에서 검증.")
+def test_fold_restore_after_autorefresh():
+    """5초 auto-refresh 후 접힌 WP 카드가 다시 펼쳐지지 않는다 (AC-23)."""
+    pass
+
+
+@pytest.mark.skip(reason="브라우저 필요 — AC-24 (F5 하드 리로드 후 fold 유지). dev-test E2E에서 검증.")
+def test_fold_restore_after_hard_reload():
+    """하드 리로드(F5) 후 접힌 상태가 유지된다 (AC-24)."""
+    pass

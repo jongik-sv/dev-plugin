@@ -3625,6 +3625,30 @@ _DASHBOARD_JS = """\
       clock.textContent=now.toISOString().slice(0,19).replace('T',' ')+'Z';
     },1000);
   }
+  /* ---- fold persistence (TSK-05-01) ---- */
+  var FOLD_KEY_PREFIX='dev-monitor:fold:';
+  function readFold(wpId){
+    try{return localStorage.getItem(FOLD_KEY_PREFIX+wpId);}catch(e){return null;}
+  }
+  function writeFold(wpId,open){
+    try{localStorage.setItem(FOLD_KEY_PREFIX+wpId,open?'open':'closed');}catch(e){}
+  }
+  function applyFoldStates(root){
+    root.querySelectorAll('details[data-wp]').forEach(function(el){
+      var saved=readFold(el.getAttribute('data-wp'));
+      if(saved==='closed'){el.removeAttribute('open');}
+      else if(saved==='open'){el.setAttribute('open','');}
+    });
+  }
+  function bindFoldListeners(root){
+    root.querySelectorAll('details[data-wp]').forEach(function(el){
+      if(el.__foldBound)return;
+      el.__foldBound=true;
+      el.addEventListener('toggle',function(){
+        writeFold(el.getAttribute('data-wp'),el.open);
+      });
+    });
+  }
   /* ---- body[data-filter] CSS-driven filter (v3) ---- */
   function applyFilter(){
     var f=state.activeFilter;
@@ -3711,6 +3735,13 @@ _DASHBOARD_JS = """\
         tog2.setAttribute('aria-pressed',togPressed);
         if(togText){tog2.textContent=togText;}
       }
+      return;
+    }
+    if(name==='wp-cards'){
+      /* TSK-05-01: fold 상태 복원 — DOM 교체 후 localStorage 기반으로 덮어씀 */
+      if(current.innerHTML!==newHtml){current.innerHTML=newHtml;}
+      applyFoldStates(current);
+      bindFoldListeners(current);
       return;
     }
     if(current.innerHTML!==newHtml){current.innerHTML=newHtml;}
@@ -3805,6 +3836,9 @@ _DASHBOARD_JS = """\
       state.autoRefresh=(tog.getAttribute('aria-pressed')!=='false');
       tog.textContent=state.autoRefresh?'◐ auto':'○ paused';
     }
+    /* TSK-05-01: fold 상태 복원 (startMainPoll 직전) */
+    applyFoldStates(document);
+    bindFoldListeners(document);
     startMainPoll();
   }
   if(document.readyState==='loading'){
