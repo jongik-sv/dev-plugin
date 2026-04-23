@@ -73,3 +73,14 @@ launcher 출력을 그대로 사용자에게 전달한다.
 - **포트 충돌**: 오류 메시지 + `--port` 힌트 안내
 - **--stop**: 종료 결과 안내
 - **--status**: 실행 여부 안내
+
+### 서버 응답 확인 (선택)
+
+기동 성공 후 서버가 실제로 응답하는지 확인할 때는 `http-probe.py`를 사용한다.
+> curl은 일부 CLI 프록시가 출력을 요약해 파이프 파서가 오작동할 수 있어 http-probe.py 사용 권장.
+
+```bash
+"$(python3 -c 'import sys; print(sys.executable)')" "${CLAUDE_PLUGIN_ROOT}/scripts/http-probe.py" \
+  http://localhost:{PORT}/ --status
+# 200 이면 정상 기동
+```
