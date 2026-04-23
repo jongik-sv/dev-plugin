@@ -1867,10 +1867,10 @@ class DepGraphSectionEmbeddedTests(unittest.TestCase):
         html = self._html(subproject="p1")
         self.assertIn('data-subproject="p1"', html)
 
-    def test_canvas_height_520px(self):
-        """dep-graph-canvas height가 520px."""
+    def test_canvas_height_640px(self):
+        """dep-graph-canvas height가 640px (TSK-04-03: 520px → 640px 확장)."""
         html = self._html()
-        self.assertIn('height:520px', html.replace(': ', ':').replace(' ', ''))
+        self.assertIn('height:640px', html.replace(': ', ':').replace(' ', ''))
 
     def test_empty_model_no_exception(self):
         """render_dashboard({}) 빈 모델에서도 예외 없이 완료."""
