@@ -34,6 +34,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from dataclasses import asdict, dataclass, field, is_dataclass
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -5550,6 +5551,160 @@ def _handle_api_task_detail(handler) -> None:
         _json_error(handler, 500, str(exc))
 
 
+# ---------------------------------------------------------------------------
+# /api/merge-status endpoint (TSK-04-02)
+# ---------------------------------------------------------------------------
+
+_API_MERGE_STATUS_PATH = "/api/merge-status"
+_MERGE_STATUS_FILENAME = "merge-status.json"
+_MERGE_STALE_SECONDS = 1800
+
+
+def _is_api_merge_status_path(path: str) -> bool:
+    """Return True iff path matches /api/merge-status exactly (query allowed)."""
+    if not isinstance(path, str):
+        return False
+    return urlsplit(path).path == _API_MERGE_STATUS_PATH
+
+
+def _badge_label_for_state(state: str) -> str:
+    """Return a human-readable badge label for a merge state."""
+    return {
+        "ready": "\U0001f7e2 머지 가능",
+        "waiting": "\U0001f7e1 대기 중",
+        "conflict": "\U0001f534 충돌",
+    }.get(state, "⚫ 알 수 없음")
+
+
+def _load_merge_status_file(path: "Path") -> "Optional[dict]":
+    """Load and return a merge-status.json file. Returns None on error."""
+    try:
+        raw = path.read_text(encoding="utf-8", errors="replace")
+        return json.loads(raw)
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _is_merge_status_stale(path: "Path", data: dict) -> bool:
+    """Compute is_stale from file mtime. Falls back to data field on OSError."""
+    try:
+        return (time.time() - path.stat().st_mtime) > _MERGE_STALE_SECONDS
+    except OSError:
+        return data.get("is_stale", False)
+
+
+def _load_merge_status(docs_dir: str, wp_id: "Optional[str]") -> "tuple[object, int]":
+    """Load merge-status.json for a single WP or all WPs.
+
+    Returns (payload, status_code).
+    - wp_id=None: returns list of summary dicts (conflicts excluded)
+    - wp_id specified: returns full dict including conflicts, or ({}, 404) if missing
+    """
+    wp_state_dir = Path(docs_dir) / "wp-state"
+
+    if wp_id:
+        # Single WP detail
+        status_file = wp_state_dir / wp_id / _MERGE_STATUS_FILENAME
+        if not status_file.exists():
+            return ({}, 404)
+        data = _load_merge_status_file(status_file)
+        if data is None:
+            return ({}, 404)
+        # Recalculate is_stale from file mtime (consistent after server restarts)
+        data["is_stale"] = _is_merge_status_stale(status_file, data)
+        return (data, 200)
+    else:
+        # All WPs summary (no conflicts array)
+        summary = []
+        if not wp_state_dir.exists():
+            return (summary, 200)
+        try:
+            entries = list(wp_state_dir.iterdir())
+        except OSError:
+            return (summary, 200)
+        for entry in sorted(entries):
+            if not entry.is_dir():
+                continue
+            status_file = entry / _MERGE_STATUS_FILENAME
+            if not status_file.exists():
+                continue
+            data = _load_merge_status_file(status_file)
+            if data is None:
+                continue
+            # Summary: exclude full conflicts array
+            row = {
+                "wp_id": data.get("wp_id", entry.name),
+                "state": data.get("state", "unknown"),
+                "pending_count": data.get("pending_count", 0),
+                "conflict_count": data.get("conflict_count", 0),
+                "is_stale": _is_merge_status_stale(status_file, data),
+            }
+            summary.append(row)
+        return (summary, 200)
+
+
+def _collect_merge_summary(docs_dir: str) -> dict:
+    """Collect WP merge state summaries for /api/state bundle.
+
+    Returns {wp_id: {state, badge_label, pending_count, conflict_count, is_stale}}.
+    Does NOT include full conflicts array.
+    """
+    wp_state_dir = Path(docs_dir) / "wp-state"
+    result = {}
+    if not wp_state_dir.exists():
+        return result
+    try:
+        entries = list(wp_state_dir.iterdir())
+    except OSError:
+        return result
+    for entry in entries:
+        if not entry.is_dir():
+            continue
+        status_file = entry / _MERGE_STATUS_FILENAME
+        if not status_file.exists():
+            continue
+        data = _load_merge_status_file(status_file)
+        if data is None:
+            continue
+        state = data.get("state", "unknown")
+        wp = data.get("wp_id", entry.name)
+        result[wp] = {
+            "state": state,
+            "badge_label": _badge_label_for_state(state),
+            "pending_count": data.get("pending_count", 0),
+            "conflict_count": data.get("conflict_count", 0),
+            "is_stale": _is_merge_status_stale(status_file, data),
+        }
+    return result
+
+
+def _handle_api_merge_status(handler) -> None:
+    """Handle GET /api/merge-status."""
+    try:
+        raw_path = getattr(handler, "path", "") or ""
+        qs = urlsplit(raw_path).query
+        qp = parse_qs(qs, keep_blank_values=False)
+        raw_sp = (qp.get("subproject") or ["all"])[0] or "all"
+        wp_param: "Optional[str]" = (qp.get("wp") or [None])[0] or None
+
+        base_docs_dir = _server_attr(handler, "docs_dir")
+        available_subprojects = discover_subprojects(base_docs_dir)
+        if raw_sp != "all" and raw_sp not in available_subprojects:
+            raw_sp = "all"
+        effective_docs_dir = _resolve_effective_docs_dir(base_docs_dir, raw_sp)
+
+        payload, status_code = _load_merge_status(effective_docs_dir, wp_param)
+
+        if status_code == 404:
+            _json_error(handler, 404, f"WP not found: {wp_param!r}")
+            return
+
+        _json_response(handler, status_code, payload)
+    except Exception as exc:
+        sys.stderr.write(f"/api/merge-status error: {exc!r}\n")
+        _json_error(handler, 500, str(exc))
+
+
 def _task_panel_css() -> str:
     """CSS for task slide panel (TSK-02-04)."""
     return (
@@ -6068,6 +6223,7 @@ def _build_state_snapshot(
         "shared_signals": _asdict_or_none(raw["shared_signals"]),
         "agent_pool_signals": _asdict_or_none(raw["agent_pool_signals"]),
         "tmux_panes": _asdict_or_none(raw["tmux_panes"]),
+        "merge_summary": _collect_merge_summary(docs_dir),
     }
 
 
@@ -6288,6 +6444,8 @@ class MonitorHandler(BaseHTTPRequestHandler):
             self._route_api_state()
         elif _is_api_task_detail_path(self.path):
             _handle_api_task_detail(self)
+        elif _is_api_merge_status_path(self.path):
+            _handle_api_merge_status(self)
         elif _is_pane_api_path(path):
             pane_id = _extract_pane_id(path, _API_PANE_PATH_PREFIX)
             _handle_pane_api(self, pane_id)

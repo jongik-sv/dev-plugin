@@ -183,6 +183,7 @@ class BuildStateSnapshotTests(unittest.TestCase):
                 "wbs_tasks", "features",
                 "shared_signals", "agent_pool_signals",
                 "tmux_panes",
+                "merge_summary",  # TSK-04-02: WP별 merge 상태 요약
             },
         )
         self.assertEqual(out["project_root"], "/abs")
