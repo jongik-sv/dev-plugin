@@ -242,7 +242,7 @@ monitor-server, monitor-launcher
 - category: development
 - domain: fullstack
 - model: sonnet
-- status: [dd]
+- status: [xx]
 - priority: critical
 - assignee: -
 - schedule: 2026-04-24 ~ 2026-04-24
@@ -298,7 +298,7 @@ monitor-server, monitor-launcher
 - category: development
 - domain: frontend
 - model: sonnet
-- status: [dd]
+- status: [xx]
 - priority: high
 - assignee: -
 - schedule: 2026-04-25 ~ 2026-04-25
@@ -341,7 +341,7 @@ monitor-server, monitor-launcher
 - category: development
 - domain: frontend
 - model: sonnet
-- status: [dd]
+- status: [xx]
 - priority: medium
 - assignee: -
 - schedule: 2026-04-25 ~ 2026-04-25
@@ -388,7 +388,7 @@ monitor-server, monitor-launcher
 - category: development
 - domain: fullstack
 - model: opus
-- status: [dd]
+- status: [xx]
 - priority: medium
 - assignee: -
 - schedule: 2026-04-25 ~ 2026-04-27
@@ -476,7 +476,7 @@ monitor-server, monitor-launcher
 - category: development
 - domain: frontend
 - model: sonnet
-- status: [dd]
+- status: [xx]
 - priority: medium
 - assignee: -
 - schedule: 2026-04-26 ~ 2026-04-26
@@ -532,7 +532,7 @@ monitor-server, monitor-launcher
 - category: development
 - domain: fullstack
 - model: sonnet
-- status: [dd]
+- status: [xx]
 - priority: low
 - assignee: -
 - schedule: 2026-04-26 ~ 2026-04-27

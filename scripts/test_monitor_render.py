@@ -251,7 +251,7 @@ class ErrorBadgeTests(unittest.TestCase):
         self.assertIn('<div class="badge" title=', html)
 
     def test_error_task_has_badge_warn_class(self) -> None:
-        """v3: error Task 행의 badge div 안에 'error' 텍스트 존재."""
+        """TSK-02-01: error 필드 있는 Task 배지는 'Failed' 텍스트로 표시 (data-phase='failed')."""
         model = _normal_model()
         bad = _make_task(tsk_id="TSK-WARN", title=None, status=None,
                          last_event=None, last_event_at=None,
@@ -259,8 +259,9 @@ class ErrorBadgeTests(unittest.TestCase):
                          error="json parse error")
         model["wbs_tasks"] = [bad]
         html = render_dashboard(model)
-        # v3: error tasks render <div class="badge" title="...">error</div>
-        self.assertIn(">error<", html)
+        # TSK-02-01: error tasks now render "Failed" badge (was "error" before)
+        self.assertIn(">Failed<", html)
+        self.assertIn('data-phase="failed"', html)
 
     def test_normal_task_has_no_warn_badge(self) -> None:
         """v3: 정상 Task 행에는 title 속성 없는 badge, 'error' 텍스트 미출현.
@@ -2285,6 +2286,247 @@ class TSK0101PhaseTimelineRemovalTests(unittest.TestCase):
                          f"py_compile 실패:\n{result.stderr}")
 
 
+# ---------------------------------------------------------------------------
+# TSK-02-01: Task DDTR 단계 배지 (Design/Build/Test/Done)
+# ---------------------------------------------------------------------------
+
+class PhaseLabelHelperTests(unittest.TestCase):
+    """_phase_label(status_code, lang, *, failed, bypassed) 헬퍼 단위 테스트."""
+
+    def test_task_badge_dd_renders_as_design(self):
+        """[dd] → 배지 텍스트 'Design'."""
+        result = monitor_server._phase_label("[dd]", "ko", failed=False, bypassed=False)
+        self.assertEqual(result, "Design")
+
+    def test_task_badge_phase_mapping(self):
+        """4개 DDTR 코드 전부: [dd]→Design, [im]→Build, [ts]→Test, [xx]→Done."""
+        cases = [
+            ("[dd]", "Design"),
+            ("[im]", "Build"),
+            ("[ts]", "Test"),
+            ("[xx]", "Done"),
+        ]
+        for status, expected in cases:
+            with self.subTest(status=status):
+                result = monitor_server._phase_label(status, "ko", failed=False, bypassed=False)
+                self.assertEqual(result, expected)
+
+    def test_task_badge_failed_bypass_pending(self):
+        """failed=True → 'Failed', bypassed=True → 'Bypass', 미상 → 'Pending'."""
+        # failed
+        self.assertEqual(
+            monitor_server._phase_label("[im]", "ko", failed=True, bypassed=False),
+            "Failed",
+        )
+        # bypassed (bypassed 우선순위가 더 높음)
+        self.assertEqual(
+            monitor_server._phase_label("[im]", "ko", failed=True, bypassed=True),
+            "Bypass",
+        )
+        # pending (unknown status)
+        self.assertEqual(
+            monitor_server._phase_label("", "ko", failed=False, bypassed=False),
+            "Pending",
+        )
+        self.assertEqual(
+            monitor_server._phase_label(None, "ko", failed=False, bypassed=False),
+            "Pending",
+        )
+        self.assertEqual(
+            monitor_server._phase_label("[??]", "ko", failed=False, bypassed=False),
+            "Pending",
+        )
+
+    def test_phase_label_en_lang(self):
+        """en lang도 동일 레이블 반환 (ko/en 공통)."""
+        self.assertEqual(
+            monitor_server._phase_label("[dd]", "en", failed=False, bypassed=False),
+            "Design",
+        )
+        self.assertEqual(
+            monitor_server._phase_label("[xx]", "en", failed=False, bypassed=False),
+            "Done",
+        )
+
+    def test_phase_label_unsupported_lang_fallback(self):
+        """미지원 lang은 ko fallback — 레이블이 빈 문자열이 아님."""
+        result = monitor_server._phase_label("[dd]", "fr", failed=False, bypassed=False)
+        self.assertEqual(result, "Design")
+
+
+class PhaseDataAttrHelperTests(unittest.TestCase):
+    """_phase_data_attr(status_code, *, failed, bypassed) 헬퍼 단위 테스트."""
+
+    def test_phase_data_attr_dd(self):
+        self.assertEqual(
+            monitor_server._phase_data_attr("[dd]", failed=False, bypassed=False),
+            "dd",
+        )
+
+    def test_phase_data_attr_all_codes(self):
+        cases = [("[dd]", "dd"), ("[im]", "im"), ("[ts]", "ts"), ("[xx]", "xx")]
+        for status, expected in cases:
+            with self.subTest(status=status):
+                result = monitor_server._phase_data_attr(status, failed=False, bypassed=False)
+                self.assertEqual(result, expected)
+
+    def test_phase_data_attr_failed(self):
+        self.assertEqual(
+            monitor_server._phase_data_attr("[im]", failed=True, bypassed=False),
+            "failed",
+        )
+
+    def test_phase_data_attr_bypass(self):
+        self.assertEqual(
+            monitor_server._phase_data_attr("[im]", failed=False, bypassed=True),
+            "bypass",
+        )
+
+    def test_phase_data_attr_pending(self):
+        self.assertEqual(
+            monitor_server._phase_data_attr(None, failed=False, bypassed=False),
+            "pending",
+        )
+        self.assertEqual(
+            monitor_server._phase_data_attr("", failed=False, bypassed=False),
+            "pending",
+        )
+        self.assertEqual(
+            monitor_server._phase_data_attr("[??]", failed=False, bypassed=False),
+            "pending",
+        )
+
+    def test_phase_data_attr_bypass_takes_priority_over_failed(self):
+        """bypassed=True는 failed보다 우선순위 높음."""
+        self.assertEqual(
+            monitor_server._phase_data_attr("[im]", failed=True, bypassed=True),
+            "bypass",
+        )
+
+
+class TaskRowDataPhaseAttributeTests(unittest.TestCase):
+    """_render_task_row_v2() data-phase 속성 및 배지 텍스트 통합 테스트."""
+
+    def test_task_row_has_data_phase_attribute(self):
+        """_render_task_row_v2 결과에 data-phase 속성이 존재한다."""
+        task = _make_task(tsk_id="TSK-02-01", status="[dd]")
+        html = monitor_server._render_task_row_v2(task, set(), set())
+        self.assertIn("data-phase=", html)
+
+    def test_task_row_dd_data_phase(self):
+        """[dd] Task → data-phase='dd'."""
+        task = _make_task(tsk_id="TSK-02-01", status="[dd]")
+        html = monitor_server._render_task_row_v2(task, set(), set())
+        self.assertIn('data-phase="dd"', html)
+
+    def test_task_row_im_data_phase(self):
+        """[im] Task (not in running/failed) → data-phase='im'."""
+        task = _make_task(tsk_id="TSK-02-01", status="[im]")
+        html = monitor_server._render_task_row_v2(task, set(), set())
+        self.assertIn('data-phase="im"', html)
+
+    def test_task_row_ts_data_phase(self):
+        task = _make_task(tsk_id="TSK-02-01", status="[ts]")
+        html = monitor_server._render_task_row_v2(task, set(), set())
+        self.assertIn('data-phase="ts"', html)
+
+    def test_task_row_xx_data_phase(self):
+        task = _make_task(tsk_id="TSK-02-01", status="[xx]")
+        html = monitor_server._render_task_row_v2(task, set(), set())
+        self.assertIn('data-phase="xx"', html)
+
+    def test_task_row_failed_data_phase(self):
+        """failed_ids에 포함된 Task → data-phase='failed'."""
+        task = _make_task(tsk_id="TSK-02-01", status="[im]")
+        html = monitor_server._render_task_row_v2(task, set(), {"TSK-02-01"})
+        self.assertIn('data-phase="failed"', html)
+
+    def test_task_row_bypass_data_phase(self):
+        """bypassed=True Task → data-phase='bypass'."""
+        task = _make_task(tsk_id="TSK-02-01", status="[im]", bypassed=True)
+        html = monitor_server._render_task_row_v2(task, set(), set())
+        self.assertIn('data-phase="bypass"', html)
+
+    def test_task_row_pending_data_phase(self):
+        """status=None Task → data-phase='pending'."""
+        task = _make_task(tsk_id="TSK-02-01", status=None)
+        html = monitor_server._render_task_row_v2(task, set(), set())
+        self.assertIn('data-phase="pending"', html)
+
+    def test_task_row_dd_badge_text_design(self):
+        """[dd] Task → 배지 텍스트 'Design'."""
+        task = _make_task(tsk_id="TSK-02-01", status="[dd]")
+        html = monitor_server._render_task_row_v2(task, set(), set())
+        self.assertIn(">Design<", html)
+
+    def test_task_row_im_badge_text_build(self):
+        task = _make_task(tsk_id="TSK-02-01", status="[im]")
+        html = monitor_server._render_task_row_v2(task, set(), set())
+        self.assertIn(">Build<", html)
+
+    def test_task_row_ts_badge_text_test(self):
+        task = _make_task(tsk_id="TSK-02-01", status="[ts]")
+        html = monitor_server._render_task_row_v2(task, set(), set())
+        self.assertIn(">Test<", html)
+
+    def test_task_row_xx_badge_text_done(self):
+        task = _make_task(tsk_id="TSK-02-01", status="[xx]")
+        html = monitor_server._render_task_row_v2(task, set(), set())
+        self.assertIn(">Done<", html)
+
+    def test_task_row_failed_badge_text(self):
+        task = _make_task(tsk_id="TSK-02-01", status="[im]")
+        html = monitor_server._render_task_row_v2(task, set(), {"TSK-02-01"})
+        self.assertIn(">Failed<", html)
+
+    def test_task_row_bypass_badge_text(self):
+        task = _make_task(tsk_id="TSK-02-01", status="[im]", bypassed=True)
+        html = monitor_server._render_task_row_v2(task, set(), set())
+        self.assertIn(">Bypass<", html)
+
+    def test_task_row_error_field_is_failed(self):
+        """error 필드 있는 Task → 배지 'Failed', data-phase='failed'."""
+        task = _make_task(tsk_id="TSK-02-01", status="[im]", error="some error")
+        html = monitor_server._render_task_row_v2(task, set(), set())
+        self.assertIn(">Failed<", html)
+        self.assertIn('data-phase="failed"', html)
+
+    def test_task_row_data_status_unchanged(self):
+        """data-status 속성은 기존 signal 기반 로직 그대로 유지된다."""
+        task = _make_task(tsk_id="TSK-02-01", status="[xx]")
+        html = monitor_server._render_task_row_v2(task, set(), set())
+        self.assertIn('data-status="done"', html)
+
+    def test_spinner_placeholder_in_badge(self):
+        """배지 내부에 spinner span 자리가 존재한다 (TSK-02-02 준비)."""
+        task = _make_task(tsk_id="TSK-02-01", status="[dd]")
+        html = monitor_server._render_task_row_v2(task, set(), set())
+        self.assertIn('class="spinner"', html)
+
+
+class I18NPhaseKeysTests(unittest.TestCase):
+    """_I18N 테이블에 7개 phase 키가 존재하는지 검증."""
+
+    _REQUIRED_KEYS = [
+        "phase_design", "phase_build", "phase_test", "phase_done",
+        "phase_failed", "phase_bypass", "phase_pending",
+    ]
+
+    def test_i18n_ko_has_all_phase_keys(self):
+        for key in self._REQUIRED_KEYS:
+            with self.subTest(key=key):
+                val = monitor_server._I18N.get("ko", {}).get(key)
+                self.assertIsNotNone(val, f"_I18N['ko'] missing key: {key}")
+                self.assertNotEqual(val, "", f"_I18N['ko']['{key}'] must not be empty")
+
+    def test_i18n_en_has_all_phase_keys(self):
+        for key in self._REQUIRED_KEYS:
+            with self.subTest(key=key):
+                val = monitor_server._I18N.get("en", {}).get(key)
+                self.assertIsNotNone(val, f"_I18N['en'] missing key: {key}")
+                self.assertNotEqual(val, "", f"_I18N['en']['{key}'] must not be empty")
+
+
 class TskSpinnerTests(unittest.TestCase):
     """TSK-02-02: Task running 스피너 애니메이션 — _render_task_row_v2 단위 테스트."""
 
@@ -2344,6 +2586,211 @@ class TskSpinnerTests(unittest.TestCase):
         """.trow[data-running="true"] .spinner { display: inline-block } 규칙 존재."""
         css = monitor_server.DASHBOARD_CSS
         self.assertIn('.trow[data-running="true"] .spinner', css)
+
+
+class TskTooltipStateSummaryTests(unittest.TestCase):
+    """TSK-02-03: Task hover 툴팁 단위 테스트."""
+
+    def _make_task_with_history(
+        self,
+        tsk_id="TSK-02-03",
+        status="[im]",
+        last_event="build.ok",
+        last_event_at="2026-04-23T05:00:00Z",
+        elapsed_seconds=120.0,
+        phase_history_tail=None,
+    ):
+        if phase_history_tail is None:
+            phase_history_tail = [
+                PhaseEntry(event="design.ok", from_status="[ ]", to_status="[dd]",
+                           at="2026-04-23T04:00:00Z", elapsed_seconds=60.0),
+                PhaseEntry(event="build.ok", from_status="[dd]", to_status="[im]",
+                           at="2026-04-23T05:00:00Z", elapsed_seconds=120.0),
+            ]
+        return _make_task(
+            tsk_id=tsk_id, status=status, last_event=last_event,
+            last_event_at=last_event_at, elapsed_seconds=elapsed_seconds,
+            phase_history_tail=phase_history_tail,
+        )
+
+    def _extract_state_summary(self, html_str):
+        import json, re
+        import html as _html
+        m = re.search(r"data-state-summary='([^']*(?:&#x27;[^']*)*)'", html_str)
+        if m is None:
+            return None
+        return json.loads(_html.unescape(m.group(1)))
+
+    def _make_model(self, tasks):
+        return {
+            "tasks": tasks, "features": [], "panes": [], "signals": [],
+            "running_ids": set(), "failed_ids": set(),
+            "subprojects": ["monitor-v4"], "current_subproject": "monitor-v4",
+            "wp_titles": {}, "subagent_count": 0, "team_size": 0,
+        }
+
+    def test_trow_has_data_state_summary_attribute(self):
+        task = self._make_task_with_history()
+        h = monitor_server._render_task_row_v2(task, set(), set())
+        self.assertIn("data-state-summary=", h)
+
+    def test_trow_data_state_summary_is_valid_json(self):
+        task = self._make_task_with_history()
+        h = monitor_server._render_task_row_v2(task, set(), set())
+        data = self._extract_state_summary(h)
+        self.assertIsNotNone(data, "data-state-summary 파싱 실패")
+        self.assertIsInstance(data, dict)
+
+    def test_trow_data_state_summary_has_required_keys(self):
+        task = self._make_task_with_history()
+        h = monitor_server._render_task_row_v2(task, set(), set())
+        data = self._extract_state_summary(h)
+        self.assertIsNotNone(data)
+        for key in ("status", "last_event", "last_event_at", "elapsed", "phase_tail"):
+            self.assertIn(key, data, f"필수 키 누락: {key}")
+
+    def test_trow_data_state_summary_status_matches_item(self):
+        task = self._make_task_with_history(status="[dd]")
+        h = monitor_server._render_task_row_v2(task, set(), set())
+        data = self._extract_state_summary(h)
+        self.assertIsNotNone(data)
+        self.assertEqual(data["status"], "[dd]")
+
+    def test_trow_data_state_summary_elapsed_is_int(self):
+        task = self._make_task_with_history(elapsed_seconds=90.7)
+        h = monitor_server._render_task_row_v2(task, set(), set())
+        data = self._extract_state_summary(h)
+        self.assertIsNotNone(data)
+        self.assertIsInstance(data["elapsed"], int)
+        self.assertEqual(data["elapsed"], 90)
+
+    def test_state_summary_phase_tail_is_last_three(self):
+        four = [
+            PhaseEntry(event="design.ok", from_status="[ ]", to_status="[dd]",
+                       at="2026-04-23T01:00:00Z", elapsed_seconds=30.0),
+            PhaseEntry(event="build.ok", from_status="[dd]", to_status="[im]",
+                       at="2026-04-23T02:00:00Z", elapsed_seconds=60.0),
+            PhaseEntry(event="test.ok", from_status="[im]", to_status="[ts]",
+                       at="2026-04-23T03:00:00Z", elapsed_seconds=90.0),
+            PhaseEntry(event="refactor.ok", from_status="[ts]", to_status="[xx]",
+                       at="2026-04-23T04:00:00Z", elapsed_seconds=120.0),
+        ]
+        task = self._make_task_with_history(phase_history_tail=four)
+        h = monitor_server._render_task_row_v2(task, set(), set())
+        data = self._extract_state_summary(h)
+        self.assertIsNotNone(data)
+        self.assertEqual(len(data["phase_tail"]), 3)
+        self.assertEqual(data["phase_tail"][0]["event"], "build.ok")
+        self.assertEqual(data["phase_tail"][2]["event"], "refactor.ok")
+
+    def test_state_summary_phase_tail_empty_when_no_history(self):
+        task = self._make_task_with_history(phase_history_tail=[])
+        h = monitor_server._render_task_row_v2(task, set(), set())
+        data = self._extract_state_summary(h)
+        self.assertIsNotNone(data)
+        self.assertEqual(data["phase_tail"], [])
+
+    def test_state_summary_phase_tail_items_have_expected_keys(self):
+        task = self._make_task_with_history()
+        h = monitor_server._render_task_row_v2(task, set(), set())
+        data = self._extract_state_summary(h)
+        self.assertIsNotNone(data)
+        self.assertTrue(len(data["phase_tail"]) > 0)
+        entry = data["phase_tail"][0]
+        for key in ("event", "from", "to", "at", "elapsed_seconds"):
+            self.assertIn(key, entry, f"phase_tail 원소 키 누락: {key}")
+
+    def test_state_summary_escapes_xss_in_last_event(self):
+        task = _make_task(tsk_id="TSK-02-03", status="[im]",
+                          last_event="<script>alert(1)</script>",
+                          last_event_at="2026-04-23T05:00:00Z")
+        h = monitor_server._render_task_row_v2(task, set(), set())
+        self.assertNotIn("<script>", h)
+        self.assertIn("&lt;script&gt;", h)
+
+    def test_state_summary_single_quote_payload_escaped(self):
+        task = _make_task(tsk_id="TSK-02-03", status="[im]",
+                          last_event="it's done",
+                          last_event_at="2026-04-23T05:00:00Z")
+        h = monitor_server._render_task_row_v2(task, set(), set())
+        self.assertIn("&#x27;", h)
+
+    def test_state_summary_null_last_event_when_none(self):
+        task = _make_task(tsk_id="TSK-02-03", status="[ ]",
+                          last_event=None, last_event_at=None,
+                          elapsed_seconds=None, phase_history_tail=[])
+        h = monitor_server._render_task_row_v2(task, set(), set())
+        data = self._extract_state_summary(h)
+        self.assertIsNotNone(data)
+        self.assertIsNone(data["last_event"])
+        self.assertIsNone(data["last_event_at"])
+
+    def test_trow_existing_structure_not_broken(self):
+        """data-state-summary 추가 후 기존 7개 child div 구조가 회귀 없음 — class 이름이 HTML 에 포함됨."""
+        task = self._make_task_with_history()
+        h = monitor_server._render_task_row_v2(task, set(), set())
+        # 각 클래스명이 HTML 어딘가에 존재하는지 확인 (multi-class 속성 포함)
+        for cls in ("statusbar", "tid", "badge", "spinner", "ttitle", "elapsed", "retry", "flags"):
+            self.assertIn(cls, h, f"기존 클래스 {cls} 누락")
+
+    def test_trow_tooltip_dom_in_body(self):
+        tasks = [self._make_task_with_history(tsk_id="TSK-02-03")]
+        h = render_dashboard(self._make_model(tasks))
+        count = h.count('<div id="trow-tooltip"')
+        self.assertEqual(count, 1, f"#trow-tooltip 이 {count}회 발견 (1회 이어야 함)")
+
+    def test_trow_tooltip_dom_has_role_tooltip(self):
+        tasks = [self._make_task_with_history(tsk_id="TSK-02-03")]
+        h = render_dashboard(self._make_model(tasks))
+        self.assertIn('<div id="trow-tooltip" role="tooltip"', h)
+
+    def test_trow_tooltip_dom_has_hidden_attribute(self):
+        tasks = [self._make_task_with_history(tsk_id="TSK-02-03")]
+        h = render_dashboard(self._make_model(tasks))
+        self.assertIn('<div id="trow-tooltip" role="tooltip" hidden', h)
+
+    def test_dashboard_css_has_trow_tooltip_rule(self):
+        self.assertIn("#trow-tooltip", monitor_server.DASHBOARD_CSS)
+
+    def test_dashboard_css_trow_tooltip_has_position_fixed(self):
+        self.assertIn("position:fixed", monitor_server.DASHBOARD_CSS)
+
+    def test_dashboard_css_trow_tooltip_has_pointer_events_none(self):
+        self.assertIn("pointer-events:none", monitor_server.DASHBOARD_CSS)
+
+    def test_dashboard_js_has_setup_task_tooltip(self):
+        self.assertIn("setupTaskTooltip", monitor_server._DASHBOARD_JS)
+
+    def test_dashboard_js_has_document_level_delegation(self):
+        js = monitor_server._DASHBOARD_JS
+        self.assertIn("mouseenter", js)
+        self.assertIn("closest", js)
+        self.assertIn("data-state-summary", js)
+
+    def test_dashboard_js_has_300ms_debounce(self):
+        js = monitor_server._DASHBOARD_JS
+        self.assertIn("300", js)
+        self.assertIn("setTimeout", js)
+
+    def test_dashboard_js_has_scroll_hide(self):
+        self.assertIn("scroll", monitor_server._DASHBOARD_JS)
+
+    def test_build_state_summary_json_helper_exists(self):
+        self.assertTrue(hasattr(monitor_server, "_build_state_summary_json"))
+        task = self._make_task_with_history()
+        self.assertIsInstance(monitor_server._build_state_summary_json(task), dict)
+
+    def test_encode_state_summary_attr_helper_exists(self):
+        self.assertTrue(hasattr(monitor_server, "_encode_state_summary_attr"))
+        result = monitor_server._encode_state_summary_attr({"status": "[im]"})
+        self.assertIsInstance(result, str)
+
+    def test_trow_tooltip_skeleton_helper_exists(self):
+        self.assertTrue(hasattr(monitor_server, "_trow_tooltip_skeleton"))
+        h = monitor_server._trow_tooltip_skeleton()
+        self.assertIn('id="trow-tooltip"', h)
+        self.assertIn('role="tooltip"', h)
+        self.assertIn("hidden", h)
 
 
 if __name__ == "__main__":

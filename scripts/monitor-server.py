@@ -445,6 +445,7 @@ class WorkItem:
     wp_id: Optional[str] = None
     depends: List[str] = field(default_factory=list)
     error: Optional[str] = None
+    model: Optional[str] = None  # TSK-02-05: wbs.md `- model:` 필드
 
 
 def _cap_error(text: Optional[str]) -> str:
@@ -530,9 +531,10 @@ _WBS_TSK_RE = re.compile(r"^###\s+(TSK-[\w-]+)\s*:\s*(.+?)\s*$", re.MULTILINE)
 
 
 def _load_wbs_title_map(docs_dir: Path):
-    """docs_dir/wbs.md 를 한 번 읽어 ``{TSK-ID: (title, wp_id, depends)}`` 반환.
+    """docs_dir/wbs.md 를 한 번 읽어 ``{TSK-ID: (title, wp_id, depends, model)}`` 반환.
 
     파싱 실패(파일 없음/IO 오류/크기 초과)는 조용히 빈 맵 fallback.
+    TSK-02-05: model 필드도 함께 파싱한다 (``- model: {value}`` 라인).
     """
     wbs_path = docs_dir / "wbs.md"
     try:
@@ -553,27 +555,30 @@ def _load_wbs_title_map(docs_dir: Path):
     current_tsk: Optional[str] = None
     current_title: Optional[str] = None
     current_depends: List[str] = []
+    current_model: Optional[str] = None
 
-    def _commit(tsk, title, wp, depends):
+    def _commit(tsk, title, wp, depends, mdl):
         if tsk:
-            result[tsk] = (title, wp, depends)
+            result[tsk] = (title, wp, depends, mdl)
 
     for raw_line in text.splitlines():
         line = raw_line.rstrip()
         m_wp = _WBS_WP_RE.match(line)
         if m_wp:
-            _commit(current_tsk, current_title, current_wp, current_depends)
+            _commit(current_tsk, current_title, current_wp, current_depends, current_model)
             current_wp = m_wp.group(1)
             current_tsk = None
             current_title = None
             current_depends = []
+            current_model = None
             continue
         m_tsk = _WBS_TSK_RE.match(line)
         if m_tsk:
-            _commit(current_tsk, current_title, current_wp, current_depends)
+            _commit(current_tsk, current_title, current_wp, current_depends, current_model)
             current_tsk = m_tsk.group(1)
             current_title = m_tsk.group(2).strip() or None
             current_depends = []
+            current_model = None
             continue
         stripped = line.lstrip()
         if stripped.startswith("- depends:"):
@@ -584,7 +589,11 @@ def _load_wbs_title_map(docs_dir: Path):
                 current_depends = [
                     token.strip() for token in rest.split(",") if token.strip()
                 ]
-    _commit(current_tsk, current_title, current_wp, current_depends)
+        elif stripped.startswith("- model:"):
+            rest = stripped[len("- model:"):].strip()
+            if rest and rest != "-":
+                current_model = rest
+    _commit(current_tsk, current_title, current_wp, current_depends, current_model)
     return result
 
 
@@ -747,22 +756,43 @@ def scan_tasks(docs_dir: Path) -> List[WorkItem]:
 
     - tasks 디렉터리가 없으면 ``[]`` 반환 (예외 없음).
     - 파싱 실패한 state.json 은 ``error`` 가 채워진 ``WorkItem`` 으로 반환.
-    - wbs.md 가 있으면 title/wp_id/depends 를 함께 채운다 (1회 파싱).
+    - wbs.md 가 있으면 title/wp_id/depends/model 을 함께 채운다 (1회 파싱).
     - wbs.md 에 선언됐지만 state.json 이 아직 없는 Task 는 pending placeholder
       WorkItem 으로 추가된다 (디스크 쓰기 없음, wbs.md 문서 순서 유지).
+    TSK-02-05: model 필드를 title_map 에서 채운다.
     """
     docs_dir = Path(docs_dir)
     title_map = _load_wbs_title_map(docs_dir)
 
     def _task_lookup(item_id, _state_path):
-        return title_map.get(item_id, (None, None, []))
+        entry = title_map.get(item_id)
+        if entry is None:
+            return None, None, []
+        # entry는 (title, wp_id, depends, model) 4-tuple (TSK-02-05)
+        if len(entry) == 4:
+            return entry[0], entry[1], entry[2]
+        return entry[0], entry[1], entry[2]
 
     items = _scan_dir(docs_dir, "tasks", "wbs", _task_lookup)
+    # model 필드 후처리: _scan_dir은 lookup 반환(3-tuple)만 처리하므로 여기서 채운다
+    for it in items:
+        if it.id in title_map:
+            entry = title_map[it.id]
+            if len(entry) == 4:
+                object.__setattr__(it, "model", entry[3]) if hasattr(it, "__dataclass_fields__") else None
+                # dataclass는 frozen이 아니므로 직접 설정 가능
+                it.model = entry[3]
     seen = {it.id for it in items}
-    for tsk_id, (title, wp_id, depends) in title_map.items():
+    for tsk_id, entry in title_map.items():
         if tsk_id in seen:
             continue
-        items.append(_make_workitem_placeholder(tsk_id, "wbs", title, wp_id, depends))
+        title = entry[0] if entry else None
+        wp_id = entry[1] if entry else None
+        depends = entry[2] if entry else []
+        mdl = entry[3] if len(entry) == 4 else None
+        placeholder = _make_workitem_placeholder(tsk_id, "wbs", title, wp_id, depends)
+        placeholder.model = mdl
+        items.append(placeholder)
     return items
 
 
@@ -1019,6 +1049,14 @@ _I18N: dict[str, dict[str, str]] = {
         "dep_stat_failed":   "실패",
         "dep_stat_bypassed": "바이패스",
         "dep_wheel_zoom":    "휠 줌",
+        # TSK-02-01: DDTR phase badge labels (ko/en same label — keys separated for i18n extensibility)
+        "phase_design":  "Design",
+        "phase_build":   "Build",
+        "phase_test":    "Test",
+        "phase_done":    "Done",
+        "phase_failed":  "Failed",
+        "phase_bypass":  "Bypass",
+        "phase_pending": "Pending",
     },
     "en": {
         "work_packages": "Work Packages",
@@ -1035,6 +1073,14 @@ _I18N: dict[str, dict[str, str]] = {
         "dep_stat_failed":   "Failed",
         "dep_stat_bypassed": "Bypassed",
         "dep_wheel_zoom":    "Wheel zoom",
+        # TSK-02-01: DDTR phase badge labels (ko/en same label — keys separated for i18n extensibility)
+        "phase_design":  "Design",
+        "phase_build":   "Build",
+        "phase_test":    "Test",
+        "phase_done":    "Done",
+        "phase_failed":  "Failed",
+        "phase_bypass":  "Bypass",
+        "phase_pending": "Pending",
     },
 }
 
@@ -1050,6 +1096,68 @@ def _t(lang: str, key: str) -> str:
         or _I18N.get("ko", {}).get(key)
         or key
     )
+
+
+# ---------------------------------------------------------------------------
+# TSK-02-01: DDTR phase badge helpers
+# ---------------------------------------------------------------------------
+
+# Maps status code / virtual keys → i18n key in _I18N.
+# Keys: DDTR status codes + virtual keys (failed / bypass / pending).
+_PHASE_LABELS: "dict[str, dict[str, str]]" = {
+    "[dd]":    {"ko": "Design",  "en": "Design"},
+    "[im]":    {"ko": "Build",   "en": "Build"},
+    "[ts]":    {"ko": "Test",    "en": "Test"},
+    "[xx]":    {"ko": "Done",    "en": "Done"},
+    "failed":  {"ko": "Failed",  "en": "Failed"},
+    "bypass":  {"ko": "Bypass",  "en": "Bypass"},
+    "pending": {"ko": "Pending", "en": "Pending"},
+}
+
+# Maps status code → data-phase attribute value (raw string without brackets).
+_PHASE_CODE_TO_ATTR: "dict[str, str]" = {
+    "[dd]": "dd",
+    "[im]": "im",
+    "[ts]": "ts",
+    "[xx]": "xx",
+}
+
+
+def _phase_label(status_code: "Optional[str]", lang: str, *, failed: bool, bypassed: bool) -> str:  # type: ignore[override]  # noqa: F811
+    """Return human-readable badge label for a Task row.
+
+    Priority: bypassed > failed > status_code mapping > pending.
+    lang is normalised via _normalize_lang (unknown → 'ko').
+
+    Note: there is a legacy _phase_label(status_str) function defined later
+    (used for task-detail history rows). This function shadows it at module
+    level for badge usage; the legacy function is renamed internally and not
+    exposed as a public helper.
+    """
+    normalised = _normalize_lang(lang)
+    if bypassed:
+        return _PHASE_LABELS["bypass"].get(normalised) or _PHASE_LABELS["bypass"]["ko"]
+    if failed:
+        return _PHASE_LABELS["failed"].get(normalised) or _PHASE_LABELS["failed"]["ko"]
+    code = str(status_code).strip() if status_code else ""
+    entry = _PHASE_LABELS.get(code)
+    if entry:
+        return entry.get(normalised) or entry["ko"]
+    return _PHASE_LABELS["pending"].get(normalised) or _PHASE_LABELS["pending"]["ko"]
+
+
+def _phase_data_attr(status_code: "Optional[str]", *, failed: bool, bypassed: bool) -> str:
+    """Return the data-phase attribute value for a Task row .trow element.
+
+    Priority: bypassed > failed > status_code mapping > pending.
+    """
+    if bypassed:
+        return "bypass"
+    if failed:
+        return "failed"
+    code = str(status_code).strip() if status_code else ""
+    return _PHASE_CODE_TO_ATTR.get(code, "pending")
+
 
 # Status → (emoji, label, css_class) for the non-override branch of
 # ``_status_badge``. The bypass/failed/running overrides stay inline in the
@@ -1250,23 +1358,26 @@ summary::-webkit-details-marker{ display:none; }
   box-shadow: 0 0 0 0 var(--done-glow);
   animation: pulse 1.6s ease-out infinite;
 }
+/* shared spinner — TSK-00-01 contract; .node-spinner shares the same animation (TSK-02-04 dep-node spinner) */
+@keyframes spin{ to{ transform: rotate(360deg); } }
+.spinner,.node-spinner{
+  display: none;
+  width: 10px; height: 10px;
+  border: 2px solid transparent;
+  border-top-color: var(--run);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  vertical-align: middle;
+}
+.trow[data-running="true"] .spinner{ display: inline-block; }
+.badge .spinner{ margin-left: 4px; }
+.dep-node[data-running="true"] .node-spinner{
+  display:inline-block; position:absolute; top:4px; right:4px;
+}
 @keyframes pulse{
   0%   { box-shadow: 0 0 0 0 rgba(78,208,138,.55); }
   70%  { box-shadow: 0 0 0 10px rgba(78,208,138,0);  }
   100% { box-shadow: 0 0 0 0 rgba(78,208,138,0);   }
-}
-/* shared — do not duplicate */
-@keyframes spin{ to{ transform: rotate(360deg); } }
-.spinner,.node-spinner{
-  display:none;
-  width:10px; height:10px; border-radius:50%;
-  border: 2px solid var(--ink-3);
-  border-top-color: var(--run);
-  animation: spin 1s linear infinite;
-}
-.trow[data-running="true"] .spinner{ display:inline-block; }
-.dep-node[data-running="true"] .node-spinner{
-  display:inline-block; position:absolute; top:4px; right:4px;
 }
 
 .btn{
@@ -2036,6 +2147,49 @@ body[data-filter="bypass"]  .trow:not([data-status="bypass"]) { display: none; }
   .trow .badge, .trow .retry, .trow .flags{ display:none; }
   .drawer{ width: 100vw; }
 }
+
+/* ---------- TSK-02-03: trow tooltip ---------- */
+#trow-tooltip{
+  position:fixed;
+  z-index:100;
+  max-width:420px;
+  background:var(--bg-2);
+  border:1px solid var(--border);
+  border-radius:6px;
+  padding:10px 12px;
+  font:12px/1.4 var(--font-mono);
+  pointer-events:none;
+  box-shadow:0 4px 12px rgba(0,0,0,.3);
+}
+#trow-tooltip[hidden]{ display:none; }
+#trow-tooltip dl{ margin:0; }
+#trow-tooltip dt{ color:var(--ink-3); font-size:10px; margin-top:6px; }
+#trow-tooltip dd{ margin:0; color:var(--ink); }
+
+/* ---------- TSK-02-05: model chip + escalation flag ---------- */
+.model-chip{
+  display:inline-block;
+  padding:1px 6px;
+  margin-left:6px;
+  font:10px/1.4 var(--font-mono);
+  border-radius:3px;
+  background:var(--bg-3);
+  color:var(--ink-2);
+  border:1px solid var(--border);
+  vertical-align:middle;
+}
+.model-chip[data-model="opus"]{ background:#3b2f4a; color:#e8d8ff; border-color:#6b4a8a; }
+.model-chip[data-model="sonnet"]{ background:#2a3a4a; color:#cce0f0; border-color:#3a6080; }
+.model-chip[data-model="haiku"]{ background:#2a3f30; color:#c8e6c9; border-color:#3a6040; }
+.escalation-flag{
+  margin-left:4px;
+  color:var(--pending);
+  font-size:11px;
+  vertical-align:middle;
+}
+/* phase-models dl in tooltip */
+#trow-tooltip dl.phase-models dt{ color:var(--ink-3); font-size:10px; margin-top:4px; }
+#trow-tooltip dl.phase-models dd{ margin:0; color:var(--ink); font-size:11px; }
 """
 
 def _minify_css(css: str) -> str:
@@ -2113,6 +2267,68 @@ def _retry_count(item) -> int:
         if isinstance(event, str) and event.endswith(".fail"):
             count += 1
     return count
+
+
+# ---------------------------------------------------------------------------
+# TSK-02-05: DDTR phase model helpers
+# ---------------------------------------------------------------------------
+
+def _MAX_ESCALATION() -> int:
+    """환경변수 MAX_ESCALATION(기본 2)을 안전하게 파싱한다.
+
+    매 호출마다 환경변수를 재읽어 테스트의 monkeypatch.setenv 즉시 반영.
+    음수/0/비숫자/빈 문자열 → 기본값 2 폴백.
+    """
+    raw = os.environ.get("MAX_ESCALATION", "").strip()
+    try:
+        val = int(raw)
+        if val > 0:
+            return val
+    except (ValueError, TypeError):
+        pass
+    return 2
+
+
+def _test_phase_model(item) -> str:
+    """retry_count 기반으로 Test phase 모델을 결정한다 (TSK-02-05 TRD §3.10).
+
+    규칙:
+    - rc >= _MAX_ESCALATION() → 'opus'
+    - rc >= 1 → 'sonnet'
+    - 그 외 → 'haiku'
+    """
+    rc = _retry_count(item)
+    if rc >= _MAX_ESCALATION():
+        return "opus"
+    if rc >= 1:
+        return "sonnet"
+    return "haiku"
+
+
+def _phase_models_for(item) -> dict:
+    """DDTR 4개 phase별 모델 dict 반환 (TSK-02-05 TRD §3.10).
+
+    Keys: design, build, test, refactor.
+    - design: item.model (wbs.md 필드) 또는 'sonnet' 폴백
+    - build, refactor: 'sonnet' 고정
+    - test: _test_phase_model(item) (retry_count 기반)
+    """
+    design_model = getattr(item, "model", None) or "sonnet"
+    return {
+        "design": design_model,
+        "build": "sonnet",
+        "test": _test_phase_model(item),
+        "refactor": "sonnet",
+    }
+
+
+# DDTR phase model 람다 테이블 (TRD §3.10 — Dep-Graph 노드 향후 소비용)
+_DDTR_PHASE_MODELS = {
+    "dd": lambda t: getattr(t, "model", None) or "sonnet",
+    "im": lambda t: "sonnet",
+    "ts": _test_phase_model,
+    "xx": lambda t: "sonnet",
+}
 
 
 def _status_badge(status: Optional[str], bypassed: bool, running: bool, failed: bool) -> str:
@@ -2689,43 +2905,135 @@ def _clean_title(title) -> str:
     return t
 
 
-def _render_task_row_v2(item, running_ids: set, failed_ids: set, lang: str = "ko") -> str:
-    """Render a v3 ``<div class="trow" data-status="{state}">`` row.
+def _build_state_summary_json(item) -> dict:
+    """state.json 요약 dict 를 생성한다 (TSK-02-03 + TSK-02-05 확장).
 
-    Matches reference markup exactly — 7 ``<div>`` children:
-    ``statusbar / tid / badge / ttitle / elapsed / retry / flags``.
-    Badge text is lowercase (``running``/``done``/``failed``/``bypass``/``pending``)
-    — reference design uses CSS to colour the pill.
+    포함 필드: status, last_event, last_event_at, elapsed (int초), phase_tail (최근 3개).
+    TSK-02-05 추가 필드: model, retry_count, phase_models, escalated.
+    item 에 필드가 없으면 graceful default (빈 문자열/None/0/[]).
+    """
+    status = getattr(item, "status", None)
+    last_event = getattr(item, "last_event", None)
+    last_event_at = getattr(item, "last_event_at", None)
+    elapsed_raw = getattr(item, "elapsed_seconds", None)
+    elapsed = (
+        int(elapsed_raw)
+        if isinstance(elapsed_raw, (int, float)) and not isinstance(elapsed_raw, bool)
+        else 0
+    )
+    history_tail = getattr(item, "phase_history_tail", []) or []
+    phase_tail = [
+        {
+            "event": getattr(e, "event", None),
+            "from": getattr(e, "from_status", None),
+            "to": getattr(e, "to_status", None),
+            "at": getattr(e, "at", None),
+            "elapsed_seconds": getattr(e, "elapsed_seconds", None),
+        }
+        for e in history_tail[-3:]
+    ]
+    # TSK-02-05: model chip + escalation badge fields
+    item_model = getattr(item, "model", None) or "sonnet"
+    rc = _retry_count(item)
+    escalated = rc >= _MAX_ESCALATION()
+    pm = _phase_models_for(item)
+    return {
+        "status": status,
+        "last_event": last_event,
+        "last_event_at": last_event_at,
+        "elapsed": elapsed,
+        "phase_tail": phase_tail,
+        "model": item_model,
+        "retry_count": rc,
+        "phase_models": pm,
+        "escalated": escalated,
+    }
+
+
+def _encode_state_summary_attr(summary: dict) -> str:
+    """summary dict 를 JSON → html.escape 로 single-quote 속성에 안전하게 삽입한다 (TSK-02-03).
+
+    반환값은 data-state-summary='...' 의 값 부분이다.
+    """
+    raw = json.dumps(summary, ensure_ascii=False, separators=(",", ":"))
+    return html.escape(raw, quote=True)
+
+
+def _trow_tooltip_skeleton() -> str:
+    """body 직계에 1회 주입하는 trow 툴팁 DOM 스켈레톤 (TSK-02-03)."""
+    return '<div id="trow-tooltip" role="tooltip" hidden></div>'
+
+
+def _render_task_row_v2(item, running_ids: set, failed_ids: set, lang: str = "ko") -> str:
+    """Render a v3 ``<div class="trow" data-status="{state}" data-phase="{phase}" data-running="{bool}">`` row.
+
+    Matches reference markup — 7 ``<div>`` children + spinner span:
+    ``statusbar / tid / badge / spinner / ttitle / elapsed / retry / flags``.
+
+    TSK-02-01: badge text is DDTR phase label (Design/Build/Test/Done/Failed/Bypass/Pending)
+    derived from state.json.status via _phase_label(). data-phase attribute added for CSS/test hooks.
+    data-status attribute (signal-based colour mapping) is unchanged.
+
+    TSK-02-02: data-running reflects whether item.id is in running_ids (independent of
+    data-status priority). The .spinner span is always emitted as a badge sibling for all
+    trows; CSS controls visibility via .trow[data-running="true"] .spinner { display: inline-block }.
     """
     item_id = getattr(item, "id", None)
     bypassed = bool(getattr(item, "bypassed", False))
     error = getattr(item, "error", None)
     title = getattr(item, "title", None)
+    status_code = getattr(item, "status", None)
     data_status = _trow_data_status(item, running_ids, failed_ids)
+    data_running = "true" if (item_id and item_id in running_ids) else "false"
 
-    badge_text = "error" if error else data_status
-    badge_title_attr = ""
-    if error:
-        badge_title_attr = f' title="{_esc(str(error)[:_ERROR_TITLE_CAP])}"'
+    # badge text: error counts as failed (same bucket as .failed signal).
+    is_failed = bool(error) or (item_id is not None and item_id in failed_ids)
+    badge_text = _phase_label(status_code, lang, failed=is_failed, bypassed=bypassed)
+    data_phase = _phase_data_attr(status_code, failed=is_failed, bypassed=bypassed)
+
+    badge_title_attr = (
+        f' title="{_esc(str(error)[:_ERROR_TITLE_CAP])}"' if error else ""
+    )
 
     elapsed_raw = _format_elapsed(item, lang=lang)
     elapsed_display = elapsed_raw if elapsed_raw != "-" else "—"
 
-    flags_inner = ""
-    if bypassed:
-        flags_inner = '<span class="flag f-crit">bypass</span>'
+    # TSK-02-05: escalation flag (⚡) — prepend before bypass flag
+    rc = _retry_count(item)
+    escalated = rc >= _MAX_ESCALATION()
+    escalation_span = (
+        '<span class="escalation-flag" aria-label="escalated">⚡</span>'
+        if escalated else ""
+    )
+    bypass_span = '<span class="flag f-crit">bypass</span>' if bypassed else ""
+    flags_inner = escalation_span + bypass_span
+
+    # TSK-02-05: model chip — inserted after clean_title in ttitle cell
+    item_model_raw = getattr(item, "model", None) or "sonnet"
+    model_esc = _esc(item_model_raw)
+    model_chip = f'<span class="model-chip" data-model="{model_esc}">{model_esc}</span>'
 
     clean_title = _esc(_clean_title(title))
 
+    expand_btn = (
+        f'<button class="expand-btn" data-task-id="{_esc(item_id or "")}"'
+        ' aria-label="Expand" title="Expand">↗</button>'
+    )
+
+    _state_summary_encoded = _encode_state_summary_attr(_build_state_summary_json(item))
+
     return (
-        f'<div class="trow" data-status="{data_status}">\n'
+        f'<div class="trow" data-status="{data_status}" data-phase="{data_phase}" data-running="{data_running}"'
+        f" data-state-summary='{_state_summary_encoded}'>\n"
         '  <div class="statusbar"></div>\n'
         f'  <div class="tid id">{_esc(item_id)}</div>\n'
         f'  <div class="badge"{badge_title_attr}>{_esc(badge_text)}</div>\n'
-        f'  <div class="ttitle title">{clean_title}</div>\n'
+        '  <span class="spinner" aria-hidden="true"></span>\n'
+        f'  <div class="ttitle title">{clean_title}{model_chip}</div>\n'
         f'  <div class="elapsed">{_esc(elapsed_display)}</div>\n'
-        f'  <div class="retry">×{_retry_count(item)}</div>\n'
+        f'  <div class="retry">×{rc}</div>\n'
         f'  <div class="flags">{flags_inner}</div>\n'
+        f'  {expand_btn}\n'
         '</div>'
     )
 
@@ -3371,8 +3679,8 @@ def _render_arow(item_id: str, entry, dt, sig_content: dict) -> str:
     event_label = _esc(event or "")
     # Strip the bracket decoration for the from→to labels so the reference
     # design's '.from/.to' spans stay compact ("running"/"done" not "[im]"/"[xx]").
-    from_label = _esc(_phase_label(from_s) or "")
-    to_label = _esc(_phase_label(to_s) or "")
+    from_label = _esc(_phase_label_history(from_s) or "")
+    to_label = _esc(_phase_label_history(to_s) or "")
 
     warn_suffix = " ⚠" if event and event.endswith(".fail") else ""
     evt_inner = (
@@ -3430,8 +3738,12 @@ def _section_live_activity(model, heading: "Optional[str]" = None):
     return _live_activity_details_wrap(heading, body)
 
 
-def _phase_label(status_str):
-    """Map '[dd]'/'[im]'/'[ts]'/'[xx]' to human-readable phase labels."""
+def _phase_label_history(status_str):
+    """Map '[dd]'/'[im]'/'[ts]'/'[xx]' to lowercase phase labels for history rows.
+
+    Used by activity section from→to labels. Not to be confused with the badge
+    helper _phase_label(status_code, lang, *, failed, bypassed) defined earlier.
+    """
     if not status_str:
         return ""
     _map = {
@@ -3716,6 +4028,103 @@ _DASHBOARD_JS = """\
   }else{
     init();
   }
+})();
+
+/* TSK-02-03: Task hover tooltip — setupTaskTooltip IIFE */
+/* TSK-02-05: renderPhaseModels 확장 추가 */
+(function setupTaskTooltip(){
+  var tip=document.getElementById('trow-tooltip');
+  if(!tip)return;
+  var _timer=null;
+  var _current=null;
+
+  /* TSK-02-05: phase model 4행 <dl> 렌더러 */
+  function renderPhaseModels(pm,escalated,retry_count){
+    if(!pm)return null;
+    var dl=document.createElement('dl');
+    dl.className='phase-models';
+    function pmrow(label,value){
+      var dt=document.createElement('dt');dt.textContent=label;
+      var dd=document.createElement('dd');dd.textContent=value||'—';
+      dl.appendChild(dt);dl.appendChild(dd);
+    }
+    pmrow('Design',pm.design);
+    pmrow('Build',pm.build);
+    var testLine=escalated
+      ?'haiku → '+pm.test+' (retry #'+retry_count+') ⚡'
+      :pm.test;
+    pmrow('Test',testLine);
+    pmrow('Refactor',pm.refactor);
+    return dl;
+  }
+
+  function renderTooltipHtml(data){
+    var dl=document.createElement('dl');
+    function row(label,value){
+      var dt=document.createElement('dt');dt.textContent=label;
+      var dd=document.createElement('dd');dd.textContent=(value===null||value===undefined)?'—':String(value);
+      dl.appendChild(dt);dl.appendChild(dd);
+    }
+    row('status',data.status);
+    row('last event',data.last_event);
+    row('at',data.last_event_at);
+    row('elapsed',data.elapsed!=null?data.elapsed+'s':null);
+    if(data.phase_tail&&data.phase_tail.length){
+      var dt2=document.createElement('dt');dt2.textContent='recent phases';
+      dl.appendChild(dt2);
+      data.phase_tail.forEach(function(p){
+        var dd2=document.createElement('dd');
+        dd2.textContent=(p.event||'')+(p.from?' '+p.from+' → ':'')+( p.to||'');
+        dl.appendChild(dd2);
+      });
+    }
+    /* TSK-02-05: phase models section */
+    var pmDl=renderPhaseModels(data.phase_models,data.escalated,data.retry_count);
+    var frag=document.createDocumentFragment();
+    frag.appendChild(dl);
+    if(pmDl){frag.appendChild(pmDl);}
+    return frag;
+  }
+
+  function show(el,data){
+    tip.innerHTML='';
+    tip.appendChild(renderTooltipHtml(data));
+    var r=el.getBoundingClientRect();
+    var left=r.right+8;
+    if(left+420>window.innerWidth){left=r.left-428;}
+    tip.style.top=(r.top+window.scrollY)+'px';
+    tip.style.left=left+'px';
+    tip.hidden=false;
+  }
+
+  function hide(){
+    clearTimeout(_timer);
+    _timer=null;
+    _current=null;
+    tip.hidden=true;
+  }
+
+  document.addEventListener('mouseenter',function(e){
+    var el=e.target&&e.target.closest?e.target.closest('.trow[data-state-summary]'):null;
+    if(!el){return;}
+    if(el===_current){return;}
+    clearTimeout(_timer);
+    _current=el;
+    _timer=setTimeout(function(){
+      var raw=el.getAttribute('data-state-summary');
+      if(!raw){return;}
+      try{var data=JSON.parse(raw);}catch(err){return;}
+      show(el,data);
+    },300);
+  },true);
+
+  document.addEventListener('mouseleave',function(e){
+    var el=e.target&&e.target.closest?e.target.closest('.trow[data-state-summary]'):null;
+    if(!el){return;}
+    hide();
+  },true);
+
+  window.addEventListener('scroll',function(){hide();},true);
 })();"""
 
 
@@ -3973,7 +4382,11 @@ def render_dashboard(model: dict, lang: str = "ko", subproject: str = "all") -> 
         '<body>\n',
         body, "\n",
         _drawer_skeleton(), "\n",
+        _trow_tooltip_skeleton(), "\n",
+        f'<style>{_task_panel_css()}</style>\n',
         f'<script id="dashboard-js">{_DASHBOARD_JS}</script>\n',
+        f'<script id="task-panel-js">{_task_panel_js()}</script>\n',
+        _task_panel_dom(), "\n",
         '</body>\n',
         '</html>\n',
     ])
@@ -4692,6 +5105,335 @@ def _is_api_state_path(path: str) -> bool:
     return urlsplit(path).path == _API_STATE_PATH
 
 
+# ---------------------------------------------------------------------------
+# /api/task-detail endpoint (TSK-02-04)
+# ---------------------------------------------------------------------------
+
+_API_TASK_DETAIL_PATH = "/api/task-detail"
+
+_WBS_SECTION_RE = re.compile(r"^### (?P<id>TSK-\S+):", re.MULTILINE)
+_TSK_ID_VALID_RE = re.compile(r"^TSK-\S+$")
+
+
+def _is_api_task_detail_path(path: str) -> bool:
+    """Return True iff path matches /api/task-detail exactly (query allowed)."""
+    if not isinstance(path, str):
+        return False
+    return urlsplit(path).path == _API_TASK_DETAIL_PATH
+
+
+def _extract_wbs_section(wbs_md: str, task_id: str) -> str:
+    """Extract WBS section for task_id from wbs_md. Returns stripped text or ''.
+
+    Sections are bounded by the next ``### `` or ``## `` header, whichever comes first.
+    """
+    matches = list(_WBS_SECTION_RE.finditer(wbs_md))
+    for i, m in enumerate(matches):
+        if m.group("id") != task_id:
+            continue
+        start = m.start()
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(wbs_md)
+        h2_match = re.search(r"^## ", wbs_md[start:end], re.MULTILINE)
+        if h2_match:
+            end = start + h2_match.start()
+        return wbs_md[start:end].strip()
+    return ""
+
+
+# Log file names to tail for the EXPAND panel § 로그 section (TSK-02-06).
+LOG_NAMES = ("build-report.md", "test-report.md")
+
+_MAX_LOG_TAIL_LINES = 200
+
+
+def _tail_report(path, max_lines=_MAX_LOG_TAIL_LINES) -> dict:
+    """Return tail dict for a single log file.
+
+    Schema: {name, tail, truncated, lines_total, exists}.
+    - File missing → exists=False, tail='', lines_total=0, truncated=False.
+    - ANSI CSI escapes are stripped via _ANSI_RE.
+    - UTF-8 decode errors are replaced (never raises).
+    """
+    name = Path(path).name
+    if not Path(path).exists():
+        return {"name": name, "tail": "", "truncated": False, "lines_total": 0, "exists": False}
+    try:
+        raw = Path(path).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return {"name": name, "tail": "", "truncated": False, "lines_total": 0, "exists": False}
+    raw = _ANSI_RE.sub("", raw)
+    all_lines = raw.splitlines()
+    lines_total = len(all_lines)
+    truncated = lines_total > max_lines
+    tail_lines = all_lines[-max_lines:] if truncated else all_lines
+    tail = "\n".join(tail_lines)
+    return {
+        "name": name,
+        "tail": tail,
+        "truncated": truncated,
+        "lines_total": lines_total,
+        "exists": True,
+    }
+
+
+def _collect_logs(task_dir) -> list:
+    """Return [{name, tail, truncated, lines_total, exists}] for LOG_NAMES."""
+    return [_tail_report(Path(task_dir) / name) for name in LOG_NAMES]
+
+
+def _collect_artifacts(task_dir):
+    """Return [{name, path, exists, size}] for design/test-report/refactor."""
+    artifact_names = ("design.md", "test-report.md", "refactor.md")
+    result = []
+    for name in artifact_names:
+        filepath = task_dir / name
+        try:
+            st = filepath.stat()
+            exists = True
+            size = st.st_size
+        except OSError:
+            exists = False
+            size = 0
+        raw = str(task_dir / name)
+        docs_idx = raw.find("docs/")
+        rel = raw[docs_idx:] if docs_idx >= 0 else raw
+        result.append({"name": name, "path": rel, "exists": exists, "size": size})
+    return result
+
+
+def _extract_title_from_section(section_md: str) -> str:
+    """Extract task title from the first line of a WBS section.
+
+    Example: ``### TSK-02-04: Some Title`` → ``"Some Title"``.
+    Returns empty string when the pattern is not found.
+    """
+    first_line = section_md.splitlines()[0] if section_md else ""
+    tsk_pos = first_line.find("TSK-")
+    if tsk_pos < 0:
+        return ""
+    colon_pos = first_line.find(":", tsk_pos)
+    if colon_pos < 0:
+        return ""
+    return first_line[colon_pos + 1:].strip()
+
+
+def _extract_wp_id(section_md: str, wbs_md: str, task_id: str) -> str:
+    """Resolve wp_id for a task.
+
+    Priority: (1) ``- wp:`` metadata line inside the section,
+    (2) reverse-scan of wbs_md for the nearest ``## WP-*:`` header before the section.
+    Returns empty string when neither is found.
+    """
+    for line in section_md.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("- wp:"):
+            return stripped[len("- wp:"):].strip()
+    section_start = wbs_md.find(f"### {task_id}:")
+    if section_start > 0:
+        preceding = wbs_md[:section_start]
+        wp_match = None
+        for m in re.finditer(r"^## (WP-\S+)", preceding, re.MULTILINE):
+            wp_match = m
+        if wp_match:
+            return wp_match.group(1).rstrip(":")
+    return ""
+
+
+def _load_state_json(task_dir) -> dict:
+    """Load state.json from task_dir. Returns ``{"status": "[ ]"}`` on missing/corrupt file."""
+    state_json_path = Path(task_dir) / "state.json"
+    if not state_json_path.exists():
+        return {"status": "[ ]"}
+    try:
+        with open(state_json_path, "r", encoding="utf-8") as fp:
+            return json.load(fp)
+    except (OSError, json.JSONDecodeError):
+        return {"status": "[ ]"}
+
+
+def _build_task_detail_payload(task_id, subproject, effective_docs_dir, wbs_md):
+    """Build /api/task-detail payload. Returns (status_code, dict)."""
+    if not _TSK_ID_VALID_RE.match(task_id):
+        return (400, {"error": f"Invalid task_id format: {task_id!r}", "code": 400})
+    wbs_section_md = _extract_wbs_section(wbs_md, task_id)
+    if not wbs_section_md:
+        return (404, {"error": f"Task {task_id!r} not found in wbs.md", "code": 404})
+    title = _extract_title_from_section(wbs_section_md)
+    wp_id = _extract_wp_id(wbs_section_md, wbs_md, task_id)
+    task_dir = Path(effective_docs_dir) / "tasks" / task_id
+    state = _load_state_json(task_dir)
+    artifacts = _collect_artifacts(task_dir)
+    logs = _collect_logs(task_dir)
+    return (200, {
+        "task_id": task_id, "title": title, "wp_id": wp_id, "source": "wbs",
+        "wbs_section_md": wbs_section_md, "state": state, "artifacts": artifacts,
+        "logs": logs,
+    })
+
+
+def _handle_api_task_detail(handler) -> None:
+    """Handle GET /api/task-detail."""
+    try:
+        raw_path = getattr(handler, "path", "") or ""
+        qs = urlsplit(raw_path).query
+        qp = parse_qs(qs, keep_blank_values=False)
+        task_id = (qp.get("task") or [""])[0] or ""
+        raw_sp = (qp.get("subproject") or ["all"])[0] or "all"
+        base_docs_dir = _server_attr(handler, "docs_dir")
+        available_subprojects = discover_subprojects(base_docs_dir)
+        if raw_sp != "all" and raw_sp not in available_subprojects:
+            raw_sp = "all"
+        effective_docs_dir = _resolve_effective_docs_dir(base_docs_dir, raw_sp)
+        wbs_path = Path(effective_docs_dir) / "wbs.md"
+        try:
+            with open(wbs_path, "r", encoding="utf-8") as fp:
+                wbs_md = fp.read()
+        except OSError:
+            wbs_md = ""
+        status, payload = _build_task_detail_payload(task_id, raw_sp, effective_docs_dir, wbs_md)
+        _json_response(handler, status, payload)
+    except Exception as exc:
+        sys.stderr.write(f"/api/task-detail error: {exc!r}\n")
+        _json_error(handler, 500, str(exc))
+
+
+def _task_panel_css() -> str:
+    """CSS for task slide panel (TSK-02-04)."""
+    return (
+        ".slide-panel{position:fixed;top:0;right:-560px;bottom:0;width:560px;"
+        "background:var(--bg-2,#1e1e2e);border-left:1px solid var(--border,#313244);"
+        "overflow-y:auto;z-index:90;transition:right 0.22s cubic-bezier(.4,0,.2,1);"
+        "display:flex;flex-direction:column;}"
+        ".slide-panel.open{right:0;}"
+        "#task-panel-overlay{position:fixed;inset:0;background:rgba(0,0,0,.3);z-index:80;}"
+        "#task-panel header{display:flex;align-items:center;justify-content:space-between;"
+        "padding:12px 16px;border-bottom:1px solid var(--border,#313244);flex-shrink:0;}"
+        "#task-panel-body{flex:1;overflow-y:auto;padding:16px;}"
+        "#task-panel-close{background:none;border:none;cursor:pointer;font-size:18px;"
+        "color:var(--ink-3,#cdd6f4);opacity:.7;line-height:1;}"
+        "#task-panel-close:hover{opacity:1;}"
+        "#task-panel-body h4{margin:16px 0 8px;font-size:13px;color:var(--ink-3,#cdd6f4);}"
+        "#task-panel-body pre{background:var(--bg-1,#181825);border-radius:4px;padding:10px;"
+        "overflow-x:auto;font-size:12px;white-space:pre-wrap;word-break:break-word;}"
+        "#task-panel-body .disabled{color:var(--ink-3,#585b70);}"
+        "#task-panel-body .size{font-size:11px;color:var(--ink-3,#585b70);margin-left:6px;}"
+        "#task-panel-body ul{list-style:none;padding:0;margin:0;}"
+        "#task-panel-body li{padding:4px 0;font-size:12px;}"
+        ".expand-btn{font-size:14px;padding:2px 6px;opacity:.5;background:none;"
+        "border:none;cursor:pointer;color:inherit;}"
+        ".expand-btn:hover{opacity:1;}"
+        "#task-panel-body code{font-family:var(--font-mono,monospace);font-size:12px;}"
+        ".panel-logs{margin-top:4px;}"
+        ".log-entry{margin-bottom:8px;}"
+        ".log-entry summary{cursor:pointer;font-size:12px;color:var(--ink-3,#cdd6f4);padding:2px 0;user-select:none;}"
+        ".log-tail{max-height:300px;overflow:auto;font-size:11px;white-space:pre-wrap;"
+        "word-break:break-all;background:var(--bg-1,#181825);border-radius:4px;"
+        "padding:8px;margin:4px 0 0;font-family:var(--font-mono,monospace);}"
+        ".log-empty{font-size:12px;color:var(--ink-3,#585b70);padding:4px 0;}"
+        ".log-trunc{font-size:10px;color:var(--ink-3,#585b70);margin-left:8px;}"
+    )
+
+
+_TASK_PANEL_JS = r"""
+function escapeHtml(s){
+  if(s==null)return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+function renderWbsSection(md){
+  if(!md)return '';
+  var lines=md.split('\n'),html='<h4>&sect; WBS</h4>',inCode=false,lang='';
+  for(var i=0;i<lines.length;i++){
+    var line=lines[i];
+    if(!inCode&&line.match(/^```/)){inCode=true;lang=line.slice(3).trim();html+='<pre><code'+(lang?' class="lang-'+escapeHtml(lang)+'"':'')+'>';continue;}
+    if(inCode){if(line.match(/^```/)){inCode=false;html+='</code></pre>\n';}else{html+=escapeHtml(line)+'\n';}continue;}
+    var m4=line.match(/^####\s+(.*)/),m3=line.match(/^###\s+(.*)/),m2=line.match(/^##\s+(.*)/),m1=line.match(/^#\s+(.*)/);
+    if(m4){html+='<h5>'+escapeHtml(m4[1])+'</h5>\n';continue;}
+    if(m3){html+='<h4>'+escapeHtml(m3[1])+'</h4>\n';continue;}
+    if(m2){html+='<h3>'+escapeHtml(m2[1])+'</h3>\n';continue;}
+    if(m1){html+='<h2>'+escapeHtml(m1[1])+'</h2>\n';continue;}
+    var li=line.match(/^\s*[-*]\s+(.*)/);
+    if(li){html+='<li>'+escapeHtml(li[1])+'</li>\n';continue;}
+    if(line.trim()===''){html+='<br>\n';continue;}
+    html+='<p>'+escapeHtml(line)+'</p>\n';
+  }
+  if(inCode)html+='</code></pre>\n';
+  return html;
+}
+function renderStateJson(state){return '<h4>&sect; state.json</h4><pre>'+escapeHtml(JSON.stringify(state,null,2))+'</pre>';}
+function renderArtifacts(arts){
+  var html='<h4>&sect; 아티팩트</h4>';
+  if(!arts||!arts.length)return html+'<p>-</p>';
+  html+='<ul>';
+  for(var i=0;i<arts.length;i++){
+    var a=arts[i];
+    if(a.exists)html+='<li><code>'+escapeHtml(a.path)+'</code><span class="size">'+escapeHtml((a.size/1024).toFixed(1))+'KB</span></li>';
+    else html+='<li class="disabled"><code>'+escapeHtml(a.path)+'</code></li>';
+  }
+  return html+'</ul>';
+}
+function renderLogs(logs){
+  var html='<h4>&sect; 로그</h4>';
+  if(!logs||!logs.length)return html+'<p>-</p>';
+  var sections='';
+  for(var i=0;i<logs.length;i++){
+    var log=logs[i];
+    if(!log.exists){
+      sections+='<div class="log-empty">'+escapeHtml(log.name)+' — 보고서 없음</div>';
+    }else{
+      var truncMsg=log.truncated?'<span class="log-trunc">마지막 200줄 / 전체 '+escapeHtml(String(log.lines_total))+'줄</span>':'';
+      sections+='<details class="log-entry" open><summary>'+escapeHtml(log.name)+truncMsg+'</summary>'
+        +'<pre class="log-tail">'+escapeHtml(log.tail)+'</pre></details>';
+    }
+  }
+  return html+'<section class="panel-logs">'+sections+'</section>';
+}
+function openTaskPanel(taskId){
+  var sp='all';try{var m=location.search.match(/[?&]subproject=([^&]+)/);if(m)sp=m[1];}catch(e){}
+  fetch('/api/task-detail?task='+encodeURIComponent(taskId)+'&subproject='+encodeURIComponent(sp))
+    .then(function(r){return r.json();}).then(function(data){
+      var t=document.getElementById('task-panel-title');if(t)t.textContent=data.title||taskId;
+      var b=document.getElementById('task-panel-body');
+      if(b)b.innerHTML=renderWbsSection(data.wbs_section_md||'')+renderStateJson(data.state||{})+renderArtifacts(data.artifacts||[])+renderLogs(data.logs||[]);
+      var p=document.getElementById('task-panel'),o=document.getElementById('task-panel-overlay');
+      if(p)p.classList.add('open');if(o)o.removeAttribute('hidden');
+    }).catch(function(e){console.error('task-panel error',e);});
+}
+function closeTaskPanel(){
+  var p=document.getElementById('task-panel'),o=document.getElementById('task-panel-overlay');
+  if(p)p.classList.remove('open');if(o)o.setAttribute('hidden','');
+}
+document.addEventListener('click',function(e){
+  var btn=e.target.closest?e.target.closest('.expand-btn'):null;
+  if(!btn&&e.target.classList&&e.target.classList.contains('expand-btn'))btn=e.target;
+  if(btn){openTaskPanel(btn.getAttribute('data-task-id')||'');return;}
+  if(e.target.id==='task-panel-close'){closeTaskPanel();return;}
+  if(e.target.id==='task-panel-overlay'){closeTaskPanel();return;}
+});
+document.addEventListener('keydown',function(e){
+  if(e.key==='Escape'){var p=document.getElementById('task-panel');if(p&&p.classList.contains('open'))closeTaskPanel();}
+});
+"""
+
+
+def _task_panel_js() -> str:
+    """JS for task slide panel. Document-level delegation survives auto-refresh."""
+    return _TASK_PANEL_JS
+
+
+def _task_panel_dom() -> str:
+    """Body-level DOM for task slide panel. Body-direct child for auto-refresh isolation."""
+    return (
+        '<div id="task-panel-overlay" hidden></div>\n'
+        '<aside id="task-panel" class="slide-panel" hidden aria-labelledby="task-panel-title">\n'
+        '  <header>\n'
+        '    <h3 id="task-panel-title"></h3>\n'
+        '    <button id="task-panel-close" aria-label="Close task panel">&#x2715;</button>\n'
+        '  </header>\n'
+        '  <div id="task-panel-body"></div>\n'
+        '</aside>'
+    )
+
+
 def _is_dataclass_instance(value: Any) -> bool:
     """True iff *value* is a dataclass **instance** (not the class object)."""
     return is_dataclass(value) and not isinstance(value, type)
@@ -5283,6 +6025,8 @@ class MonitorHandler(BaseHTTPRequestHandler):
             _handle_graph_api(self)
         elif _is_api_state_path(self.path):
             self._route_api_state()
+        elif _is_api_task_detail_path(self.path):
+            _handle_api_task_detail(self)
         elif _is_pane_api_path(path):
             pane_id = _extract_pane_id(path, _API_PANE_PATH_PREFIX)
             _handle_pane_api(self, pane_id)

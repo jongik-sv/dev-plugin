@@ -21,6 +21,13 @@
       "elapsed_seconds": 2203
     },
     {
+      "event": "test.ok",
+      "from": "[im]",
+      "to": "[ts]",
+      "at": "2026-04-23T06:20:21Z",
+      "elapsed_seconds": 268
+    },
+    {
       "event": "refactor.ok",
       "from": "[im]",
       "to": "[im]",
