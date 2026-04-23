@@ -1,9 +1,9 @@
 {
-  "status": "[ts]",
+  "status": "[xx]",
   "started_at": "2026-04-23T05:38:38Z",
   "last": {
-    "event": "test.ok",
-    "at": "2026-04-23T06:35:07Z"
+    "event": "refactor.ok",
+    "at": "2026-04-23T06:40:50Z"
   },
   "phase_history": [
     {
@@ -26,7 +26,16 @@
       "to": "[ts]",
       "at": "2026-04-23T06:35:07Z",
       "elapsed_seconds": 486
+    },
+    {
+      "event": "refactor.ok",
+      "from": "[ts]",
+      "to": "[xx]",
+      "at": "2026-04-23T06:40:50Z",
+      "elapsed_seconds": 343
     }
   ],
-  "updated": "2026-04-23T06:35:07Z"
+  "updated": "2026-04-23T06:40:50Z",
+  "completed_at": "2026-04-23T06:40:50Z",
+  "elapsed_seconds": 3732
 }
