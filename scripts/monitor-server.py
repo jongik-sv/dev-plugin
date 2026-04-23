@@ -1958,28 +1958,72 @@ body[data-filter="bypass"]  .trow:not([data-status="bypass"]) { display: none; }
 @keyframes fade-in{from{opacity:0; transform:translateY(-4px);}to{opacity:1; transform:translateY(0);}}
 @media (prefers-reduced-motion: reduce){ .arow{ animation: none; } }
 
-/* ---------- dep-node HTML 레이블 (TSK-04-02) ---------- */
+/* ---------- dep-node HTML 레이블 (TSK-04-03) ---------- */
 /* cytoscape-node-html-label 플러그인이 각 노드 위에 오버레이하는 2줄 카드 */
+/* 단서 1: border-left-color (상태별 스트립)
+   단서 2: .dep-node-id color override (상태별 ID 글자색)
+   단서 3: --_tint color-mix() 배경 틴트 (color-mix 미지원 시 transparent fallback → 단서 1/2만 유지) */
 .dep-node {
   display: flex; flex-direction: column; align-items: flex-start;
-  width: 176px; height: 50px; padding: 4px 8px; box-sizing: border-box;
-  border-radius: 4px; border-left: 3px solid transparent;
-  font-family: var(--mono); font-size: 10px; line-height: 1.4;
-  background: var(--bg-2); border-color: var(--line-2);
+  width: 180px; padding: 10px 12px 10px 16px; box-sizing: border-box;
+  border-radius: 8px;
+  border: 1px solid var(--ink-4);
+  border-left: 4px solid var(--ink-4);
+  background: var(--bg-2);
+  background-image: linear-gradient(90deg, var(--_tint, transparent), transparent 45%);
+  transition: transform .15s ease, box-shadow .15s ease;
   pointer-events: none;
 }
-.dep-node-id    { font-weight: 700; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
-.dep-node-title { font-weight: 400; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
-/* status strip: 좌측 테두리 색상 */
-.dep-node.status-done      { border-left-color: #22c55e; }
-.dep-node.status-running   { border-left-color: #eab308; }
-.dep-node.status-pending   { border-left-color: #94a3b8; }
-.dep-node.status-failed    { border-left-color: #ef4444; }
-.dep-node.status-bypassed  { border-left-color: #a855f7; }
-/* 크리티컬 노드: ID 글자색 강조 */
-.dep-node.critical .dep-node-id { color: #ef4444; }
-/* 병목 노드: 배경 틴트 (color-mix 미지원 구형 브라우저는 투명 fallback — AC 허용 범위) */
-.dep-node.bottleneck { background: color-mix(in srgb, #eab308 8%, var(--bg-2)); }
+.dep-node:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0,0,0,.45);
+}
+.dep-node-id {
+  font-family: var(--mono); font-size: 10px; font-weight: 700;
+  color: var(--ink-3);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
+}
+.dep-node-title {
+  font-family: var(--font-body); font-size: 12.5px; font-weight: 400;
+  color: var(--ink);
+  overflow: hidden; text-overflow: ellipsis; max-width: 100%;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+}
+/* --- 상태 5종 (단서 1: 스트립, 단서 2: ID 글자색, 단서 3: 배경 틴트) --- */
+.dep-node.status-done {
+  border-left-color: var(--done);
+  --_tint: color-mix(in srgb, var(--done) 10%, transparent);
+}
+.dep-node.status-done .dep-node-id { color: var(--done); }
+.dep-node.status-running {
+  border-left-color: var(--run);
+  --_tint: color-mix(in srgb, var(--run) 10%, transparent);
+}
+.dep-node.status-running .dep-node-id { color: var(--run); }
+.dep-node.status-pending {
+  border-left-color: var(--ink-3);
+  --_tint: color-mix(in srgb, var(--ink-3) 8%, transparent);
+}
+.dep-node.status-pending .dep-node-id { color: var(--ink-3); }
+.dep-node.status-failed {
+  border-left-color: var(--fail);
+  --_tint: color-mix(in srgb, var(--fail) 10%, transparent);
+}
+.dep-node.status-failed .dep-node-id { color: var(--fail); }
+.dep-node.status-bypassed {
+  border-left-color: var(--ink-4);
+  --_tint: color-mix(in srgb, var(--ink-4) 8%, transparent);
+}
+.dep-node.status-bypassed .dep-node-id { color: var(--ink-4); }
+/* --- 모디파이어: critical (붉은 글로우 + border) --- */
+.dep-node.critical {
+  border-color: var(--fail);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--fail) 35%, transparent);
+}
+/* --- 모디파이어: bottleneck (dashed border) --- */
+.dep-node.bottleneck {
+  border-style: dashed;
+}
 
 /* ---------- dep-graph summary chips (TSK-04-04) ---------- */
 /* AC-32: color values match #dep-graph-legend inline style hex 1:1 */
@@ -3200,7 +3244,7 @@ def _section_dep_graph(lang: str = "ko", subproject: str = "all") -> str:
         f'    {summary_html}\n'
         '  </div>\n'
         '  <div class="dep-graph-wrap">\n'
-        '    <div id="dep-graph-canvas" style="height:520px;"></div>\n'
+        '    <div id="dep-graph-canvas" style="height:640px;"></div>\n'
         f'    {legend_html}\n'
         '  </div>\n'
         f'{scripts_html}\n'
