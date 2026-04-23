@@ -2220,5 +2220,66 @@ class RedesignDonutViewBoxTests(unittest.TestCase):
         self.assertIn('viewBox="0 0 36 36"', svg)
 
 
+class TskSpinnerTests(unittest.TestCase):
+    """TSK-02-02: Task running 스피너 애니메이션 — _render_task_row_v2 단위 테스트."""
+
+    def test_task_row_has_spinner_when_running(self):
+        """running_ids 에 포함된 task 의 trow HTML 에 data-running="true"."""
+        task = _make_task(tsk_id="TSK-01-01", status="[im]")
+        html = monitor_server._render_task_row_v2(task, {"TSK-01-01"}, set())
+        self.assertIn('data-running="true"', html)
+
+    def test_task_row_spinner_hidden_when_not_running(self):
+        """running_ids 에 미포함 시 data-running="false"."""
+        task = _make_task(tsk_id="TSK-01-01", status="[im]")
+        html = monitor_server._render_task_row_v2(task, set(), set())
+        self.assertIn('data-running="false"', html)
+
+    def test_task_row_spinner_span_always_present(self):
+        """모든 trow 에 <span class="spinner"> 가 존재해야 한다 (CSS 로 노출 제어)."""
+        task = _make_task(tsk_id="TSK-01-01", status="[dd]")
+        html = monitor_server._render_task_row_v2(task, set(), set())
+        self.assertIn('<span class="spinner"', html)
+
+    def test_task_row_spinner_span_present_when_running(self):
+        """running 상태 trow 에도 <span class="spinner"> 가 존재한다."""
+        task = _make_task(tsk_id="TSK-01-01", status="[im]")
+        html = monitor_server._render_task_row_v2(task, {"TSK-01-01"}, set())
+        self.assertIn('<span class="spinner"', html)
+
+    def test_task_row_spinner_has_aria_hidden(self):
+        """spinner span 에 aria-hidden="true" 가 있어야 한다."""
+        task = _make_task(tsk_id="TSK-01-01", status="[dd]")
+        html = monitor_server._render_task_row_v2(task, set(), set())
+        self.assertIn('aria-hidden="true"', html)
+
+    def test_task_row_data_running_false_when_empty_running_ids(self):
+        """running_ids=set() 일 때 모든 trow 가 data-running="false"."""
+        task = _make_task(tsk_id="TSK-01-01", status="[dd]")
+        html = monitor_server._render_task_row_v2(task, set(), set())
+        self.assertIn('data-running="false"', html)
+        self.assertNotIn('data-running="true"', html)
+
+    def test_task_row_data_running_independent_of_data_status(self):
+        """data-running 과 data-status 는 독립 속성이다 (bypassed + running 가능)."""
+        task = _make_task(tsk_id="TSK-01-01", status="[im]", bypassed=True)
+        html = monitor_server._render_task_row_v2(task, {"TSK-01-01"}, set())
+        # bypassed 이므로 data-status="bypass" 유지
+        self.assertIn('data-status="bypass"', html)
+        # running_ids 에 포함되어 있으므로 data-running="true"
+        self.assertIn('data-running="true"', html)
+
+    def test_task_row_data_status_not_broken_by_spinner(self):
+        """data-running 추가 후 기존 data-status 회귀 없음."""
+        task = _make_task(tsk_id="TSK-01-01", status="[xx]")
+        html = monitor_server._render_task_row_v2(task, set(), set())
+        self.assertIn('data-status="done"', html)
+
+    def test_dashboard_css_has_trow_running_spinner_rule(self):
+        """.trow[data-running="true"] .spinner { display: inline-block } 규칙 존재."""
+        css = monitor_server.DASHBOARD_CSS
+        self.assertIn('.trow[data-running="true"] .spinner', css)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
