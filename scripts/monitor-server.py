@@ -680,6 +680,23 @@ def _make_workitem_from_state(
     )
 
 
+def _make_workitem_placeholder(
+    item_id: str, kind: str,
+    title: Optional[str], wp_id: Optional[str], depends: List[str],
+) -> WorkItem:
+    """wbs.md 에 선언됐지만 state.json 이 아직 없는 Task용 in-memory placeholder."""
+    # path=None: UI는 path 필드를 렌더링하지 않고 JSON에만 노출 — "파일 없음" 신호.
+    return WorkItem(
+        id=item_id, kind=kind, title=title, path=None,
+        status="[ ]", started_at=None, completed_at=None, elapsed_seconds=None,
+        bypassed=False, bypassed_reason=None,
+        last_event=None, last_event_at=None,
+        phase_history_tail=[],
+        wp_id=wp_id, depends=list(depends),
+        error=None,
+    )
+
+
 def _resolve_abs_path(path: Path) -> str:
     """Return ``str(path.resolve())``, falling back to ``str(path)`` on OSError.
 
@@ -732,14 +749,22 @@ def scan_tasks(docs_dir: Path) -> List[WorkItem]:
     - tasks 디렉터리가 없으면 ``[]`` 반환 (예외 없음).
     - 파싱 실패한 state.json 은 ``error`` 가 채워진 ``WorkItem`` 으로 반환.
     - wbs.md 가 있으면 title/wp_id/depends 를 함께 채운다 (1회 파싱).
+    - wbs.md 에 선언됐지만 state.json 이 아직 없는 Task 는 pending placeholder
+      WorkItem 으로 추가된다 (디스크 쓰기 없음, wbs.md 문서 순서 유지).
     """
     docs_dir = Path(docs_dir)
-    title_map = _load_wbs_title_map(docs_dir) if (docs_dir / "tasks").is_dir() else {}
+    title_map = _load_wbs_title_map(docs_dir)
 
     def _task_lookup(item_id, _state_path):
         return title_map.get(item_id, (None, None, []))
 
-    return _scan_dir(docs_dir, "tasks", "wbs", _task_lookup)
+    items = _scan_dir(docs_dir, "tasks", "wbs", _task_lookup)
+    seen = {it.id for it in items}
+    for tsk_id, (title, wp_id, depends) in title_map.items():
+        if tsk_id in seen:
+            continue
+        items.append(_make_workitem_placeholder(tsk_id, "wbs", title, wp_id, depends))
+    return items
 
 
 def scan_features(docs_dir: Path) -> List[WorkItem]:
