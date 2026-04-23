@@ -69,31 +69,44 @@ def parse_conflicts(repo_root: pathlib.Path) -> list[dict]:
     Parse unmerged (conflicted) files and their hunk lines from git diff output.
     Returns a list of {"file": str, "hunks": [str]}.
 
-    Uses a single `git diff --diff-filter=U` call: file names are extracted from
-    the "diff --git a/... b/..." header lines, so a separate --name-only query
-    is not needed.
+    Strategy: use `--name-only --diff-filter=U` to enumerate conflicted files,
+    then `git diff --diff-filter=U` (combined diff, "diff --cc" headers) to get
+    hunk content.  The two-pass approach is necessary because combined diffs use
+    "diff --cc <file>" headers (not "diff --git a/... b/..."), so we cannot
+    reliably extract file names from a single combined-diff call.
     """
+    # Pass 1: enumerate conflicted file names
+    name_result = _run_git(
+        ["diff", "--name-only", "--diff-filter=U"],
+        cwd=repo_root,
+    )
+    conflicted_files = [f for f in name_result.stdout.splitlines() if f.strip()]
+
+    if not conflicted_files:
+        return []
+
+    # Pass 2: get full combined diff for hunk content
     diff_result = _run_git(["diff", "--diff-filter=U"], cwd=repo_root)
 
-    conflicts: list[dict] = []
+    # Build a lookup: file → hunk lines, keyed from "diff --cc <file>" headers
+    hunk_map: dict[str, list[str]] = {}
     current_file: str | None = None
     current_hunks: list[str] = []
 
     for line in diff_result.stdout.splitlines():
-        if line.startswith("diff --git "):
+        # Combined diff header: "diff --cc <file>"  (no "a/" / "b/" prefix)
+        if line.startswith("diff --cc "):
             if current_file is not None:
-                conflicts.append({"file": current_file, "hunks": current_hunks})
-            # Extract file name from "diff --git a/path b/path"
-            parts = line.split(" b/", 1)
-            current_file = parts[1] if len(parts) == 2 else line
+                hunk_map[current_file] = current_hunks
+            current_file = line[len("diff --cc "):]
             current_hunks = []
         elif current_file is not None:
             current_hunks.append(line)
 
     if current_file is not None:
-        conflicts.append({"file": current_file, "hunks": current_hunks})
+        hunk_map[current_file] = current_hunks
 
-    return conflicts
+    return [{"file": f, "hunks": hunk_map.get(f, [])} for f in conflicted_files]
 
 
 def _is_up_to_date(merge_proc: subprocess.CompletedProcess) -> bool:

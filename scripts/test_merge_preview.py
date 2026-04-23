@@ -5,15 +5,14 @@ TSK-06-01: scripts/merge-preview.py 단위 테스트
 - test_merge_preview_dirty_worktree_exits_2
 - test_dev_build_skill_contains_merge_preview_step
 """
+from __future__ import annotations
+
 import json
-import os
 import pathlib
 import subprocess
 import sys
 import tempfile
-import textwrap
 import unittest
-from typing import List, Optional
 
 
 REPO_ROOT = pathlib.Path(__file__).parent.parent
@@ -37,24 +36,11 @@ def _git(args: list[str], cwd: pathlib.Path, check: bool = True) -> subprocess.C
     )
 
 
-def _make_clean_repo(tmp: pathlib.Path) -> pathlib.Path:
-    """Create a minimal git repo with one commit."""
-    repo = tmp / "repo"
-    repo.mkdir()
-    _git(["init", "-b", "main"], cwd=repo)
-    _git(["config", "user.email", "test@example.com"], cwd=repo)
-    _git(["config", "user.name", "Test"], cwd=repo)
-    (repo / "file.txt").write_text("line1\n")
-    _git(["add", "."], cwd=repo)
-    _git(["commit", "-m", "init"], cwd=repo)
-    return repo
-
-
-def _make_conflict_setup(tmp: pathlib.Path):
+def _make_conflict_setup(tmp: pathlib.Path) -> pathlib.Path:
     """
     Create two repos (origin + local) where merging origin/main into local/main
     would produce a conflict on file.txt.
-    Returns (local_repo_path).
+    Returns the local repo path.
     """
     # origin
     origin = tmp / "origin"
@@ -87,7 +73,7 @@ def _make_conflict_setup(tmp: pathlib.Path):
 
 def _run_script(
     repo: pathlib.Path,
-    extra_args: Optional[List[str]] = None,
+    extra_args: list[str] | None = None,
 ) -> subprocess.CompletedProcess:
     cmd = [sys.executable, str(SCRIPT)] + (extra_args or [])
     return subprocess.run(
