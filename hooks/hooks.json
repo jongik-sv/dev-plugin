@@ -1,0 +1,24 @@
+{
+  "PreToolUse": [
+    {
+      "matcher": "Agent|Task",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/agent-hook-signal.py\" pre"
+        }
+      ]
+    }
+  ],
+  "PostToolUse": [
+    {
+      "matcher": "Agent|Task",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/agent-hook-signal.py\" post"
+        }
+      ]
+    }
+  ]
+}
