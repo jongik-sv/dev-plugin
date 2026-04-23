@@ -870,7 +870,7 @@ monitor-server, monitor-launcher
 - category: infrastructure
 - domain: infra
 - model: opus
-- status: [dd]
+- status: [xx]
 - priority: high
 - assignee: -
 - schedule: 2026-05-01 ~ 2026-05-02
