@@ -15,6 +15,21 @@
 
 ## TDD 순서 (반드시 준수)
 
+### Step -1 — Merge Preview (충돌 사전 확인)
+
+**`[im]` 진입 전 반드시 실행한다.** `scripts/merge-preview.py`로 현재 브랜치와 `origin/main` 간 병합 충돌을 시뮬레이션하고, 충돌이 감지되면 즉시 `build.fail`로 보고한다.
+
+```bash
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/merge-preview.py --remote origin --target main
+```
+
+- exit 0 (clean=true): 충돌 없음 — 다음 단계로 진행한다.
+- exit 1 (clean=false): 충돌 감지 — JSON의 `conflicts` 배열에 충돌 파일 목록을 포함하여 `build.fail`로 보고한다. 충돌을 먼저 해소한 뒤 `/dev-build`를 재실행하라.
+- exit 2: uncommitted 변경 있음 — stash 또는 commit 후 재실행하라.
+- 스크립트 미존재(`No such file`): 이 단계를 건너뛰고 다음 단계를 진행한다 (선택적 가드레일).
+
+> 이 단계는 zero side-effect 시뮬레이션(`git merge --no-commit --no-ff` + 반드시 `--abort`)이므로 실제 브랜치 상태를 변경하지 않는다.
+
 ### Step 0 — 라우터/메뉴 선행 수정 (UI 도메인 진입점 구현)
 
 **진입 조건**: `{DOMAIN}`이 `fullstack` 또는 `frontend`인 경우 실행한다. 그 외 도메인(`backend`, `default`, `docs`, `test` 등)은 이 단계를 건너뛴다.

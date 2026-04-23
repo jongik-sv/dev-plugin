@@ -789,7 +789,7 @@ monitor-server, monitor-launcher
 - category: infrastructure
 - domain: fullstack
 - model: sonnet
-- status: [dd]
+- status: [im]
 - priority: high
 - assignee: -
 - schedule: 2026-04-28 ~ 2026-04-29
@@ -831,7 +831,7 @@ monitor-server, monitor-launcher
 - category: infrastructure
 - domain: infra
 - model: sonnet
-- status: [dd]
+- status: [im]
 - priority: high
 - assignee: -
 - schedule: 2026-04-30 ~ 2026-04-30
@@ -921,7 +921,7 @@ monitor-server, monitor-launcher
 - category: documentation
 - domain: fullstack
 - model: sonnet
-- status: [ ]
+- status: [dd]
 - priority: medium
 - assignee: -
 - schedule: 2026-05-02 ~ 2026-05-02
