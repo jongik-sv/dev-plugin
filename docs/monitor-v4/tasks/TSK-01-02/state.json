@@ -1,9 +1,9 @@
 {
-  "status": "[dd]",
+  "status": "[ts]",
   "started_at": "2026-04-23T05:39:10Z",
   "last": {
-    "event": "design.ok",
-    "at": "2026-04-23T05:39:10Z"
+    "event": "test.ok",
+    "at": "2026-04-23T06:20:21Z"
   },
   "phase_history": [
     {
@@ -12,7 +12,21 @@
       "to": "[dd]",
       "at": "2026-04-23T05:39:10Z",
       "elapsed_seconds": 0
+    },
+    {
+      "event": "build.ok",
+      "from": "[dd]",
+      "to": "[im]",
+      "at": "2026-04-23T06:15:53Z",
+      "elapsed_seconds": 2203
+    },
+    {
+      "event": "test.ok",
+      "from": "[im]",
+      "to": "[ts]",
+      "at": "2026-04-23T06:20:21Z",
+      "elapsed_seconds": 268
     }
   ],
-  "updated": "2026-04-23T05:39:10Z"
+  "updated": "2026-04-23T06:20:21Z"
 }

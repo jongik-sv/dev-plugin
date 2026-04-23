@@ -251,7 +251,7 @@ class ErrorBadgeTests(unittest.TestCase):
         self.assertIn('<div class="badge" title=', html)
 
     def test_error_task_has_badge_warn_class(self) -> None:
-        """v3: error Task 행의 badge div 안에 'error' 텍스트 존재."""
+        """TSK-02-01: error 필드 있는 Task 배지는 'Failed' 텍스트로 표시 (data-phase='failed')."""
         model = _normal_model()
         bad = _make_task(tsk_id="TSK-WARN", title=None, status=None,
                          last_event=None, last_event_at=None,
@@ -259,8 +259,9 @@ class ErrorBadgeTests(unittest.TestCase):
                          error="json parse error")
         model["wbs_tasks"] = [bad]
         html = render_dashboard(model)
-        # v3: error tasks render <div class="badge" title="...">error</div>
-        self.assertIn(">error<", html)
+        # TSK-02-01: error tasks now render "Failed" badge (was "error" before)
+        self.assertIn(">Failed<", html)
+        self.assertIn('data-phase="failed"', html)
 
     def test_normal_task_has_no_warn_badge(self) -> None:
         """v3: 정상 Task 행에는 title 속성 없는 badge, 'error' 텍스트 미출현.
@@ -2218,6 +2219,308 @@ class RedesignDonutViewBoxTests(unittest.TestCase):
         counts = {"done": 0, "running": 0, "failed": 0, "bypass": 0, "pending": 0}
         svg = monitor_server._wp_donut_svg(counts)
         self.assertIn('viewBox="0 0 36 36"', svg)
+
+
+# ---------------------------------------------------------------------------
+# TSK-02-01: Task DDTR 단계 배지 (Design/Build/Test/Done)
+# ---------------------------------------------------------------------------
+
+class PhaseLabelHelperTests(unittest.TestCase):
+    """_phase_label(status_code, lang, *, failed, bypassed) 헬퍼 단위 테스트."""
+
+    def test_task_badge_dd_renders_as_design(self):
+        """[dd] → 배지 텍스트 'Design'."""
+        result = monitor_server._phase_label("[dd]", "ko", failed=False, bypassed=False)
+        self.assertEqual(result, "Design")
+
+    def test_task_badge_phase_mapping(self):
+        """4개 DDTR 코드 전부: [dd]→Design, [im]→Build, [ts]→Test, [xx]→Done."""
+        cases = [
+            ("[dd]", "Design"),
+            ("[im]", "Build"),
+            ("[ts]", "Test"),
+            ("[xx]", "Done"),
+        ]
+        for status, expected in cases:
+            with self.subTest(status=status):
+                result = monitor_server._phase_label(status, "ko", failed=False, bypassed=False)
+                self.assertEqual(result, expected)
+
+    def test_task_badge_failed_bypass_pending(self):
+        """failed=True → 'Failed', bypassed=True → 'Bypass', 미상 → 'Pending'."""
+        # failed
+        self.assertEqual(
+            monitor_server._phase_label("[im]", "ko", failed=True, bypassed=False),
+            "Failed",
+        )
+        # bypassed (bypassed 우선순위가 더 높음)
+        self.assertEqual(
+            monitor_server._phase_label("[im]", "ko", failed=True, bypassed=True),
+            "Bypass",
+        )
+        # pending (unknown status)
+        self.assertEqual(
+            monitor_server._phase_label("", "ko", failed=False, bypassed=False),
+            "Pending",
+        )
+        self.assertEqual(
+            monitor_server._phase_label(None, "ko", failed=False, bypassed=False),
+            "Pending",
+        )
+        self.assertEqual(
+            monitor_server._phase_label("[??]", "ko", failed=False, bypassed=False),
+            "Pending",
+        )
+
+    def test_phase_label_en_lang(self):
+        """en lang도 동일 레이블 반환 (ko/en 공통)."""
+        self.assertEqual(
+            monitor_server._phase_label("[dd]", "en", failed=False, bypassed=False),
+            "Design",
+        )
+        self.assertEqual(
+            monitor_server._phase_label("[xx]", "en", failed=False, bypassed=False),
+            "Done",
+        )
+
+    def test_phase_label_unsupported_lang_fallback(self):
+        """미지원 lang은 ko fallback — 레이블이 빈 문자열이 아님."""
+        result = monitor_server._phase_label("[dd]", "fr", failed=False, bypassed=False)
+        self.assertEqual(result, "Design")
+
+
+class PhaseDataAttrHelperTests(unittest.TestCase):
+    """_phase_data_attr(status_code, *, failed, bypassed) 헬퍼 단위 테스트."""
+
+    def test_phase_data_attr_dd(self):
+        self.assertEqual(
+            monitor_server._phase_data_attr("[dd]", failed=False, bypassed=False),
+            "dd",
+        )
+
+    def test_phase_data_attr_all_codes(self):
+        cases = [("[dd]", "dd"), ("[im]", "im"), ("[ts]", "ts"), ("[xx]", "xx")]
+        for status, expected in cases:
+            with self.subTest(status=status):
+                result = monitor_server._phase_data_attr(status, failed=False, bypassed=False)
+                self.assertEqual(result, expected)
+
+    def test_phase_data_attr_failed(self):
+        self.assertEqual(
+            monitor_server._phase_data_attr("[im]", failed=True, bypassed=False),
+            "failed",
+        )
+
+    def test_phase_data_attr_bypass(self):
+        self.assertEqual(
+            monitor_server._phase_data_attr("[im]", failed=False, bypassed=True),
+            "bypass",
+        )
+
+    def test_phase_data_attr_pending(self):
+        self.assertEqual(
+            monitor_server._phase_data_attr(None, failed=False, bypassed=False),
+            "pending",
+        )
+        self.assertEqual(
+            monitor_server._phase_data_attr("", failed=False, bypassed=False),
+            "pending",
+        )
+        self.assertEqual(
+            monitor_server._phase_data_attr("[??]", failed=False, bypassed=False),
+            "pending",
+        )
+
+    def test_phase_data_attr_bypass_takes_priority_over_failed(self):
+        """bypassed=True는 failed보다 우선순위 높음."""
+        self.assertEqual(
+            monitor_server._phase_data_attr("[im]", failed=True, bypassed=True),
+            "bypass",
+        )
+
+
+class TaskRowDataPhaseAttributeTests(unittest.TestCase):
+    """_render_task_row_v2() data-phase 속성 및 배지 텍스트 통합 테스트."""
+
+    def test_task_row_has_data_phase_attribute(self):
+        """_render_task_row_v2 결과에 data-phase 속성이 존재한다."""
+        task = _make_task(tsk_id="TSK-02-01", status="[dd]")
+        html = monitor_server._render_task_row_v2(task, set(), set())
+        self.assertIn("data-phase=", html)
+
+    def test_task_row_dd_data_phase(self):
+        """[dd] Task → data-phase='dd'."""
+        task = _make_task(tsk_id="TSK-02-01", status="[dd]")
+        html = monitor_server._render_task_row_v2(task, set(), set())
+        self.assertIn('data-phase="dd"', html)
+
+    def test_task_row_im_data_phase(self):
+        """[im] Task (not in running/failed) → data-phase='im'."""
+        task = _make_task(tsk_id="TSK-02-01", status="[im]")
+        html = monitor_server._render_task_row_v2(task, set(), set())
+        self.assertIn('data-phase="im"', html)
+
+    def test_task_row_ts_data_phase(self):
+        task = _make_task(tsk_id="TSK-02-01", status="[ts]")
+        html = monitor_server._render_task_row_v2(task, set(), set())
+        self.assertIn('data-phase="ts"', html)
+
+    def test_task_row_xx_data_phase(self):
+        task = _make_task(tsk_id="TSK-02-01", status="[xx]")
+        html = monitor_server._render_task_row_v2(task, set(), set())
+        self.assertIn('data-phase="xx"', html)
+
+    def test_task_row_failed_data_phase(self):
+        """failed_ids에 포함된 Task → data-phase='failed'."""
+        task = _make_task(tsk_id="TSK-02-01", status="[im]")
+        html = monitor_server._render_task_row_v2(task, set(), {"TSK-02-01"})
+        self.assertIn('data-phase="failed"', html)
+
+    def test_task_row_bypass_data_phase(self):
+        """bypassed=True Task → data-phase='bypass'."""
+        task = _make_task(tsk_id="TSK-02-01", status="[im]", bypassed=True)
+        html = monitor_server._render_task_row_v2(task, set(), set())
+        self.assertIn('data-phase="bypass"', html)
+
+    def test_task_row_pending_data_phase(self):
+        """status=None Task → data-phase='pending'."""
+        task = _make_task(tsk_id="TSK-02-01", status=None)
+        html = monitor_server._render_task_row_v2(task, set(), set())
+        self.assertIn('data-phase="pending"', html)
+
+    def test_task_row_dd_badge_text_design(self):
+        """[dd] Task → 배지 텍스트 'Design'."""
+        task = _make_task(tsk_id="TSK-02-01", status="[dd]")
+        html = monitor_server._render_task_row_v2(task, set(), set())
+        self.assertIn(">Design<", html)
+
+    def test_task_row_im_badge_text_build(self):
+        task = _make_task(tsk_id="TSK-02-01", status="[im]")
+        html = monitor_server._render_task_row_v2(task, set(), set())
+        self.assertIn(">Build<", html)
+
+    def test_task_row_ts_badge_text_test(self):
+        task = _make_task(tsk_id="TSK-02-01", status="[ts]")
+        html = monitor_server._render_task_row_v2(task, set(), set())
+        self.assertIn(">Test<", html)
+
+    def test_task_row_xx_badge_text_done(self):
+        task = _make_task(tsk_id="TSK-02-01", status="[xx]")
+        html = monitor_server._render_task_row_v2(task, set(), set())
+        self.assertIn(">Done<", html)
+
+    def test_task_row_failed_badge_text(self):
+        task = _make_task(tsk_id="TSK-02-01", status="[im]")
+        html = monitor_server._render_task_row_v2(task, set(), {"TSK-02-01"})
+        self.assertIn(">Failed<", html)
+
+    def test_task_row_bypass_badge_text(self):
+        task = _make_task(tsk_id="TSK-02-01", status="[im]", bypassed=True)
+        html = monitor_server._render_task_row_v2(task, set(), set())
+        self.assertIn(">Bypass<", html)
+
+    def test_task_row_error_field_is_failed(self):
+        """error 필드 있는 Task → 배지 'Failed', data-phase='failed'."""
+        task = _make_task(tsk_id="TSK-02-01", status="[im]", error="some error")
+        html = monitor_server._render_task_row_v2(task, set(), set())
+        self.assertIn(">Failed<", html)
+        self.assertIn('data-phase="failed"', html)
+
+    def test_task_row_data_status_unchanged(self):
+        """data-status 속성은 기존 signal 기반 로직 그대로 유지된다."""
+        task = _make_task(tsk_id="TSK-02-01", status="[xx]")
+        html = monitor_server._render_task_row_v2(task, set(), set())
+        self.assertIn('data-status="done"', html)
+
+    def test_spinner_placeholder_in_badge(self):
+        """배지 내부에 spinner span 자리가 존재한다 (TSK-02-02 준비)."""
+        task = _make_task(tsk_id="TSK-02-01", status="[dd]")
+        html = monitor_server._render_task_row_v2(task, set(), set())
+        self.assertIn('class="spinner"', html)
+
+
+class I18NPhaseKeysTests(unittest.TestCase):
+    """_I18N 테이블에 7개 phase 키가 존재하는지 검증."""
+
+    _REQUIRED_KEYS = [
+        "phase_design", "phase_build", "phase_test", "phase_done",
+        "phase_failed", "phase_bypass", "phase_pending",
+    ]
+
+    def test_i18n_ko_has_all_phase_keys(self):
+        for key in self._REQUIRED_KEYS:
+            with self.subTest(key=key):
+                val = monitor_server._I18N.get("ko", {}).get(key)
+                self.assertIsNotNone(val, f"_I18N['ko'] missing key: {key}")
+                self.assertNotEqual(val, "", f"_I18N['ko']['{key}'] must not be empty")
+
+    def test_i18n_en_has_all_phase_keys(self):
+        for key in self._REQUIRED_KEYS:
+            with self.subTest(key=key):
+                val = monitor_server._I18N.get("en", {}).get(key)
+                self.assertIsNotNone(val, f"_I18N['en'] missing key: {key}")
+                self.assertNotEqual(val, "", f"_I18N['en']['{key}'] must not be empty")
+
+
+class TskSpinnerTests(unittest.TestCase):
+    """TSK-02-02: Task running 스피너 애니메이션 — _render_task_row_v2 단위 테스트."""
+
+    def test_task_row_has_spinner_when_running(self):
+        """running_ids 에 포함된 task 의 trow HTML 에 data-running="true"."""
+        task = _make_task(tsk_id="TSK-01-01", status="[im]")
+        html = monitor_server._render_task_row_v2(task, {"TSK-01-01"}, set())
+        self.assertIn('data-running="true"', html)
+
+    def test_task_row_spinner_hidden_when_not_running(self):
+        """running_ids 에 미포함 시 data-running="false"."""
+        task = _make_task(tsk_id="TSK-01-01", status="[im]")
+        html = monitor_server._render_task_row_v2(task, set(), set())
+        self.assertIn('data-running="false"', html)
+
+    def test_task_row_spinner_span_always_present(self):
+        """모든 trow 에 <span class="spinner"> 가 존재해야 한다 (CSS 로 노출 제어)."""
+        task = _make_task(tsk_id="TSK-01-01", status="[dd]")
+        html = monitor_server._render_task_row_v2(task, set(), set())
+        self.assertIn('<span class="spinner"', html)
+
+    def test_task_row_spinner_span_present_when_running(self):
+        """running 상태 trow 에도 <span class="spinner"> 가 존재한다."""
+        task = _make_task(tsk_id="TSK-01-01", status="[im]")
+        html = monitor_server._render_task_row_v2(task, {"TSK-01-01"}, set())
+        self.assertIn('<span class="spinner"', html)
+
+    def test_task_row_spinner_has_aria_hidden(self):
+        """spinner span 에 aria-hidden="true" 가 있어야 한다."""
+        task = _make_task(tsk_id="TSK-01-01", status="[dd]")
+        html = monitor_server._render_task_row_v2(task, set(), set())
+        self.assertIn('aria-hidden="true"', html)
+
+    def test_task_row_data_running_false_when_empty_running_ids(self):
+        """running_ids=set() 일 때 모든 trow 가 data-running="false"."""
+        task = _make_task(tsk_id="TSK-01-01", status="[dd]")
+        html = monitor_server._render_task_row_v2(task, set(), set())
+        self.assertIn('data-running="false"', html)
+        self.assertNotIn('data-running="true"', html)
+
+    def test_task_row_data_running_independent_of_data_status(self):
+        """data-running 과 data-status 는 독립 속성이다 (bypassed + running 가능)."""
+        task = _make_task(tsk_id="TSK-01-01", status="[im]", bypassed=True)
+        html = monitor_server._render_task_row_v2(task, {"TSK-01-01"}, set())
+        # bypassed 이므로 data-status="bypass" 유지
+        self.assertIn('data-status="bypass"', html)
+        # running_ids 에 포함되어 있으므로 data-running="true"
+        self.assertIn('data-running="true"', html)
+
+    def test_task_row_data_status_not_broken_by_spinner(self):
+        """data-running 추가 후 기존 data-status 회귀 없음."""
+        task = _make_task(tsk_id="TSK-01-01", status="[xx]")
+        html = monitor_server._render_task_row_v2(task, set(), set())
+        self.assertIn('data-status="done"', html)
+
+    def test_dashboard_css_has_trow_running_spinner_rule(self):
+        """.trow[data-running="true"] .spinner { display: inline-block } 규칙 존재."""
+        css = monitor_server.DASHBOARD_CSS
+        self.assertIn('.trow[data-running="true"] .spinner', css)
 
 
 if __name__ == "__main__":
