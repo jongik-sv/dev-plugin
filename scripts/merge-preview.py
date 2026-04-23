@@ -27,10 +27,9 @@ import json
 import pathlib
 import subprocess
 import sys
-from typing import Dict, List, Tuple
 
 
-def _run_git(args: List[str], cwd: pathlib.Path, check: bool = True) -> subprocess.CompletedProcess:
+def _run_git(args: list[str], cwd: pathlib.Path, check: bool = False) -> subprocess.CompletedProcess:
     """Run a git sub-command and return the completed process."""
     return subprocess.run(
         ["git"] + args,
@@ -43,7 +42,7 @@ def _run_git(args: List[str], cwd: pathlib.Path, check: bool = True) -> subproce
 
 def check_worktree_clean(repo_root: pathlib.Path) -> None:
     """Exit 2 with a stderr warning if the worktree has uncommitted changes."""
-    result = _run_git(["status", "--porcelain"], cwd=repo_root, check=False)
+    result = _run_git(["status", "--porcelain"], cwd=repo_root)
     if result.returncode != 0 or result.stdout.strip():
         print(
             "ERROR: worktree has uncommitted changes — commit or stash before running merge-preview.",
@@ -55,43 +54,30 @@ def check_worktree_clean(repo_root: pathlib.Path) -> None:
 def get_base_sha(remote: str, target: str, repo_root: pathlib.Path) -> str:
     """Return the merge-base SHA between HEAD and remote/target."""
     remote_ref = f"{remote}/{target}"
-    result = _run_git(["merge-base", "HEAD", remote_ref], cwd=repo_root, check=False)
+    result = _run_git(["merge-base", "HEAD", remote_ref], cwd=repo_root)
     if result.returncode != 0:
         # Fallback: try FETCH_HEAD
-        result2 = _run_git(["merge-base", "HEAD", "FETCH_HEAD"], cwd=repo_root, check=False)
+        result2 = _run_git(["merge-base", "HEAD", "FETCH_HEAD"], cwd=repo_root)
         if result2.returncode == 0:
             return result2.stdout.strip()
         return ""
     return result.stdout.strip()
 
 
-def parse_conflicts(repo_root: pathlib.Path) -> List[Dict]:
+def parse_conflicts(repo_root: pathlib.Path) -> list[dict]:
     """
     Parse unmerged (conflicted) files and their hunk lines from git diff output.
     Returns a list of {"file": str, "hunks": [str]}.
+
+    Uses a single `git diff --diff-filter=U` call: file names are extracted from
+    the "diff --git a/... b/..." header lines, so a separate --name-only query
+    is not needed.
     """
-    # Get list of conflicted files
-    unmerged = _run_git(
-        ["diff", "--name-only", "--diff-filter=U"],
-        cwd=repo_root,
-        check=False,
-    )
-    conflicted_files = [f for f in unmerged.stdout.splitlines() if f.strip()]
+    diff_result = _run_git(["diff", "--diff-filter=U"], cwd=repo_root)
 
-    if not conflicted_files:
-        return []
-
-    # Get full diff for unmerged files to extract hunk lines
-    diff_result = _run_git(
-        ["diff", "--diff-filter=U"],
-        cwd=repo_root,
-        check=False,
-    )
-
-    # Parse diff output per file
-    conflicts = []
-    current_file = None
-    current_hunks: List[str] = []
+    conflicts: list[dict] = []
+    current_file: str | None = None
+    current_hunks: list[str] = []
 
     for line in diff_result.stdout.splitlines():
         if line.startswith("diff --git "):
@@ -107,25 +93,25 @@ def parse_conflicts(repo_root: pathlib.Path) -> List[Dict]:
     if current_file is not None:
         conflicts.append({"file": current_file, "hunks": current_hunks})
 
-    # For files that appeared in --name-only but not in diff (edge case), add them
-    listed = {c["file"] for c in conflicts}
-    for f in conflicted_files:
-        if f not in listed:
-            conflicts.append({"file": f, "hunks": []})
-
     return conflicts
+
+
+def _is_up_to_date(merge_proc: subprocess.CompletedProcess) -> bool:
+    """Return True if git merge reported that the branch is already up to date."""
+    combined = (merge_proc.stdout + merge_proc.stderr).lower()
+    return "already up to date" in combined
 
 
 def simulate_merge(
     remote: str, target: str, repo_root: pathlib.Path
-) -> Tuple[bool, List[Dict]]:
+) -> tuple[bool, list[dict]]:
     """
     Simulate `git merge --no-commit --no-ff {remote}/{target}`.
     Always aborts via try/finally to ensure zero side-effects.
     Returns (clean: bool, conflicts: list[dict]).
     """
     # Fetch remote target first
-    fetch = _run_git(["fetch", remote, target], cwd=repo_root, check=False)
+    fetch = _run_git(["fetch", remote, target], cwd=repo_root)
     if fetch.returncode != 0:
         print(
             f"ERROR: git fetch {remote} {target} failed:\n{fetch.stderr}",
@@ -137,39 +123,26 @@ def simulate_merge(
     merge_proc = _run_git(
         ["merge", "--no-commit", "--no-ff", remote_ref],
         cwd=repo_root,
-        check=False,
     )
 
     merge_head = repo_root / ".git" / "MERGE_HEAD"
     try:
-        # Determine outcome
-        # A clean fast-forward-able merge exits 0 and creates MERGE_HEAD briefly,
-        # but --no-commit keeps it staged.  A conflict also exits non-zero.
-        if merge_proc.returncode == 0:
-            # Check if there are any unmerged files (shouldn't be, but be defensive)
-            unmerged = _run_git(
-                ["diff", "--name-only", "--diff-filter=U"],
-                cwd=repo_root,
-                check=False,
-            )
-            if unmerged.stdout.strip():
-                conflicts = parse_conflicts(repo_root)
-                return False, conflicts
+        if _is_up_to_date(merge_proc):
             return True, []
-        else:
-            # Non-zero: could be conflict (exit 1) or already up-to-date (handled above)
-            # Check "Already up to date" case
-            if "Already up to date" in merge_proc.stdout or "up to date" in merge_proc.stdout.lower():
-                return True, []
-            conflicts = parse_conflicts(repo_root)
-            return False, conflicts
+
+        if merge_proc.returncode == 0:
+            # Staged clean merge — no conflicts
+            return True, []
+
+        # Non-zero, not "up to date" → conflicts present
+        conflicts = parse_conflicts(repo_root)
+        return False, conflicts
     finally:
-        # Always abort to restore worktree — safe even if merge succeeded (--no-commit)
+        # Always restore worktree — abort if in merge state, else reset staged changes
         if merge_head.exists():
-            _run_git(["merge", "--abort"], cwd=repo_root, check=False)
+            _run_git(["merge", "--abort"], cwd=repo_root)
         else:
-            # Clean merge staged changes — reset HEAD to clean state
-            _run_git(["reset", "--hard", "HEAD"], cwd=repo_root, check=False)
+            _run_git(["reset", "--hard", "HEAD"], cwd=repo_root)
 
 
 def main() -> None:

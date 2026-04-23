@@ -103,25 +103,37 @@ def set_config_idempotent(worktree: str, key: str, value: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# rerere configuration
+# shared counter helper
 # ---------------------------------------------------------------------------
 
-def configure_rerere(worktree: str, _plugin_root: pathlib.Path) -> dict:
-    """Set rerere.enabled and rerere.autoupdate.
+def _apply_config_pairs(worktree: str, pairs: list) -> dict:
+    """Apply a list of (key, value) git config pairs idempotently.
 
     Returns: {"changed": int, "noop": int}
     """
     changed = 0
     noop = 0
-    for key, val in [
-        ("rerere.enabled", "true"),
-        ("rerere.autoupdate", "true"),
-    ]:
+    for key, val in pairs:
         if set_config_idempotent(worktree, key, val):
             changed += 1
         else:
             noop += 1
     return {"changed": changed, "noop": noop}
+
+
+# ---------------------------------------------------------------------------
+# rerere configuration
+# ---------------------------------------------------------------------------
+
+def configure_rerere(worktree: str) -> dict:
+    """Set rerere.enabled and rerere.autoupdate.
+
+    Returns: {"changed": int, "noop": int}
+    """
+    return _apply_config_pairs(worktree, [
+        ("rerere.enabled", "true"),
+        ("rerere.autoupdate", "true"),
+    ])
 
 
 # ---------------------------------------------------------------------------
@@ -137,8 +149,7 @@ def configure_merge_drivers(worktree: str, plugin_root: pathlib.Path) -> dict:
     state_json_script = str(plugin_root / "scripts" / "merge-state-json.py")
     wbs_status_script = str(plugin_root / "scripts" / "merge-wbs-status.py")
 
-    drivers = [
-        # (key, value)
+    return _apply_config_pairs(worktree, [
         (
             "merge.state-json-smart.driver",
             f'"{python_bin}" "{state_json_script}" %O %A %B %L %P',
@@ -155,16 +166,7 @@ def configure_merge_drivers(worktree: str, plugin_root: pathlib.Path) -> dict:
             "merge.wbs-status-smart.name",
             "Smart merge driver for wbs.md status lines (dev-plugin)",
         ),
-    ]
-
-    changed = 0
-    noop = 0
-    for key, val in drivers:
-        if set_config_idempotent(worktree, key, val):
-            changed += 1
-        else:
-            noop += 1
-    return {"changed": changed, "noop": noop}
+    ])
 
 
 # ---------------------------------------------------------------------------
@@ -210,7 +212,7 @@ def main() -> None:
     print(f"init-git-rerere: worktree={worktree!r}  plugin_root={str(plugin_root)!r}")
 
     print("\n[rerere]")
-    rerere_result = configure_rerere(worktree, plugin_root)
+    rerere_result = configure_rerere(worktree)
 
     print("\n[merge drivers]")
     drivers_result = configure_merge_drivers(worktree, plugin_root)
