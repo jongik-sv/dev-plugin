@@ -1018,6 +1018,7 @@ _I18N: dict[str, dict[str, str]] = {
         "dep_stat_pending":  "대기",
         "dep_stat_failed":   "실패",
         "dep_stat_bypassed": "바이패스",
+        "dep_wheel_zoom":    "휠 줌",
     },
     "en": {
         "work_packages": "Work Packages",
@@ -1034,6 +1035,7 @@ _I18N: dict[str, dict[str, str]] = {
         "dep_stat_pending":  "Pending",
         "dep_stat_failed":   "Failed",
         "dep_stat_bypassed": "Bypassed",
+        "dep_wheel_zoom":    "Wheel zoom",
     },
 }
 
@@ -2047,6 +2049,20 @@ body[data-filter="bypass"]  .trow:not([data-status="bypass"]) { display: none; }
 .dep-stat-bypassed em,
 .dep-stat-bypassed b { color: #a855f7; }
 .dep-graph-summary-extra { color: var(--ink-2); margin-left: 10px; }
+
+/* ---------- dep-graph legend + wheel-zoom toggle ---------- */
+#dep-graph-legend {
+  display: flex; flex-wrap: wrap; gap: 14px; align-items: center;
+  margin-top: 8px; font-size: 11px;
+}
+#dep-graph-legend .leg-item { font-family: var(--mono); }
+#dep-graph-legend .dep-graph-wheel {
+  margin-left: auto;
+  display: inline-flex; gap: 6px; align-items: center;
+  color: var(--ink-3); cursor: pointer; user-select: none;
+  font-size: 11px; letter-spacing: .02em;
+}
+#dep-graph-legend .dep-graph-wheel input { margin: 0; cursor: pointer; }
 
 /* ---------- responsive ---------- */
 @media (max-width: 1280px){
@@ -3218,6 +3234,7 @@ def _section_dep_graph(lang: str = "ko", subproject: str = "all") -> str:
     )
     summary_html = f'<aside id="dep-graph-summary" class="dep-graph-summary">{chips}</aside>'
 
+    wheel_label = html.escape(_t(lang, "dep_wheel_zoom"))
     legend_html = (
         '<div id="dep-graph-legend" class="dep-graph-legend">'
         '<span class="leg-item" style="color:#22c55e">&#9632; done</span> '
@@ -3225,6 +3242,9 @@ def _section_dep_graph(lang: str = "ko", subproject: str = "all") -> str:
         '<span class="leg-item" style="color:#94a3b8">&#9632; pending</span> '
         '<span class="leg-item" style="color:#ef4444">&#9632; failed</span> '
         '<span class="leg-item" style="color:#a855f7">&#9632; bypassed</span>'
+        '<label class="dep-graph-wheel" for="dep-graph-wheel-toggle">'
+        '<input type="checkbox" id="dep-graph-wheel-toggle">'
+        f'<span>{wheel_label}</span></label>'
         '</div>'
     )
 

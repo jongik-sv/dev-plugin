@@ -14,6 +14,11 @@
     edge_default:  "#475569",
     edge_critical: "#ef4444",
   };
+  // 과축소 방지: 글자가 읽히지 않을 정도로 zoom-out 차단 + fit 시 maxZoom 캡
+  const ZOOM_MIN = 0.7;
+  const ZOOM_MAX = 2.0;
+  const FIT_MAX  = 1.2;
+  const WHEEL_STORAGE_KEY = "dep-graph-wheel-enabled";
 
   // -- 상태 --
   let cy = null;
@@ -21,6 +26,7 @@
   let lastSignature = "";
   let popoverNodeId = null;
   let _popoverEl = null;
+  let _initialFitDone = false;
 
   // -- XSS 방지 헬퍼 --
   function escapeHtml(s) {
@@ -141,7 +147,16 @@
     });
 
     if (topoChanged) {
-      cy.layout({ name: "dagre", rankDir: "LR", nodeSep: 60, rankSep: 120 }).run();
+      const layout = cy.layout({ name: "dagre", rankDir: "LR", nodeSep: 60, rankSep: 120 });
+      layout.one("layoutstop", () => {
+        // 첫 레이아웃 종료 시점에만 fit 호출 (maxZoom 캡) — 이후는 사용자 pan/zoom 존중
+        if (!_initialFitDone && cy.nodes().length > 0) {
+          cy.fit(undefined, 40);
+          if (cy.zoom() > FIT_MAX) cy.zoom(FIT_MAX);
+          _initialFitDone = true;
+        }
+      });
+      layout.run();
     }
 
     if (popoverNodeId) {
@@ -252,8 +267,18 @@
     const container = document.getElementById("dep-graph-canvas");
     if (!container) return;
 
+    // 휠 줌: localStorage 영속, 기본값 off
+    let wheelEnabled = false;
+    try {
+      const stored = localStorage.getItem(WHEEL_STORAGE_KEY);
+      if (stored === "1") wheelEnabled = true;
+    } catch (_) { /* localStorage 차단 환경 — 기본값 사용 */ }
+
     cy = cytoscape({
       container,
+      minZoom: ZOOM_MIN,
+      maxZoom: ZOOM_MAX,
+      userZoomingEnabled: wheelEnabled,
       style: [
         {
           selector: "node",
@@ -311,6 +336,17 @@
     document.addEventListener("click", e => {
       if (_popoverEl && !_popoverEl.contains(e.target)) hidePopover();
     });
+
+    // -- 휠 줌 토글 UI 바인딩 --
+    const toggle = document.getElementById("dep-graph-wheel-toggle");
+    if (toggle) {
+      toggle.checked = wheelEnabled;
+      toggle.addEventListener("change", () => {
+        const on = !!toggle.checked;
+        if (cy) cy.userZoomingEnabled(on);
+        try { localStorage.setItem(WHEEL_STORAGE_KEY, on ? "1" : "0"); } catch (_) {}
+      });
+    }
 
     tick();
     setInterval(tick, POLL_MS);
