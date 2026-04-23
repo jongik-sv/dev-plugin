@@ -1,9 +1,9 @@
 {
-  "status": "[im]",
+  "status": "[xx]",
   "started_at": "2026-04-23T05:39:10Z",
   "last": {
-    "event": "build.ok",
-    "at": "2026-04-23T06:15:53Z"
+    "event": "refactor.ok",
+    "at": "2026-04-23T06:26:53Z"
   },
   "phase_history": [
     {
@@ -19,7 +19,30 @@
       "to": "[im]",
       "at": "2026-04-23T06:15:53Z",
       "elapsed_seconds": 2203
+    },
+    {
+      "event": "refactor.ok",
+      "from": "[im]",
+      "to": "[im]",
+      "at": "2026-04-23T06:26:22Z",
+      "elapsed_seconds": 629
+    },
+    {
+      "event": "test.ok",
+      "from": "[im]",
+      "to": "[ts]",
+      "at": "2026-04-23T06:26:48Z",
+      "elapsed_seconds": 26
+    },
+    {
+      "event": "refactor.ok",
+      "from": "[ts]",
+      "to": "[xx]",
+      "at": "2026-04-23T06:26:53Z",
+      "elapsed_seconds": 5
     }
   ],
-  "updated": "2026-04-23T06:15:53Z"
+  "updated": "2026-04-23T06:26:53Z",
+  "completed_at": "2026-04-23T06:26:53Z",
+  "elapsed_seconds": 2863
 }

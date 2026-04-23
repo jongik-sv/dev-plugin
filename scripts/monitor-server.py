@@ -3331,6 +3331,60 @@ def _live_activity_details_wrap(heading: str, body: str) -> str:
     )
 
 
+def _arow_data_to(event: "Optional[str]", to_s: "Optional[str]") -> str:
+    """이벤트/상태에서 CSS [data-to] 값을 계산한다."""
+    to_phase = _phase_of(to_s) if to_s else None
+    if event == "bypass":
+        return "bypass"
+    if event and event.endswith(".fail"):
+        return "failed"
+    if to_phase in ("dd", "im", "ts"):
+        return "running"
+    if to_phase == "xx":
+        return "done"
+    return "pending"
+
+
+def _render_arow(item_id: str, entry, dt, sig_content: dict) -> str:
+    """단일 phase_history 항목을 .arow div HTML 문자열로 렌더한다."""
+    event = getattr(entry, "event", None)
+    from_s = getattr(entry, "from_status", None)
+    to_s = getattr(entry, "to_status", None)
+    elapsed_s = getattr(entry, "elapsed_seconds", None)
+
+    data_to = _arow_data_to(event, to_s)
+    time_str = _fmt_hms(dt)
+    elapsed_str = _fmt_elapsed_short(elapsed_s)
+    event_label = _esc(event or "")
+    # Strip the bracket decoration for the from→to labels so the reference
+    # design's '.from/.to' spans stay compact ("running"/"done" not "[im]"/"[xx]").
+    from_label = _esc(_phase_label(from_s) or "")
+    to_label = _esc(_phase_label(to_s) or "")
+
+    warn_suffix = " ⚠" if event and event.endswith(".fail") else ""
+    evt_inner = (
+        f'<span class="arrow">→</span>'
+        f'<span class="from">{from_label}</span>'
+        f'<span class="arrow">→</span>'
+        f'<span class="to">{to_label}</span>'
+    )
+
+    # Attach signal file message when available
+    sig_kind = _event_to_sig_kind(event)
+    log_msg = sig_content.get(item_id, {}).get(sig_kind, "").strip() if sig_kind else ""
+    log_html = f'  <span class="log">{_esc(log_msg)}</span>\n' if log_msg else ""
+
+    return (
+        f'<div class="arow" data-event="{event_label}" data-to="{data_to}">\n'
+        f'  <span class="t">{_esc(time_str)}</span>\n'
+        f'  <span class="tid">{_esc(item_id)}</span>\n'
+        f'  <span class="evt">{event_label}{evt_inner}</span>\n'
+        f'  <span class="el">{_esc(elapsed_str)}{warn_suffix}</span>\n'
+        + log_html
+        + '</div>'
+    )
+
+
 def _section_live_activity(model, heading: "Optional[str]" = None):
     """Live Activity 섹션을 렌더링한다.
 
@@ -3358,58 +3412,7 @@ def _section_live_activity(model, heading: "Optional[str]" = None):
         if tid and kind and content:
             sig_content.setdefault(tid, {})[kind] = content
 
-    row_htmls = []
-    for item_id, entry, dt in rows:
-        event = getattr(entry, "event", None)
-        from_s = getattr(entry, "from_status", None)
-        to_s = getattr(entry, "to_status", None)
-        elapsed_s = getattr(entry, "elapsed_seconds", None)
-
-        # Map to_status to a data-to value matching v3 CSS [data-to="..."] selectors.
-        to_phase = _phase_of(to_s) if to_s else None
-        if event == "bypass":
-            data_to = "bypass"
-        elif event and event.endswith(".fail"):
-            data_to = "failed"
-        elif to_phase in ("dd", "im", "ts"):
-            data_to = "running"
-        elif to_phase == "xx":
-            data_to = "done"
-        else:
-            data_to = "pending"
-
-        time_str = _fmt_hms(dt)
-        elapsed_str = _fmt_elapsed_short(elapsed_s)
-        event_label = _esc(event or "")
-        # Strip the bracket decoration for the from→to labels so the reference
-        # design's '.from/.to' spans stay compact ("running"/"done" not "[im]"/"[xx]").
-        from_label = _esc(_phase_label(from_s) or "")
-        to_label = _esc(_phase_label(to_s) or "")
-
-        warn_suffix = " ⚠" if event and event.endswith(".fail") else ""
-        evt_inner = (
-            f'<span class="arrow">→</span>'
-            f'<span class="from">{from_label}</span>'
-            f'<span class="arrow">→</span>'
-            f'<span class="to">{to_label}</span>'
-        )
-
-        # Attach signal file message when available
-        sig_kind = _event_to_sig_kind(event)
-        log_msg = sig_content.get(item_id, {}).get(sig_kind, "").strip() if sig_kind else ""
-        log_html = f'  <span class="log">{_esc(log_msg)}</span>\n' if log_msg else ""
-
-        row_html = (
-            f'<div class="arow" data-event="{event_label}" data-to="{data_to}">\n'
-            f'  <span class="t">{_esc(time_str)}</span>\n'
-            f'  <span class="tid">{_esc(item_id)}</span>\n'
-            f'  <span class="evt">{event_label}{evt_inner}</span>\n'
-            f'  <span class="el">{_esc(elapsed_str)}{warn_suffix}</span>\n'
-            + log_html +
-            '</div>'
-        )
-        row_htmls.append(row_html)
-
+    row_htmls = [_render_arow(item_id, entry, dt, sig_content) for item_id, entry, dt in rows]
     body = '<div class="panel"><div class="activity" aria-live="polite">\n' + "\n".join(row_htmls) + '\n</div></div>'
     return _live_activity_details_wrap(heading, body)
 
@@ -3589,15 +3592,10 @@ _DASHBOARD_JS = """\
       }
       return;
     }
-    if(name==='wp-cards'){
-      /* TSK-05-01: fold 상태 복원 — DOM 교체 후 localStorage 기반으로 덮어씀 */
-      if(current.innerHTML!==newHtml){current.innerHTML=newHtml;}
-      applyFoldStates(current);
-      bindFoldListeners(current);
-      return;
-    }
-    if(name==='live-activity'){
-      /* TSK-01-02: fold 상태 복원 — auto-refresh 후에도 open/closed 유지 */
+    /* TSK-05-01 / TSK-01-02: fold 상태 복원이 필요한 섹션 집합.
+       새 섹션 추가 시 이 집합에만 추가하면 된다. */
+    var _FOLD_SECTIONS={'wp-cards':1,'live-activity':1};
+    if(_FOLD_SECTIONS[name]){
       if(current.innerHTML!==newHtml){current.innerHTML=newHtml;}
       applyFoldStates(current);
       bindFoldListeners(current);
