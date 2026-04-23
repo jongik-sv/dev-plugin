@@ -4493,10 +4493,10 @@ def render_dashboard(model: dict, lang: str = "ko", subproject: str = "all") -> 
         body, "\n",
         _drawer_skeleton(), "\n",
         _trow_tooltip_skeleton(), "\n",
-        _task_panel_dom(), "\n",
         f'<style>{_task_panel_css()}</style>\n',
         f'<script id="dashboard-js">{_DASHBOARD_JS}</script>\n',
         f'<script id="task-panel-js">{_task_panel_js()}</script>\n',
+        _task_panel_dom(), "\n",
         '</body>\n',
         '</html>\n',
     ])
