@@ -676,6 +676,223 @@ class TestHandleApiTaskDetail(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# 5. _tail_report tests (TSK-02-06)
+# ---------------------------------------------------------------------------
+
+class TestTailReport(unittest.TestCase):
+    """Tests for _tail_report helper."""
+
+    def setUp(self):
+        if not hasattr(monitor_server, "_tail_report"):
+            self.skipTest("_tail_report not yet implemented")
+
+    def test_tail_report_truncated(self):
+        """300줄 파일 → tail 200줄, truncated=True, lines_total=300."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            p = Path(tmpdir) / "build-report.md"
+            lines = [f"line {i}" for i in range(300)]
+            p.write_text("\n".join(lines), encoding="utf-8")
+            result = monitor_server._tail_report(p)
+        self.assertEqual(result["name"], "build-report.md")
+        self.assertTrue(result["exists"])
+        self.assertEqual(result["lines_total"], 300)
+        self.assertTrue(result["truncated"])
+        tail_lines = result["tail"].splitlines()
+        self.assertEqual(len(tail_lines), 200)
+        # tail은 마지막 200줄이어야 함
+        self.assertIn("line 100", tail_lines[0])
+        self.assertIn("line 299", tail_lines[-1])
+
+    def test_tail_report_no_truncation_under_200(self):
+        """80줄 파일 → tail 80줄, truncated=False, lines_total=80."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            p = Path(tmpdir) / "test-report.md"
+            lines = [f"row {i}" for i in range(80)]
+            p.write_text("\n".join(lines), encoding="utf-8")
+            result = monitor_server._tail_report(p)
+        self.assertTrue(result["exists"])
+        self.assertEqual(result["lines_total"], 80)
+        self.assertFalse(result["truncated"])
+        self.assertEqual(len(result["tail"].splitlines()), 80)
+
+    def test_tail_report_missing_file(self):
+        """파일 미존재 → exists=False, tail='', lines_total=0, truncated=False."""
+        p = Path("/nonexistent/path/build-report.md")
+        result = monitor_server._tail_report(p)
+        self.assertFalse(result["exists"])
+        self.assertEqual(result["tail"], "")
+        self.assertEqual(result["lines_total"], 0)
+        self.assertFalse(result["truncated"])
+        self.assertEqual(result["name"], "build-report.md")
+
+    def test_tail_report_empty_file(self):
+        """0바이트 파일 → exists=True, tail='', lines_total=0, truncated=False."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            p = Path(tmpdir) / "build-report.md"
+            p.write_text("", encoding="utf-8")
+            result = monitor_server._tail_report(p)
+        self.assertTrue(result["exists"])
+        self.assertEqual(result["tail"], "")
+        self.assertEqual(result["lines_total"], 0)
+        self.assertFalse(result["truncated"])
+
+    def test_tail_report_required_keys(self):
+        """결과 dict에 name, tail, truncated, lines_total, exists 5개 키 존재."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            p = Path(tmpdir) / "test-report.md"
+            p.write_text("hello\nworld\n", encoding="utf-8")
+            result = monitor_server._tail_report(p)
+        for key in ("name", "tail", "truncated", "lines_total", "exists"):
+            self.assertIn(key, result, f"Missing key '{key}'")
+
+
+# ---------------------------------------------------------------------------
+# 6. _collect_logs tests (TSK-02-06)
+# ---------------------------------------------------------------------------
+
+class TestCollectLogs(unittest.TestCase):
+    """Tests for _collect_logs helper."""
+
+    def setUp(self):
+        if not hasattr(monitor_server, "_collect_logs"):
+            self.skipTest("_collect_logs not yet implemented")
+
+    def test_collect_logs_returns_two_entries(self):
+        """항상 2개 항목(build-report.md, test-report.md) 반환."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            task_dir = Path(tmpdir)
+            result = monitor_server._collect_logs(task_dir)
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[0]["name"], "build-report.md")
+        self.assertEqual(result[1]["name"], "test-report.md")
+
+    def test_collect_logs_both_missing(self):
+        """두 파일 모두 없으면 exists=False 2개."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            task_dir = Path(tmpdir)
+            result = monitor_server._collect_logs(task_dir)
+        for entry in result:
+            self.assertFalse(entry["exists"])
+            self.assertEqual(entry["tail"], "")
+
+    def test_collect_logs_one_exists(self):
+        """build-report.md만 있으면 logs[0].exists=True, logs[1].exists=False."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            task_dir = Path(tmpdir)
+            (task_dir / "build-report.md").write_text("line1\nline2\n", encoding="utf-8")
+            result = monitor_server._collect_logs(task_dir)
+        self.assertTrue(result[0]["exists"])
+        self.assertFalse(result[1]["exists"])
+
+
+# ---------------------------------------------------------------------------
+# 7. /api/task-detail logs field tests (TSK-02-06)
+# ---------------------------------------------------------------------------
+
+class TestApiTaskDetailLogsField(unittest.TestCase):
+    """Tests for logs field in /api/task-detail response."""
+
+    def setUp(self):
+        if not hasattr(monitor_server, "_handle_api_task_detail"):
+            self.skipTest("_handle_api_task_detail not yet implemented")
+        if not hasattr(monitor_server, "_collect_logs"):
+            self.skipTest("_collect_logs not yet implemented")
+
+    def _make_docs_with_task(self, tmpdir, task_id="TSK-02-06"):
+        docs_dir = os.path.join(tmpdir, "monitor-v4")
+        os.makedirs(docs_dir, exist_ok=True)
+        wbs_content = f"""\
+## WP-02: Monitor v4
+
+### {task_id}: Test Task
+- category: development
+- status: [dd]
+Some content.
+
+### TSK-02-99: Next
+- status: [ ]
+"""
+        with open(os.path.join(docs_dir, "wbs.md"), "w", encoding="utf-8") as f:
+            f.write(wbs_content)
+        return docs_dir
+
+    def test_api_task_detail_logs_field(self):
+        """/api/task-detail 응답에 logs 필드 존재 + 각 entry 스키마."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            docs_dir = self._make_docs_with_task(tmpdir)
+            handler = _FakeHandler(
+                path="/api/task-detail?task=TSK-02-06&subproject=monitor-v4",
+                docs_dir=os.path.dirname(docs_dir),
+            )
+            monitor_server._handle_api_task_detail(handler)
+        self.assertEqual(handler._response_code, 200)
+        body = handler.response_body()
+        # logs 필드 존재
+        self.assertIn("logs", body)
+        logs = body["logs"]
+        self.assertIsInstance(logs, list)
+        self.assertEqual(len(logs), 2)
+        for entry in logs:
+            for key in ("name", "tail", "truncated", "lines_total", "exists"):
+                self.assertIn(key, entry, f"logs entry missing key '{key}'")
+        self.assertEqual(logs[0]["name"], "build-report.md")
+        self.assertEqual(logs[1]["name"], "test-report.md")
+
+    def test_api_task_detail_ansi_stripped(self):
+        """ANSI 이스케이프가 응답 tail에 나타나지 않음."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            docs_dir = self._make_docs_with_task(tmpdir)
+            # task_dir 생성 후 ANSI 포함 build-report.md 작성
+            task_dir = Path(docs_dir) / "tasks" / "TSK-02-06"
+            task_dir.mkdir(parents=True)
+            ansi_content = "\x1b[31mERROR\x1b[0m\n\x1b[1;33mWARN\x1b[0m\nplain text\n"
+            (task_dir / "build-report.md").write_text(ansi_content, encoding="utf-8")
+            handler = _FakeHandler(
+                path="/api/task-detail?task=TSK-02-06&subproject=monitor-v4",
+                docs_dir=os.path.dirname(docs_dir),
+            )
+            monitor_server._handle_api_task_detail(handler)
+        self.assertEqual(handler._response_code, 200)
+        body = handler.response_body()
+        tail = body["logs"][0]["tail"]
+        self.assertNotIn("\x1b", tail)
+        self.assertIn("ERROR", tail)
+        self.assertIn("WARN", tail)
+        self.assertIn("plain text", tail)
+
+    def test_api_task_detail_logs_missing_files(self):
+        """로그 파일 미존재 시 exists=False + tail='' + 정상 200."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            docs_dir = self._make_docs_with_task(tmpdir)
+            # task_dir 없이 호출 → 로그 파일 미존재
+            handler = _FakeHandler(
+                path="/api/task-detail?task=TSK-02-06&subproject=monitor-v4",
+                docs_dir=os.path.dirname(docs_dir),
+            )
+            monitor_server._handle_api_task_detail(handler)
+        self.assertEqual(handler._response_code, 200)
+        body = handler.response_body()
+        logs = body["logs"]
+        for entry in logs:
+            self.assertFalse(entry["exists"])
+            self.assertEqual(entry["tail"], "")
+            self.assertEqual(entry["lines_total"], 0)
+
+    def test_api_task_detail_full_response_keys(self):
+        """응답에 task_id, title, wp_id, source, wbs_section_md, state, artifacts, logs 8개 키."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            docs_dir = self._make_docs_with_task(tmpdir)
+            handler = _FakeHandler(
+                path="/api/task-detail?task=TSK-02-06&subproject=monitor-v4",
+                docs_dir=os.path.dirname(docs_dir),
+            )
+            monitor_server._handle_api_task_detail(handler)
+        body = handler.response_body()
+        for key in ("task_id", "title", "wp_id", "source", "wbs_section_md", "state", "artifacts", "logs"):
+            self.assertIn(key, body, f"Response missing key '{key}'")
+
+
+# ---------------------------------------------------------------------------
 # E2E placeholder — tests here require a live server (run in dev-test phase)
 # ---------------------------------------------------------------------------
 

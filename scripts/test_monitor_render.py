@@ -2523,5 +2523,8 @@ class TskSpinnerTests(unittest.TestCase):
         self.assertIn('.trow[data-running="true"] .spinner', css)
 
 
+
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

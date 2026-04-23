@@ -2170,6 +2170,24 @@ body[data-filter="bypass"]  .trow:not([data-status="bypass"]) { display: none; }
   .trow .badge, .trow .retry, .trow .flags{ display:none; }
   .drawer{ width: 100vw; }
 }
+
+/* ---------- TSK-02-03: trow tooltip ---------- */
+#trow-tooltip{
+  position:fixed;
+  z-index:100;
+  max-width:420px;
+  background:var(--bg-2);
+  border:1px solid var(--border);
+  border-radius:6px;
+  padding:10px 12px;
+  font:12px/1.4 var(--font-mono);
+  pointer-events:none;
+  box-shadow:0 4px 12px rgba(0,0,0,.3);
+}
+#trow-tooltip[hidden]{ display:none; }
+#trow-tooltip dl{ margin:0; }
+#trow-tooltip dt{ color:var(--ink-3); font-size:10px; margin-top:6px; }
+#trow-tooltip dd{ margin:0; color:var(--ink); }
 """
 
 def _minify_css(css: str) -> str:
@@ -2826,6 +2844,53 @@ def _clean_title(title) -> str:
     return t
 
 
+def _build_state_summary_json(item) -> dict:
+    """state.json 요약 dict 를 생성한다 (TSK-02-03).
+
+    포함 필드: status, last_event, last_event_at, elapsed (int초), phase_tail (최근 3개).
+    item 에 필드가 없으면 graceful default (빈 문자열/None/0/[]).
+    """
+    status = getattr(item, "status", None)
+    last_event = getattr(item, "last_event", None)
+    last_event_at = getattr(item, "last_event_at", None)
+    elapsed_raw = getattr(item, "elapsed_seconds", None)
+    elapsed = int(elapsed_raw) if isinstance(elapsed_raw, (int, float)) and not isinstance(elapsed_raw, bool) else 0
+    history_tail = getattr(item, "phase_history_tail", []) or []
+    # 최근 3개만 추출
+    tail = history_tail[-3:] if len(history_tail) > 3 else history_tail
+    phase_tail = [
+        {
+            "event": getattr(e, "event", None),
+            "from": getattr(e, "from_status", None),
+            "to": getattr(e, "to_status", None),
+            "at": getattr(e, "at", None),
+            "elapsed_seconds": getattr(e, "elapsed_seconds", None),
+        }
+        for e in tail
+    ]
+    return {
+        "status": status,
+        "last_event": last_event,
+        "last_event_at": last_event_at,
+        "elapsed": elapsed,
+        "phase_tail": phase_tail,
+    }
+
+
+def _encode_state_summary_attr(summary: dict) -> str:
+    """summary dict 를 JSON → html.escape 로 single-quote 속성에 안전하게 삽입한다 (TSK-02-03).
+
+    반환값은 data-state-summary='...' 의 값 부분이다.
+    """
+    raw = json.dumps(summary, ensure_ascii=False, separators=(",", ":"))
+    return html.escape(raw, quote=True)
+
+
+def _trow_tooltip_skeleton() -> str:
+    """body 직계에 1회 주입하는 trow 툴팁 DOM 스켈레톤 (TSK-02-03)."""
+    return '<div id="trow-tooltip" role="tooltip" hidden></div>'
+
+
 def _render_task_row_v2(item, running_ids: set, failed_ids: set, lang: str = "ko") -> str:
     """Render a v3 ``<div class="trow" data-status="{state}" data-phase="{phase}" data-running="{bool}">`` row.
 
@@ -2848,22 +2913,19 @@ def _render_task_row_v2(item, running_ids: set, failed_ids: set, lang: str = "ko
     data_status = _trow_data_status(item, running_ids, failed_ids)
     data_running = "true" if (item_id and item_id in running_ids) else "false"
 
-    # TSK-02-01: badge text from state.json.status via _phase_label().
-    # error field counts as failed (same bucket as .failed signal).
+    # badge text: error counts as failed (same bucket as .failed signal).
     is_failed = bool(error) or (item_id is not None and item_id in failed_ids)
     badge_text = _phase_label(status_code, lang, failed=is_failed, bypassed=bypassed)
     data_phase = _phase_data_attr(status_code, failed=is_failed, bypassed=bypassed)
 
-    badge_title_attr = ""
-    if error:
-        badge_title_attr = f' title="{_esc(str(error)[:_ERROR_TITLE_CAP])}"'
+    badge_title_attr = (
+        f' title="{_esc(str(error)[:_ERROR_TITLE_CAP])}"' if error else ""
+    )
 
     elapsed_raw = _format_elapsed(item, lang=lang)
     elapsed_display = elapsed_raw if elapsed_raw != "-" else "—"
 
-    flags_inner = ""
-    if bypassed:
-        flags_inner = '<span class="flag f-crit">bypass</span>'
+    flags_inner = '<span class="flag f-crit">bypass</span>' if bypassed else ""
 
     clean_title = _esc(_clean_title(title))
 
@@ -2872,8 +2934,11 @@ def _render_task_row_v2(item, running_ids: set, failed_ids: set, lang: str = "ko
         ' aria-label="Expand" title="Expand">↗</button>'
     )
 
+    _state_summary_encoded = _encode_state_summary_attr(_build_state_summary_json(item))
+
     return (
-        f'<div class="trow" data-status="{data_status}" data-phase="{data_phase}" data-running="{data_running}">\n'
+        f'<div class="trow" data-status="{data_status}" data-phase="{data_phase}" data-running="{data_running}"'
+        f" data-state-summary='{_state_summary_encoded}'>\n"
         '  <div class="statusbar"></div>\n'
         f'  <div class="tid id">{_esc(item_id)}</div>\n'
         f'  <div class="badge"{badge_title_attr}>{_esc(badge_text)}</div>\n'
@@ -4091,6 +4156,77 @@ _DASHBOARD_JS = """\
   }else{
     init();
   }
+})();
+
+/* TSK-02-03: Task hover tooltip — setupTaskTooltip IIFE */
+(function setupTaskTooltip(){
+  var tip=document.getElementById('trow-tooltip');
+  if(!tip)return;
+  var _timer=null;
+  var _current=null;
+
+  function renderTooltipHtml(data){
+    var dl=document.createElement('dl');
+    function row(label,value){
+      var dt=document.createElement('dt');dt.textContent=label;
+      var dd=document.createElement('dd');dd.textContent=(value===null||value===undefined)?'—':String(value);
+      dl.appendChild(dt);dl.appendChild(dd);
+    }
+    row('status',data.status);
+    row('last event',data.last_event);
+    row('at',data.last_event_at);
+    row('elapsed',data.elapsed!=null?data.elapsed+'s':null);
+    if(data.phase_tail&&data.phase_tail.length){
+      var dt2=document.createElement('dt');dt2.textContent='recent phases';
+      dl.appendChild(dt2);
+      data.phase_tail.forEach(function(p){
+        var dd2=document.createElement('dd');
+        dd2.textContent=(p.event||'')+(p.from?' '+p.from+' → ':'')+( p.to||'');
+        dl.appendChild(dd2);
+      });
+    }
+    return dl;
+  }
+
+  function show(el,data){
+    tip.innerHTML='';
+    tip.appendChild(renderTooltipHtml(data));
+    var r=el.getBoundingClientRect();
+    var left=r.right+8;
+    if(left+420>window.innerWidth){left=r.left-428;}
+    tip.style.top=(r.top+window.scrollY)+'px';
+    tip.style.left=left+'px';
+    tip.hidden=false;
+  }
+
+  function hide(){
+    clearTimeout(_timer);
+    _timer=null;
+    _current=null;
+    tip.hidden=true;
+  }
+
+  document.addEventListener('mouseenter',function(e){
+    var el=e.target&&e.target.closest?e.target.closest('.trow[data-state-summary]'):null;
+    if(!el){return;}
+    if(el===_current){return;}
+    clearTimeout(_timer);
+    _current=el;
+    _timer=setTimeout(function(){
+      var raw=el.getAttribute('data-state-summary');
+      if(!raw){return;}
+      try{var data=JSON.parse(raw);}catch(err){return;}
+      show(el,data);
+    },300);
+  },true);
+
+  document.addEventListener('mouseleave',function(e){
+    var el=e.target&&e.target.closest?e.target.closest('.trow[data-state-summary]'):null;
+    if(!el){return;}
+    hide();
+  },true);
+
+  window.addEventListener('scroll',function(){hide();},true);
 })();"""
 
 
@@ -4356,6 +4492,7 @@ def render_dashboard(model: dict, lang: str = "ko", subproject: str = "all") -> 
         '<body>\n',
         body, "\n",
         _drawer_skeleton(), "\n",
+        _trow_tooltip_skeleton(), "\n",
         _task_panel_dom(), "\n",
         f'<style>{_task_panel_css()}</style>\n',
         f'<script id="dashboard-js">{_DASHBOARD_JS}</script>\n',
@@ -5063,6 +5200,47 @@ def _extract_wbs_section(wbs_md: str, task_id: str) -> str:
     return ""
 
 
+# Log file names to tail for the EXPAND panel § 로그 section (TSK-02-06).
+LOG_NAMES = ("build-report.md", "test-report.md")
+
+_MAX_LOG_TAIL_LINES = 200
+
+
+def _tail_report(path, max_lines=_MAX_LOG_TAIL_LINES) -> dict:
+    """Return tail dict for a single log file.
+
+    Schema: {name, tail, truncated, lines_total, exists}.
+    - File missing → exists=False, tail='', lines_total=0, truncated=False.
+    - ANSI CSI escapes are stripped via _ANSI_RE.
+    - UTF-8 decode errors are replaced (never raises).
+    """
+    name = Path(path).name
+    if not Path(path).exists():
+        return {"name": name, "tail": "", "truncated": False, "lines_total": 0, "exists": False}
+    try:
+        raw = Path(path).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return {"name": name, "tail": "", "truncated": False, "lines_total": 0, "exists": False}
+    raw = _ANSI_RE.sub("", raw)
+    all_lines = raw.splitlines()
+    lines_total = len(all_lines)
+    truncated = lines_total > max_lines
+    tail_lines = all_lines[-max_lines:] if truncated else all_lines
+    tail = "\n".join(tail_lines)
+    return {
+        "name": name,
+        "tail": tail,
+        "truncated": truncated,
+        "lines_total": lines_total,
+        "exists": True,
+    }
+
+
+def _collect_logs(task_dir) -> list:
+    """Return [{name, tail, truncated, lines_total, exists}] for LOG_NAMES."""
+    return [_tail_report(Path(task_dir) / name) for name in LOG_NAMES]
+
+
 def _collect_artifacts(task_dir):
     """Return [{name, path, exists, size}] for design/test-report/refactor."""
     artifact_names = ("design.md", "test-report.md", "refactor.md")
@@ -5145,9 +5323,11 @@ def _build_task_detail_payload(task_id, subproject, effective_docs_dir, wbs_md):
     task_dir = Path(effective_docs_dir) / "tasks" / task_id
     state = _load_state_json(task_dir)
     artifacts = _collect_artifacts(task_dir)
+    logs = _collect_logs(task_dir)
     return (200, {
         "task_id": task_id, "title": title, "wp_id": wp_id, "source": "wbs",
         "wbs_section_md": wbs_section_md, "state": state, "artifacts": artifacts,
+        "logs": logs,
     })
 
 
@@ -5203,6 +5383,14 @@ def _task_panel_css() -> str:
         "border:none;cursor:pointer;color:inherit;}"
         ".expand-btn:hover{opacity:1;}"
         "#task-panel-body code{font-family:var(--font-mono,monospace);font-size:12px;}"
+        ".panel-logs{margin-top:4px;}"
+        ".log-entry{margin-bottom:8px;}"
+        ".log-entry summary{cursor:pointer;font-size:12px;color:var(--ink-3,#cdd6f4);padding:2px 0;user-select:none;}"
+        ".log-tail{max-height:300px;overflow:auto;font-size:11px;white-space:pre-wrap;"
+        "word-break:break-all;background:var(--bg-1,#181825);border-radius:4px;"
+        "padding:8px;margin:4px 0 0;font-family:var(--font-mono,monospace);}"
+        ".log-empty{font-size:12px;color:var(--ink-3,#585b70);padding:4px 0;}"
+        ".log-trunc{font-size:10px;color:var(--ink-3,#585b70);margin-left:8px;}"
     )
 
 
@@ -5243,13 +5431,29 @@ function renderArtifacts(arts){
   }
   return html+'</ul>';
 }
+function renderLogs(logs){
+  var html='<h4>&sect; 로그</h4>';
+  if(!logs||!logs.length)return html+'<p>-</p>';
+  var sections='';
+  for(var i=0;i<logs.length;i++){
+    var log=logs[i];
+    if(!log.exists){
+      sections+='<div class="log-empty">'+escapeHtml(log.name)+' — 보고서 없음</div>';
+    }else{
+      var truncMsg=log.truncated?'<span class="log-trunc">마지막 200줄 / 전체 '+escapeHtml(String(log.lines_total))+'줄</span>':'';
+      sections+='<details class="log-entry" open><summary>'+escapeHtml(log.name)+truncMsg+'</summary>'
+        +'<pre class="log-tail">'+escapeHtml(log.tail)+'</pre></details>';
+    }
+  }
+  return html+'<section class="panel-logs">'+sections+'</section>';
+}
 function openTaskPanel(taskId){
   var sp='all';try{var m=location.search.match(/[?&]subproject=([^&]+)/);if(m)sp=m[1];}catch(e){}
   fetch('/api/task-detail?task='+encodeURIComponent(taskId)+'&subproject='+encodeURIComponent(sp))
     .then(function(r){return r.json();}).then(function(data){
       var t=document.getElementById('task-panel-title');if(t)t.textContent=data.title||taskId;
       var b=document.getElementById('task-panel-body');
-      if(b)b.innerHTML=renderWbsSection(data.wbs_section_md||'')+renderStateJson(data.state||{})+renderArtifacts(data.artifacts||[]);
+      if(b)b.innerHTML=renderWbsSection(data.wbs_section_md||'')+renderStateJson(data.state||{})+renderArtifacts(data.artifacts||[])+renderLogs(data.logs||[]);
       var p=document.getElementById('task-panel'),o=document.getElementById('task-panel-overlay');
       if(p)p.classList.add('open');if(o)o.removeAttribute('hidden');
     }).catch(function(e){console.error('task-panel error',e);});

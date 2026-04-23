@@ -959,5 +959,148 @@ class TaskExpandPanelE2ETests(unittest.TestCase):
         self.assertIn("escapeHtml", html, "escapeHtml JS not found")
 
 
+@unittest.skipUnless(_SERVER_UP, f"monitor-server not reachable at {_E2E_URL}")
+class TaskExpandLogsE2ETests(unittest.TestCase):
+    """E2E tests for TSK-02-06: EXPAND 패널 § 로그 섹션.
+
+    Reachability gate: 대시보드 루트(/) 로드 → Task 행 ↗ 아이콘 클릭 경로로
+    패널을 여는 시뮬레이션. Playwright 없이 urllib + HTML 검사로 검증.
+    - /api/task-detail 응답에 logs 필드 포함 (AC-22)
+    - renderLogs JS 함수 + CSS 포함 (AC-23)
+    - 섹션 순서: wbs → state → artifacts → logs
+    - 5초 auto-refresh 후에도 패널 DOM 보존 (body 직계)
+
+    주의: 이 테스트는 live 서버가 기동된 상태에서만 실행된다 (skipUnless 조건).
+    빌드 단계에서는 skip된다.
+    """
+
+    def _get_html(self, path: str = "/") -> str:
+        with urllib.request.urlopen(_E2E_URL + path, timeout=3) as resp:
+            return resp.read().decode("utf-8", errors="replace")
+
+    def _get_json(self, path: str) -> dict:
+        with urllib.request.urlopen(_E2E_URL + path, timeout=3) as resp:
+            return json.loads(resp.read())
+
+    def test_slide_panel_logs_section(self) -> None:
+        """대시보드 HTML에 renderLogs JS 함수 + .log-tail CSS + .log-entry 클래스 포함 (AC-23).
+
+        Reachability: GET / → <script> 블록에서 renderLogs, .log-tail, .log-entry 확인.
+        패널을 실제로 열 수 없는 urllib 환경에서, JS 함수 존재와 CSS를 검증한다.
+        """
+        html = self._get_html("/")
+        self.assertIn("renderLogs", html, "renderLogs JS function not found in dashboard HTML")
+        self.assertIn("log-entry", html, ".log-entry class not found in dashboard HTML")
+        self.assertIn("log-tail", html, ".log-tail CSS class not found in dashboard HTML")
+        self.assertIn("보고서 없음", html, "placeholder '보고서 없음' not found in renderLogs JS")
+
+    def test_slide_panel_section_order(self) -> None:
+        """openTaskPanel body 조립: wbs → state → artifacts → logs 순서 (AC-22).
+
+        Reachability: GET / → JS 소스에서 renderWbsSection / renderStateJson /
+        renderArtifacts / renderLogs 호출 순서가 올바른지 확인.
+        """
+        html = self._get_html("/")
+        pos_wbs = html.find("renderWbsSection")
+        pos_state = html.find("renderStateJson")
+        pos_artifacts = html.find("renderArtifacts")
+        pos_logs = html.find("renderLogs")
+        self.assertGreater(pos_wbs, 0, "renderWbsSection not found")
+        self.assertGreater(pos_state, 0, "renderStateJson not found")
+        self.assertGreater(pos_artifacts, 0, "renderArtifacts not found")
+        self.assertGreater(pos_logs, 0, "renderLogs not found")
+        # openTaskPanel 내 body.innerHTML 조립부에서 호출 순서 확인
+        # 마지막 정의 위치가 아닌 innerHTML 조립부에서의 등장 순서를 검사하기 위해
+        # openTaskPanel 함수 본문 스코프를 추출
+        panel_fn_start = html.find("function openTaskPanel")
+        panel_fn_end = html.find("function closeTaskPanel")
+        self.assertGreater(panel_fn_start, 0, "openTaskPanel not found")
+        self.assertGreater(panel_fn_end, panel_fn_start, "closeTaskPanel not after openTaskPanel")
+        panel_fn = html[panel_fn_start:panel_fn_end]
+        # innerHTML 조립 라인에서 4개 함수가 모두 등장해야 함
+        self.assertIn("renderWbsSection", panel_fn, "renderWbsSection not in openTaskPanel body")
+        self.assertIn("renderStateJson", panel_fn, "renderStateJson not in openTaskPanel body")
+        self.assertIn("renderArtifacts", panel_fn, "renderArtifacts not in openTaskPanel body")
+        self.assertIn("renderLogs", panel_fn, "renderLogs not in openTaskPanel body")
+        # 순서 검증: wbs < state < artifacts < logs (innerHTML 조립 문자열 내)
+        inner_html_line_start = panel_fn.find("innerHTML")
+        self.assertGreater(inner_html_line_start, 0, "innerHTML assignment not found in openTaskPanel")
+        inner_html_line = panel_fn[inner_html_line_start:]
+        order_positions = [
+            inner_html_line.find("renderWbsSection"),
+            inner_html_line.find("renderStateJson"),
+            inner_html_line.find("renderArtifacts"),
+            inner_html_line.find("renderLogs"),
+        ]
+        for i, p in enumerate(order_positions):
+            self.assertGreater(p, -1, f"render function #{i} not found in innerHTML line")
+        self.assertEqual(
+            order_positions,
+            sorted(order_positions),
+            "Section order must be: wbs → state → artifacts → logs"
+        )
+
+    def test_api_task_detail_logs_field_e2e(self) -> None:
+        """GET /api/task-detail 응답에 logs 필드 존재 + 2개 항목(AC-22).
+
+        Reachability: 대시보드(/) 로드 후 ↗ 버튼 클릭 경로를 시뮬레이션하기 위해
+        먼저 대시보드에서 유효한 task_id를 추출 후 /api/task-detail 호출.
+        """
+        html = self._get_html("/")
+        # 대시보드에서 data-task-id 속성에서 task ID 추출 (reachability: ↗ 버튼 경로)
+        task_id_match = re.search(r'data-task-id="([^"]+)"', html)
+        if not task_id_match:
+            self.skipTest("No data-task-id found in dashboard (may be empty docs dir)")
+        task_id = task_id_match.group(1)
+        # subproject 파라미터 추출 시도
+        sp_match = re.search(r'[?&]subproject=([^&"]+)', html)
+        sp = sp_match.group(1) if sp_match else "all"
+        try:
+            data = self._get_json(
+                f"/api/task-detail?task={urllib.parse.quote(task_id)}&subproject={urllib.parse.quote(sp)}"
+            )
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                self.skipTest(f"Task {task_id!r} not found on this server")
+            raise
+        # logs 필드 검증
+        self.assertIn("logs", data, "logs field missing from /api/task-detail response")
+        logs = data["logs"]
+        self.assertIsInstance(logs, list, "logs should be a list")
+        self.assertEqual(len(logs), 2, "logs should have exactly 2 entries (build-report + test-report)")
+        self.assertEqual(logs[0]["name"], "build-report.md")
+        self.assertEqual(logs[1]["name"], "test-report.md")
+        for entry in logs:
+            for key in ("name", "tail", "truncated", "lines_total", "exists"):
+                self.assertIn(key, entry, f"logs entry missing key '{key}'")
+
+    def test_log_tail_css_in_dashboard(self) -> None:
+        """.log-tail CSS max-height:300px + overflow:auto + font-size:11px 포함."""
+        html = self._get_html("/")
+        self.assertIn("max-height:300px", html, ".log-tail max-height:300px not found")
+        self.assertIn("overflow:auto", html, ".log-tail overflow:auto not found")
+        self.assertIn("font-size:11px", html, ".log-tail font-size:11px not found")
+
+    def test_panel_body_direct_child_isolation(self) -> None:
+        """#task-panel が body 직계 자식으로 배치 (5초 auto-refresh 격리, AC-25).
+
+        reachability: GET / → task-panel이 data-section 컨테이너 밖에 존재.
+        """
+        html = self._get_html("/")
+        panel_pos = html.find('id="task-panel"')
+        self.assertGreater(panel_pos, 0, "#task-panel not found in HTML")
+        # 패널이 body 닫는 태그 직전에 위치하는지 확인
+        # (data-section 마지막 위치보다 뒤에 있어야 함)
+        last_ds_pos = 0
+        for m in re.finditer(r'data-section=', html):
+            last_ds_pos = m.start()
+        if last_ds_pos > 0:
+            # task-panel은 최소한 마지막 data-section 뒤에 있어야 함
+            self.assertGreater(
+                panel_pos, last_ds_pos,
+                "#task-panel should appear after the last data-section (body-direct isolation)"
+            )
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
