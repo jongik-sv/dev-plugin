@@ -28,7 +28,10 @@
 | (신규) `.gitattributes` | **(WP-06)** `union` + `state-json-smart` + `wbs-status-smart` 매핑 |
 | `skills/dev-build/SKILL.md` | **(WP-06)** 워커 프롬프트에 "Task `[im]` 진입 전 `merge-preview.py` 실행" 단계 추가 |
 | `skills/dev-team/references/merge-procedure.md` | **(WP-06)** rerere/드라이버 순서, 충돌 로그 보존 경로(`docs/merge-log/{WT}-{UTC}.json`) |
+| `scripts/monitor-server.py` | **(WP-04/TSK-04-04)** `_section_dep_graph` 요약 HTML을 `<span class="dep-stat dep-stat-{state}"><em>label</em> <b data-stat=...>-</b></span>` 칩 구조로 교체, `_t` 테이블에 `dep_stat_*` i18n 키 6종 추가, `.dep-stat*` CSS 인라인 |
+| `skills/dev-monitor/vendor/graph-client.js` | **(WP-04/TSK-04-04)** `updateSummary(stats)` 가 `[data-stat]` 선택자 유지로 태그 변경(`<span>→<b>`)과 무관하게 동작 — JS 수정 0 목표 |
 | (신규) `scripts/test_monitor_dep_graph_html.py` | **(WP-04)** 2줄 레이블, 3중 시각 단서, nodeSep/rankSep 회귀 |
+| (신규) `scripts/test_monitor_dep_graph_summary.py` | **(WP-04/TSK-04-04)** 요약 칩 레이블(ko/en) + 색상 팔레트 일치 + legend parity |
 | (신규) `scripts/test_monitor_fold.py` | **(WP-05)** localStorage 저장/복원 JS 존재 및 서버 계약 검증 |
 | (신규) `scripts/test_merge_preview.py` | **(WP-06)** 충돌 탐지 / clean-merge 케이스 |
 | (신규) `scripts/test_merge_state_json.py` | **(WP-06)** phase_history union, status 우선순위, bypassed OR |
@@ -686,6 +689,132 @@ docs/**/wbs.md                  merge=wbs-status-smart
 - WP-06 이 merge-preview / rerere 자기 자신을 구현하므로, WP-06 Task 진행 중에는 **해당 기능 없이** 진행. TSK-06-01 완료 전 워커 프롬프트 훅 비활성, TSK-06-02 완료 전 rerere 비활성.
 - 팀리더 프롬프트는 WP-06 머지 시 특별히 "드라이버 미설정 상태에서 수동 3-way 충돌 해결 가능" 주의사항 포함.
 
+### 3.13 Dep-Graph 요약 카드 범례화 + 상태별 색상 (WP-04 / TSK-04-04)
+
+#### 3.13.1 현재 상태와 문제
+
+`monitor-server.py:_section_dep_graph` (line ~3079) 가 생성하는 현재 요약 HTML:
+
+```html
+<aside id="dep-graph-summary" class="dep-graph-summary">
+  <span data-stat="total">-</span> ·
+  <span data-stat="done">-</span> ·
+  <span data-stat="running">-</span> ·
+  <span data-stat="pending">-</span> ·
+  <span data-stat="failed">-</span> ·
+  <span data-stat="bypassed">-</span>
+</aside>
+```
+
+- 사용자 눈에는 `4 · 2 · 1 · 1 · 0 · 0` 처럼 **레이블 없는 숫자 나열**만 보임 — 어느 숫자가 무엇인지 추측해야 함.
+- 노드·legend는 이미 상태별 색상 팔레트를 쓰지만, 요약 숫자는 단색(inherit) — 색상 언어 단절.
+- `#dep-graph-legend` (canvas 아래) 는 존재하지만 사용자의 시선이 노드·숫자·legend 세 곳에 분산되어, **요약 카드 자체만으로 상태를 읽을 수 없음**.
+
+#### 3.13.2 목표 및 제약
+
+- 요약 카드 각 숫자를 **`{레이블} {숫자}` 칩 형태**로 치환하고, 레이블·숫자 글자색을 해당 상태 색으로 칠한다.
+- 레이블은 i18n(`ko`/`en`) 대응 — 기존 `_t(lang, key)` 프레임워크 재사용.
+- 기존 `graph-client.js:updateSummary` 는 `span[data-stat="..."]` 를 찾아 `textContent` 만 갱신하므로 **JS 계약 변경 없이 SSR HTML만 재구성** — 회귀 위험 최소.
+- 크리티컬 패스 깊이/병목 수는 현 구조(`.dep-graph-summary-extra`) 유지.
+
+#### 3.13.3 변경 HTML (SSR)
+
+`_section_dep_graph` 의 `summary_html` 을 다음으로 교체:
+
+```html
+<aside id="dep-graph-summary" class="dep-graph-summary">
+  <span class="dep-stat dep-stat-total">
+    <em>{dep_stat_total}</em> <b data-stat="total">-</b>
+  </span>
+  <span class="dep-stat dep-stat-done">
+    <em>{dep_stat_done}</em> <b data-stat="done">-</b>
+  </span>
+  <span class="dep-stat dep-stat-running">
+    <em>{dep_stat_running}</em> <b data-stat="running">-</b>
+  </span>
+  <span class="dep-stat dep-stat-pending">
+    <em>{dep_stat_pending}</em> <b data-stat="pending">-</b>
+  </span>
+  <span class="dep-stat dep-stat-failed">
+    <em>{dep_stat_failed}</em> <b data-stat="failed">-</b>
+  </span>
+  <span class="dep-stat dep-stat-bypassed">
+    <em>{dep_stat_bypassed}</em> <b data-stat="bypassed">-</b>
+  </span>
+</aside>
+```
+
+- `<b data-stat="...">` 는 **기존 계약 보존** — `graph-client.js:updateSummary` 의 `el.querySelector('[data-stat="...")')` 가 그대로 동작.
+- `<em>` 은 레이블(i18n 치환), 기본 `font-style: normal`.
+- 각 `.dep-stat-{state}` 래퍼가 색상 규칙을 담당.
+
+#### 3.13.4 i18n 키 추가
+
+`_t` 테이블(line ~980, `"dep_graph"` 항목 근처)에 6키 추가:
+
+```python
+"dep_stat_total":    {"ko": "총",       "en": "Total"},
+"dep_stat_done":     {"ko": "완료",     "en": "Done"},
+"dep_stat_running":  {"ko": "진행",     "en": "Running"},
+"dep_stat_pending":  {"ko": "대기",     "en": "Pending"},
+"dep_stat_failed":   {"ko": "실패",     "en": "Failed"},
+"dep_stat_bypassed": {"ko": "바이패스", "en": "Bypassed"},
+```
+
+> 표시 순서는 `total · done · running · pending · failed · bypassed` 로 기존 순서 유지 — 사용자 습관 보호.
+
+#### 3.13.5 CSS (monitor-server.py inline `<style>` 또는 섹션 head)
+
+```css
+#dep-graph-summary {
+  display: flex; gap: 14px; align-items: baseline;
+  font-size: 12.5px; font-variant-numeric: tabular-nums;
+}
+.dep-stat { display: inline-flex; gap: 5px; align-items: baseline; }
+.dep-stat em   { font-style: normal; font-weight: 500; opacity: .85; letter-spacing: .02em; }
+.dep-stat b    { font-weight: 700; }
+.dep-stat-total    em,
+.dep-stat-total    b { color: var(--ink); }                /* 총계는 기본 텍스트 */
+.dep-stat-done     em,
+.dep-stat-done     b { color: var(--done); }               /* #22c55e */
+.dep-stat-running  em,
+.dep-stat-running  b { color: var(--run); }                /* #eab308 */
+.dep-stat-pending  em,
+.dep-stat-pending  b { color: var(--ink-3); }              /* 대기 — pending 톤 */
+.dep-stat-failed   em,
+.dep-stat-failed   b { color: var(--fail); }               /* #ef4444 */
+.dep-stat-bypassed em,
+.dep-stat-bypassed b { color: #a855f7; }                   /* bypassed 보라 */
+.dep-graph-summary-extra { color: var(--ink-2); margin-left: 10px; }
+```
+
+- 기존 토큰(`--done`, `--run`, `--ink`, `--ink-3`, `--fail`) 재사용. 새 토큰 도입 없음.
+- `#a855f7` 는 기존 graph-client.js `COLOR.bypassed` / legend 하드코딩과 동일값 — 별도 변수 없이 일치.
+- legend(line ~3090) 색상 해시(`#22c55e`/`#eab308`/`#94a3b8`/`#ef4444`/`#a855f7`) 는 이번 WP 범위에서 `var(--done)` 등으로 치환 검토 가능하나, **선택 사항** — 선(先) 요약 칩만 확정하고 legend 치환은 후속 리팩토링(회귀 최소화).
+
+#### 3.13.6 graph-client.js 영향
+
+- `updateSummary(stats)` 의 `el.querySelector('[data-stat="..."]')` → `<b data-stat="...">` 로 타겟 맞춤 (태그만 변경, 선택자 유지).
+- `.dep-graph-summary-extra` 로직 기존 그대로.
+- **JS 변경 없음** 시나리오: `<b>` / `<span>` 차이는 `querySelector` 가 구분하지 않으므로 선택자 `[data-stat]` 만 유지하면 JS 수정 0. 다만 TSK 분리를 위해 `test_monitor_dep_graph_summary.py` 에서 `<b data-stat>` 또는 `<span data-stat>` 양쪽 허용.
+
+#### 3.13.7 legend parity
+
+- `.dep-stat-{state}` 색상 토큰과 `#dep-graph-legend .leg-item` 의 inline `style="color:..."` 해시가 일치해야 함.
+- 테스트: `test_dep_graph_summary_legend_parity` — 양쪽 HTML에서 state별 색상값 추출해 동일성 assert.
+
+#### 3.13.8 접근성 · 성능
+
+- 색만으로 상태를 구분하지 않음 — **레이블이 1차 단서**, 색은 보조. 색맹 대응 OK.
+- SSR HTML 크기 증분 ~400 bytes (6 칩 × 약 60 bytes). 무시 가능.
+- 폴링 주기 갱신 시 DOM 조작은 기존과 동일(`<b>` 의 `textContent` 만 교체).
+
+#### 3.13.9 비목표 재확인
+
+- 숫자 클릭 → 해당 상태 필터링(인터랙션) 비대상.
+- 완료율 %·ETA 등 추가 메트릭 비대상.
+- `#dep-graph-legend` 자체 색상 토큰 리팩토링(하드코딩 해시 → CSS 변수) 비대상 — 후속 정리 트랙.
+
 ## 4. 테스트 전략
 
 ### 단위 테스트 (pytest + Python stdlib만)
@@ -721,6 +850,11 @@ docs/**/wbs.md                  merge=wbs-status-smart
 | `test_static_route_whitelist_allows_vendor_js` | `GET /static/cytoscape.min.js` → 200 |
 | `test_static_route_rejects_traversal` | `GET /static/../secrets` → 404 |
 | `test_graph_section_embedded_in_dashboard` | `_section_dep_graph` 가 `<div id="dep-graph-canvas">` 포함 |
+| `test_dep_graph_summary_labels_ko` | `lang=ko` 렌더에 `<em>총</em>`, `<em>완료</em>`, `<em>진행</em>`, `<em>대기</em>`, `<em>실패</em>`, `<em>바이패스</em>` 6종 존재 |
+| `test_dep_graph_summary_labels_en` | `?lang=en` 시 `Total/Done/Running/Pending/Failed/Bypassed` 치환 |
+| `test_dep_graph_summary_color_matches_palette` | `.dep-stat-done` 규칙이 `var(--done)` 적용, `.dep-stat-bypassed` 는 `#a855f7`, `.dep-stat-total` 은 `var(--ink)` |
+| `test_dep_graph_summary_legend_parity` | `.dep-stat-{state}` 색상과 `#dep-graph-legend` 의 동일 state 색상 1:1 일치 |
+| `test_dep_graph_summary_preserves_data_stat_selector` | `[data-stat="total\|done\|running\|pending\|failed\|bypassed"]` 6개 모두 존재 (graph-client.js 계약 보존) |
 
 ### 수동 E2E
 

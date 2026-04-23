@@ -1,10 +1,10 @@
 # WBS - dev-monitor v3
 
-> version: 1.1
-> description: dev-monitor 대시보드 v3 — 프로젝트/서브프로젝트 격리 + 실시간 의존성 그래프 + pane URL 버그 수정 + i18n/폰트 UX 개선 + (v1.1) Dep-graph 노드 카드 디자인 / WP 카드 fold 영속성 / 워크트리 머지 충돌 저감 MVP
+> version: 1.2
+> description: dev-monitor 대시보드 v3 — 프로젝트/서브프로젝트 격리 + 실시간 의존성 그래프 + pane URL 버그 수정 + i18n/폰트 UX 개선 + (v1.1) Dep-graph 노드 카드 디자인 / WP 카드 fold 영속성 / 워크트리 머지 충돌 저감 MVP + (v1.2) Dep-Graph 요약 카드 범례화 + 상태별 색상
 > depth: 3
 > start-date: 2026-04-22
-> target-date: 2026-05-05
+> target-date: 2026-05-06
 > updated: 2026-04-23
 
 ---
@@ -563,9 +563,9 @@ monitor-server, monitor-launcher
 
 ---
 
-## WP-04: Dep-Graph 노드 카드 디자인 개편
-- schedule: 2026-04-24 ~ 2026-04-26
-- description: 현재 단일 라인 레이블(title-only, 11px, 단색)을 HTML 기반 2줄 카드(ID monospace + 제목 sans + 상태 3중 시각 단서)로 교체. `cytoscape-node-html-label` 플러그인 벤더링.
+## WP-04: Dep-Graph 노드 카드 디자인 개편 + 요약 카드 범례화
+- schedule: 2026-04-24 ~ 2026-04-27
+- description: (1) 현재 단일 라인 레이블(title-only, 11px, 단색)을 HTML 기반 2줄 카드(ID monospace + 제목 sans + 상태 3중 시각 단서)로 교체, `cytoscape-node-html-label` 플러그인 벤더링. (2) 섹션 헤더 우측 요약 숫자(`4 · 2 · 1 · 1 · 0 · 0`)를 `{레이블} {숫자}` 칩으로 교체하고 상태 색상 팔레트와 1:1 일치시켜, 노드/legend/요약 세 위치의 색상 언어를 통일한다.
 
 ### TSK-04-01: cytoscape-node-html-label 벤더 추가
 - category: infrastructure
@@ -684,6 +684,53 @@ monitor-server, monitor-launcher
 - api-spec: -
 - data-model: -
 - ui-spec: TRD §3.10.4
+
+---
+
+### TSK-04-04: Dep-Graph summary 칩 SSR + i18n + CSS
+- category: development
+- domain: frontend
+- model: sonnet
+- status: [ ]
+- priority: medium
+- assignee: -
+- schedule: 2026-04-27 ~ 2026-04-27
+- tags: dep-graph, summary, legend, i18n, css, accessibility, frontend
+- depends: TSK-03-04
+- blocked-by: -
+- entry-point: -
+- note: WP-04의 노드 카드 디자인과 동일한 섹션(`_section_dep_graph`)·동일한 색상 팔레트를 다룬다. TSK-04-01/02/03(노드 카드)과 독립적이어서 병렬 가능하지만, 같은 파일 충돌을 피하려면 04-03 이후 직렬 수행 권장. `graph-client.js:updateSummary` 는 `[data-stat]` 선택자만 사용하므로 태그 변경(`<span>→<b>`)과 무관하게 동작 — JS 수정 0 목표.
+
+#### PRD 요구사항
+- prd-ref: PRD §2 P1-8, §4 S9, §5 AC-30, AC-31, AC-32
+- requirements:
+  - `_section_dep_graph` summary HTML 교체: 6개 `<span class="dep-stat dep-stat-{state}"><em>{label}</em> <b data-stat="{state}">-</b></span>`
+  - `_t` 테이블에 i18n 키 6종 추가: `dep_stat_total`, `dep_stat_done`, `dep_stat_running`, `dep_stat_pending`, `dep_stat_failed`, `dep_stat_bypassed` (ko/en)
+  - `.dep-stat` / `.dep-stat-{state}` CSS 규칙 추가 — `var(--done)`, `var(--run)`, `var(--ink-3)`, `var(--fail)`, `#a855f7`, `var(--ink)` 매핑
+  - `[data-stat]` 선택자 6종 모두 유지 (graph-client.js:updateSummary 계약)
+  - `.dep-graph-summary-extra`(크리티컬 깊이/병목 수) 표시 유지
+- acceptance:
+  - AC-30: `lang=ko` / `lang=en` 렌더에서 6개 레이블이 정확히 표시
+  - AC-31: 5개 상태 칩의 글자색이 팔레트 토큰과 일치, `total` 은 기본 텍스트 색
+  - AC-32: 칩 색상과 `#dep-graph-legend` 색상이 1:1 일치
+  - `graph-client.js:updateSummary` 회귀 없음 (기존 `test_monitor_*` 통과)
+- constraints:
+  - SSR 마크업 변경 우선, JS 수정은 선택자 유지 시 0으로 목표
+  - 새 CSS 토큰 도입 금지 — 기존 `--done`/`--run`/`--ink`/`--ink-3`/`--fail` 재사용
+  - `#a855f7`(bypassed)는 legend·graph-client.js 기존 하드코딩값과 동일값 사용
+  - 색만으로 상태 구분하지 않음 — 레이블 텍스트가 1차 단서(접근성)
+- test-criteria:
+  - `test_dep_graph_summary_labels_ko`
+  - `test_dep_graph_summary_labels_en`
+  - `test_dep_graph_summary_color_matches_palette`
+  - `test_dep_graph_summary_legend_parity`
+  - `test_dep_graph_summary_preserves_data_stat_selector`
+
+#### 기술 스펙 (TRD)
+- tech-spec: TRD §3.13
+- api-spec: `/api/graph` 응답 스키마 변경 없음 (기존 `stats.{total,done,running,pending,failed,bypassed,critical_path_depth,bottleneck_count}` 재사용)
+- data-model: -
+- ui-spec: TRD §3.13.3(HTML), §3.13.4(i18n), §3.13.5(CSS), §3.13.7(legend parity)
 
 ---
 
@@ -960,6 +1007,10 @@ graph LR
   TSK-06-02 --> TSK-06-04
   TSK-06-03 --> TSK-06-04
 
+  %% WP-04 TSK-04-04 (v1.2) — Dep-Graph summary chip
+  TSK-04-04["TSK-04-04<br/>summary chip + i18n"]
+  TSK-03-04 --> TSK-04-04
+
   style TSK-00-01 fill:#e8f5e9,stroke:#2e7d32
   style TSK-00-02 fill:#e8f5e9,stroke:#2e7d32
   style TSK-00-03 fill:#e8f5e9,stroke:#c62828,stroke-width:2px
@@ -971,12 +1022,12 @@ graph LR
 
 > `dep-analysis.py --graph-stats` 기준 (`fan_in` = 이 Task를 `depends`로 지목한 downstream Task 수)
 >
-> v1.1 확장(WP-04/05/06) 포함 기준. WP-04 는 3-task 선형 체인, WP-05 는 독립, WP-06 는 01/02/03 → 04 로 수렴.
+> v1.1 확장(WP-04/05/06) + v1.2 확장(WP-04/TSK-04-04) 포함 기준. WP-04 는 3-task 선형 체인(01→02→03) + TSK-04-04(TSK-03-04 직접 의존, 01~03과 병렬 가능), WP-05 는 독립, WP-06 는 01/02/03 → 04 로 수렴.
 
 | 항목 | 값 | 임계값 |
 |------|-----|--------|
-| 최장 체인 깊이 | 3 (WP-00~03 경로 유지) / 2 (WP-04) / 2 (WP-06) | 3 초과 시 검토 |
-| 전체 Task 수 | 20 (기존 12 + v1.1 신규 8) | — |
+| 최장 체인 깊이 | 3 (WP-00~03 경로 유지) / 2 (WP-04: 01→02→03) / 2 (WP-06) / 1 (TSK-04-04: 단일) | 3 초과 시 검토 |
+| 전체 Task 수 | 21 (기존 12 + v1.1 신규 8 + v1.2 신규 1) | — |
 | Fan-in ≥ 3 Task 수 | 1 (TSK-00-03) | 계약 추출 후보 |
 | Diamond 패턴 수 | 0 | 자주 발생 시 apex 계약 추출 |
 
@@ -988,6 +1039,7 @@ graph LR
 | TSK-06-04 | 3 | — (수렴점, WP-06 문서화) | — (WP 종결 Task) |
 | TSK-00-01 | 2 | TSK-01-01, TSK-01-02 | ✅ 이미 계약 전용으로 분리 완료 |
 | TSK-00-02 | 2 | TSK-01-01, TSK-01-02 | ✅ 이미 계약 전용으로 분리 완료 |
+| TSK-03-04 | 1 | TSK-04-04 | — (v1.2에서 TSK-04-04 추가로 +1) |
 | TSK-04-02 | 1 | TSK-04-03 | — |
 
 **Diamond 패턴**: 없음. TSK-00-01/02/03이 TSK-01-01과 TSK-01-02로 팬아웃되지만 downstream에서 단일 apex로 재수렴하지 않아 diamond가 형성되지 않는다.
@@ -1016,3 +1068,21 @@ graph LR
 ### 실행 경로
 - `/dev:dev-team monitor-v3` — tmux 세션 안에서 호출. 각 WP 별 worktree 생성 → WP 리더 spawn → 워커가 DDTR 사이클 수행 → early-merge.
 - WP-06 내부 재귀 주의: merge-preview / rerere / 드라이버 자체가 WP-06 산출물이므로 **WP-06 실행 중에는 해당 기능 없이 진행** (TRD §3.12.8).
+
+---
+
+## v1.2 확장 요약 (WP-04 범위 확장 — TSK-04-04)
+
+### 배경
+- v1.1 릴리스 후 실사용에서 "Dep-Graph 섹션 헤더 우측 숫자(`4 · 2 · 1 · 1 · 0 · 0`)가 각각 무엇인지 범례가 없어 식별이 어렵다"는 피드백 — 캔버스 아래 legend와 노드는 색상 구분되어 있으나, **요약 숫자만 단색 평문**이라 색상 언어가 단절된 문제.
+
+### 변경 요약
+- **TSK-04-04** (1 task, 2026-04-27): Dep-Graph summary HTML을 `{레이블} {숫자}` 칩으로 교체, 레이블/숫자 글자색을 노드·legend 색상 팔레트와 1:1 일치. i18n(ko/en) 적용. `[data-stat]` 계약 보존으로 `graph-client.js` 회귀 0. **별도 WP가 아니라 WP-04 내 TSK로 통합** — 같은 섹션(`_section_dep_graph`)·같은 색상 팔레트를 다루므로 노드 카드 디자인과 함께 처리.
+
+### 관련 문서
+- PRD: §2 P1-8 / §3 비목표 확장(요약 카드 추가 메트릭/인터랙션) / §4 S9 / §5 AC-30~AC-32
+- TRD: §1 변경 파일 확장 / §3.13
+
+### 실행 경로
+- `/dev:dev TSK-04-04 --docs docs/monitor-v3` — 단일 Task로 해결 가능. 의존: TSK-03-04 완료 후 (노드 카드 TSK-04-01/02/03과는 병렬 가능하나 같은 파일 충돌 회피를 위해 TSK-04-03 이후 직렬 수행 권장).
+- 수용 기준 검증 시 실제 브라우저에서 `http://localhost:7321/?lang=ko` 및 `?lang=en` 양쪽 확인.

@@ -27,6 +27,7 @@
 5. **타이틀 i18n** — 한국어/영어 토글, 기본 한국어.
 6. **WP 카드 Fold 상태 영속성** — 사용자가 접어둔 WP 카드가 5초 자동 refresh 및 하드 리로드 후에도 접힌 상태로 유지된다.
 7. **워크트리 머지 충돌 저감 MVP** — `/dev-team` 머지 단계의 충돌 빈도와 해결 토큰비용을 낮추는 도구셋(merge-preview + git rerere + 커스텀 머지 드라이버) 도입.
+8. **Dep-Graph 요약 카드 범례화 + 상태별 색상** (WP-04 범위 확장) — Dependency Graph 섹션 헤더 우측의 숫자 나열(`4 · 2 · 1 · 1 · 0 · 0`)이 각 숫자의 의미(총/완료/진행/대기/실패/바이패스)를 레이블로 식별할 수 있고, 숫자 색상도 노드 색상 팔레트(done/running/pending/failed/bypassed)와 일치하여 한눈에 진행 상태를 읽을 수 있다. WP-04(노드 카드 디자인 개편)에 TSK-04-04로 통합 — 같은 섹션(`_section_dep_graph`)·같은 색상 팔레트를 건드리므로 단일 WP 내에서 일관성 있게 처리.
 
 ## 3. 비목표
 
@@ -42,6 +43,8 @@
 - Fold 상태의 다중 탭 동기화(`storage` 이벤트)는 비대상.
 - 머지 충돌 저감 Layer 1(WP별 파일 오너십 사전 선언) 및 Layer 5(충돌 예측 대시보드 카드)는 비대상 — 후속 릴리스에서 검토.
 - 모놀리식 파일(예: `scripts/monitor-server.py`) 분할 리팩토링은 비대상(별도 트랙).
+- 요약 카드에 추가 메트릭(완료율 %, ETA, 진행 시간 등) 표시는 비대상 — 기존 6개 카운트(total/done/running/pending/failed/bypassed) + 크리티컬 깊이/병목 수만 유지.
+- 요약 카드 숫자 클릭으로 해당 상태만 필터링하는 인터랙션은 비대상(후속 릴리스 검토). 이번 릴리스는 표시·색상 범례까지만.
 
 ## 4. 사용자 시나리오
 
@@ -90,6 +93,16 @@
 
 사용자가 `/dev-team`으로 3개 WP를 병렬 실행. 각 워커는 Task `[im]` 단계 진입 전 `merge-preview.py` 를 자동 실행 → main과의 잠재 충돌을 **미리 탐지**해 in-context로 해결(토큰 저렴). `git rerere` 활성화로 **반복 충돌 자동 해결**, `.gitattributes` 커스텀 머지 드라이버가 `state.json` / `wbs.md` / `todo.md` 3-way 병합을 자동화한다. 최종 머지 실패율·해결 토큰비용이 대폭 감소한다.
 
+### S9. Dep-Graph 요약 카드 읽기 (WP-04 / TSK-04-04)
+
+사용자가 Dependency Graph 섹션을 열면 헤더 우측에 요약 카드가 보인다. v2는 `4 · 2 · 1 · 1 · 0 · 0` 형태로 숫자만 나열되어 어떤 숫자가 무엇을 의미하는지 알 수 없었다. v3에서는 각 숫자가 **레이블 + 상태 색상 칩** 형태로 표시된다:
+
+- `총 4` (기본색) · `완료 2` (초록, `--done`) · `진행 1` (노랑, `--run`) · `대기 1` (회색, `--ink-3`) · `실패 0` (빨강, `--fail`) · `바이패스 0` (보라, `#a855f7`)
+- 뒤이어 `| 크리티컬 패스 깊이 D | 병목 Task K개` 는 기존 그대로.
+- 한국어/영어 토글(`?lang=en`) 시 레이블도 i18n 적용 — `Total / Done / Running / Pending / Failed / Bypassed`.
+- 숫자는 기존 노드 색상 팔레트와 **1:1 일치**하여 노드 색과 요약 숫자 색이 같은 상태를 지시함을 시각적으로 알 수 있다.
+- 캔버스 하단 범례(legend)와 요약 칩 색상도 일치시켜, 세 위치(노드/범례/요약)의 색상 언어가 통일된다.
+
 ## 5. 수용 기준
 
 | # | 기준 | 검증 방법 |
@@ -123,6 +136,9 @@
 | AC-27 | `.gitattributes` 의 `state-json-smart` 드라이버가 양쪽 `phase_history`를 union하고 `[xx]>[ts]>[im]>[dd]>[ ]` 우선순위로 status를 선택한다 | 단위 테스트 `test_merge_state_json_phase_history_union`, `test_merge_state_json_status_priority` |
 | AC-28 | `docs/todo.md` 는 `union` 머지로 양쪽 라인이 모두 보존된다 | 단위 테스트 `test_merge_todo_union` |
 | AC-29 | `skills/dev-build/SKILL.md` 워커 프롬프트가 Task `[im]` 진입 전 `merge-preview.py` 실행 단계를 명시한다 | grep 검증 + 기존 dev-build 테스트 regression 없음 |
+| AC-30 | Dep-Graph 요약 카드의 6개 카운트(total/done/running/pending/failed/bypassed)가 각각 한국어(기본) 및 영어(`?lang=en`) 레이블과 함께 `{레이블} {숫자}` 형태로 표시된다 | 단위 테스트 `test_dep_graph_summary_labels_ko`, `test_dep_graph_summary_labels_en` |
+| AC-31 | done/running/pending/failed/bypassed 요약 칩의 글자색이 노드 색상 팔레트(`--done`/`--run`/`--ink-3`/`--fail`/`#a855f7`)와 동일하며, `total` 칩은 기본 텍스트 색을 따른다 | 단위 테스트 `test_dep_graph_summary_color_matches_palette` + 브라우저 확인 |
+| AC-32 | 요약 칩 색상·레이블이 캔버스 하단 `#dep-graph-legend` 의 항목 색상·문구와 1:1 일치한다 | 단위 테스트 `test_dep_graph_summary_legend_parity` |
 
 ## 6. 릴리스 조건
 
