@@ -152,6 +152,7 @@ def start_server(port: int, docs: str, project_root: str, no_tmux: bool = False)
         str(server_script),
         "--port", str(port),
         "--docs", docs,
+        "--project-root", project_root,
     ]
     if no_tmux:
         cmd.append("--no-tmux")

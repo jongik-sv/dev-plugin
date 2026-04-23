@@ -526,7 +526,7 @@ def _build_phase_history_tail(history) -> List[PhaseEntry]:
     return result
 
 
-_WBS_WP_RE = re.compile(r"^##\s+(WP-[\w-]+)\s*:", re.MULTILINE)
+_WBS_WP_RE = re.compile(r"^##\s+(WP-[\w-]+)\s*:\s*(.*?)\s*$", re.MULTILINE)
 _WBS_TSK_RE = re.compile(r"^###\s+(TSK-[\w-]+)\s*:\s*(.+?)\s*$", re.MULTILINE)
 
 
@@ -586,6 +586,35 @@ def _load_wbs_title_map(docs_dir: Path):
                     token.strip() for token in rest.split(",") if token.strip()
                 ]
     _commit(current_tsk, current_title, current_wp, current_depends)
+    return result
+
+
+def _load_wbs_wp_titles(docs_dir: Path) -> dict:
+    """docs_dir/wbs.md 를 훑어 ``{WP-ID: wp_title}`` 맵 반환.
+
+    ``## WP-XX: 제목`` 라인에서 제목 부분만 추출한다. 제목이 비어 있으면
+    해당 WP는 맵에 포함되지 않는다 (렌더러는 fallback 으로 WP-ID 를 표시).
+    파싱 실패(파일 없음/IO 오류/크기 초과)는 조용히 빈 맵 fallback.
+    """
+    wbs_path = docs_dir / "wbs.md"
+    try:
+        size = wbs_path.stat().st_size
+    except OSError:
+        return {}
+    if size > _MAX_STATE_BYTES * 4:
+        return {}
+    try:
+        with open(wbs_path, "r", encoding="utf-8") as fp:
+            text = fp.read()
+    except OSError:
+        return {}
+
+    result: dict = {}
+    for m in _WBS_WP_RE.finditer(text):
+        wp_id = m.group(1)
+        title = (m.group(2) or "").strip()
+        if title:
+            result[wp_id] = title
     return result
 
 
@@ -724,6 +753,126 @@ def scan_features(docs_dir: Path) -> List[WorkItem]:
         return _load_feature_title(state_path.parent), None, []
 
     return _scan_dir(docs_dir, "features", "feat", _feat_lookup)
+
+
+# ---------------------------------------------------------------------------
+# --- worktree aggregation (dev-team live status) ---
+# ---------------------------------------------------------------------------
+
+
+def _discover_worktree_docs(project_root: Optional[Path], rel_subpath: Path) -> List[Path]:
+    """``{project_root}/.claude/worktrees/*/{rel_subpath}`` 중 실제 디렉터리만 수집.
+
+    `/dev-team` 은 각 WP 를 `.claude/worktrees/{WT_NAME}/` 워크트리에서 돌리며
+    해당 트리의 `docs/tasks/*/state.json` 을 갱신한다. main 머지 전에도 대시보드가
+    진행 상황을 비추려면 동일 프로젝트의 모든 워크트리 docs 를 함께 훑어야 한다.
+
+    - ``project_root`` 이 ``None`` 이거나 경로가 디렉터리가 아니면 ``[]``.
+    - ``.claude/worktrees`` 자체가 없으면 ``[]`` (에러 없음).
+    - 각 worktree child 에서 ``rel_subpath`` 하위가 디렉터리로 존재할 때만 포함.
+    - 정렬된 결정론적 순서 반환.
+    """
+    if project_root is None:
+        return []
+    project_root = Path(project_root)
+    if not project_root.is_dir():
+        return []
+    wt_root = project_root / ".claude" / "worktrees"
+    if not wt_root.is_dir():
+        return []
+    result: List[Path] = []
+    for child in sorted(wt_root.iterdir()):
+        if not child.is_dir():
+            continue
+        candidate = child / rel_subpath
+        if candidate.is_dir():
+            result.append(candidate)
+    return result
+
+
+def _workitem_updated_key(item: WorkItem) -> str:
+    """머지 시 최신 판별에 쓰이는 키. ``updated`` 결측 시 빈 문자열로 폴백한다.
+
+    ISO 8601 문자열은 사전식 비교로 시간 순서와 동일하므로 파싱 불필요.
+    """
+    # `last_event_at` 은 status change 타임스탬프, `started_at`/`completed_at` 은 보조.
+    # state.json 원본의 ``updated`` 가 WorkItem 에 직접 매핑되지는 않지만
+    # `last_event_at` 이 사실상 "마지막 이벤트 시각" 으로 동일 역할을 한다.
+    return item.last_event_at or item.completed_at or item.started_at or ""
+
+
+def _merge_workitems_newest_wins(
+    main_items: List[WorkItem],
+    worktree_items_lists: List[List[WorkItem]],
+) -> List[WorkItem]:
+    """``id`` 기준 중복 제거. 동일 id 에 대해 **최신 타임스탬프 우선**.
+
+    - main 결과로 시작 → 각 worktree 결과를 순서대로 병합.
+    - 충돌 시 ``last_event_at`` (없으면 completed_at/started_at) 사전식 비교.
+    - 타이브레이크(동일 타임스탬프 또는 어느 한쪽 결측): **worktree 우선**
+      (진행 중 워크트리가 더 최신 상태일 가능성이 높음).
+    - 입력 순서 유지 — 신규 id 는 끝에 추가, 기존 id 는 자리 그대로 값만 교체.
+    """
+    merged: Dict[str, WorkItem] = {}
+    order: List[str] = []
+
+    for item in main_items:
+        if item.id not in merged:
+            merged[item.id] = item
+            order.append(item.id)
+
+    for wt_items in worktree_items_lists:
+        for item in wt_items:
+            existing = merged.get(item.id)
+            if existing is None:
+                merged[item.id] = item
+                order.append(item.id)
+                continue
+            # 동률이면 worktree 우선(>=), 엄격히 더 최신일 때만 확실히 교체.
+            if _workitem_updated_key(item) >= _workitem_updated_key(existing):
+                merged[item.id] = item
+
+    return [merged[i] for i in order]
+
+
+def _aggregated_scan(
+    docs_dir: Path,
+    project_root: Optional[Path],
+    scan_fn: Callable[[Path], List[WorkItem]],
+) -> List[WorkItem]:
+    """main ``docs_dir`` + 모든 worktree 동일 상대경로를 훑어 머지한다.
+
+    ``docs_dir`` 이 ``project_root`` 하위가 아니면 worktree 탐색을 skip 하고
+    기존 ``scan_fn(docs_dir)`` 결과를 그대로 반환한다(외부 절대 경로 케이스).
+    """
+    docs_dir = Path(docs_dir)
+    main_items = scan_fn(docs_dir)
+    if project_root is None:
+        return main_items
+    project_root = Path(project_root)
+    try:
+        rel = docs_dir.resolve().relative_to(project_root.resolve())
+    except (ValueError, OSError):
+        return main_items
+    wt_docs_list = _discover_worktree_docs(project_root, rel)
+    if not wt_docs_list:
+        return main_items
+    wt_items_lists = [scan_fn(wt_docs) for wt_docs in wt_docs_list]
+    return _merge_workitems_newest_wins(main_items, wt_items_lists)
+
+
+def scan_tasks_aggregated(
+    docs_dir: Path, project_root: Optional[Path] = None,
+) -> List[WorkItem]:
+    """``scan_tasks`` + worktree 집계. ``project_root`` 미지정 시 main-only 폴백."""
+    return _aggregated_scan(docs_dir, project_root, scan_tasks)
+
+
+def scan_features_aggregated(
+    docs_dir: Path, project_root: Optional[Path] = None,
+) -> List[WorkItem]:
+    """``scan_features`` + worktree 집계. ``project_root`` 미지정 시 main-only 폴백."""
+    return _aggregated_scan(docs_dir, project_root, scan_features)
 
 
 # ---------------------------------------------------------------------------
@@ -4285,8 +4434,14 @@ def _handle_graph_api(
         effective_docs_dir = str(Path(base_docs_dir) / subproject)
 
     # Scan tasks and signals (fresh, no cache)
+    project_root_str = _server_attr(handler, "project_root")
+    project_root_path = Path(project_root_str) if project_root_str else None
     try:
-        tasks = list(scan_tasks_fn(effective_docs_dir) or [])
+        tasks = list(
+            _aggregated_scan(
+                Path(effective_docs_dir), project_root_path, scan_tasks_fn,
+            ) or []
+        )
         signals = list(scan_signals_fn() or [])
     except Exception as exc:
         sys.stderr.write(f"/api/graph scan failed: {exc!r}\n")
@@ -4671,6 +4826,8 @@ def _build_render_state(
     is_multi_mode = bool(available_subprojects)
     project_name = os.path.basename(os.path.normpath(project_root)) if project_root else ""
 
+    wp_titles = _load_wbs_wp_titles(Path(docs_dir)) if docs_dir else {}
+
     return {
         "generated_at": _now_iso_z(),
         "project_root": project_root or "",
@@ -4686,6 +4843,7 @@ def _build_render_state(
         "available_subprojects": available_subprojects,
         "is_multi_mode": is_multi_mode,
         "lang": lang,
+        "wp_titles": wp_titles,
     }
 
 
@@ -4812,12 +4970,32 @@ def _handle_api_state(
         # --- 3. effective_docs_dir for scan_tasks / scan_features ---
         effective_docs_dir: str = _resolve_effective_docs_dir(docs_dir, subproject)
 
+        # --- 3b. features aggregator for "all" in multi-mode ---
+        _base_docs = docs_dir
+        _avail_sps = available_subprojects
+        _project_root_path = Path(project_root) if project_root else None
+
+        def _scan_features_api(docs_dir_arg) -> List[WorkItem]:
+            if subproject == "all" and is_multi_mode:
+                items: List[WorkItem] = list(
+                    _aggregated_scan(Path(_base_docs), _project_root_path, scan_features) or []
+                )
+                for sp in _avail_sps:
+                    items.extend(
+                        _aggregated_scan(Path(_base_docs) / sp, _project_root_path, scan_features) or []
+                    )
+                return items
+            return _aggregated_scan(Path(docs_dir_arg), _project_root_path, scan_features)
+
+        def _scan_tasks_api(docs_dir_arg) -> List[WorkItem]:
+            return _aggregated_scan(Path(docs_dir_arg), _project_root_path, scan_tasks)
+
         # --- 4. Build base snapshot using effective_docs_dir ---
         payload = _build_state_snapshot(
             project_root=project_root,
             docs_dir=effective_docs_dir,
-            scan_tasks=scan_tasks,
-            scan_features=scan_features,
+            scan_tasks=_scan_tasks_api,
+            scan_features=_scan_features_api,
             scan_signals=scan_signals,
             list_tmux_panes=list_tmux_panes,
         )
@@ -5008,11 +5186,28 @@ class MonitorHandler(BaseHTTPRequestHandler):
                 raw_panes = filtered.get("tmux_panes") or []
             return raw_panes
 
+        _project_root_path = Path(project_root) if project_root else None
+
+        def _scan_features_f(docs_dir_arg) -> List[WorkItem]:
+            if subproject == "all" and is_multi_mode:
+                items: List[WorkItem] = list(
+                    _aggregated_scan(Path(base_docs_dir), _project_root_path, scan_features) or []
+                )
+                for sp in available_subprojects:
+                    items.extend(
+                        _aggregated_scan(Path(base_docs_dir) / sp, _project_root_path, scan_features) or []
+                    )
+                return items
+            return _aggregated_scan(Path(docs_dir_arg), _project_root_path, scan_features)
+
+        def _scan_tasks_f(docs_dir_arg) -> List[WorkItem]:
+            return _aggregated_scan(Path(docs_dir_arg), _project_root_path, scan_tasks)
+
         state = _build_render_state(
             project_root=project_root,
             docs_dir=effective_docs_dir,
-            scan_tasks=scan_tasks,
-            scan_features=scan_features,
+            scan_tasks=_scan_tasks_f,
+            scan_features=_scan_features_f,
             scan_signals=_scan_signals_f,
             list_tmux_panes=_list_panes_f,
             subproject=subproject,

@@ -28,6 +28,9 @@ WorkItem = monitor_server.WorkItem
 PhaseEntry = monitor_server.PhaseEntry
 scan_tasks = monitor_server.scan_tasks
 scan_features = monitor_server.scan_features
+scan_tasks_aggregated = monitor_server.scan_tasks_aggregated
+scan_features_aggregated = monitor_server.scan_features_aggregated
+_discover_worktree_docs = monitor_server._discover_worktree_docs
 
 
 def _write(path: Path, text: str) -> None:
@@ -478,6 +481,170 @@ class IntegrationTests(unittest.TestCase):
         self.assertTrue(all(i.kind == "feat" for i in feats))
         total = len(tasks) + len(feats)
         self.assertEqual(total, 4)
+
+
+class WorktreeAggregationTests(unittest.TestCase):
+    """scan_tasks_aggregated / scan_features_aggregated — worktree merge.
+
+    `/dev-team` 이 돌면 실제 상태는 ``.claude/worktrees/{WT}/docs/tasks/*/state.json``
+    에 쓰인다. main ``docs/`` 만 보는 기존 스캔은 PENDING 만 노출한다. 여기서는
+    main + worktree 를 동시에 훑어 최신 ``state.json`` 이 선택되는지 검증한다.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp(prefix="monitor-wt-"))
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.project_root = self.tmp
+        self.main_docs = self.tmp / "docs"
+        self.main_docs.mkdir()
+
+    def _write_task_state(self, docs_dir: Path, tsk_id: str, data: dict) -> None:
+        _write_state(docs_dir / "tasks" / tsk_id / "state.json", data)
+
+    def _worktree_docs(self, wt_name: str, subpath: str = "docs") -> Path:
+        wt_docs = self.project_root / ".claude" / "worktrees" / wt_name / subpath
+        wt_docs.mkdir(parents=True, exist_ok=True)
+        return wt_docs
+
+    # ------------------------------------------------------------------ cases
+    def test_worktree_only_task_is_merged_in(self) -> None:
+        # main 에는 아예 없음, worktree 에서 막 생성됨
+        wt_docs = self._worktree_docs("WP-01")
+        self._write_task_state(wt_docs, "TSK-01-01", {
+            "status": "[dd]", "started_at": "2026-04-23T10:00:00Z",
+            "last": {"event": "design.ok", "at": "2026-04-23T10:00:10Z"},
+            "phase_history": [], "updated": "2026-04-23T10:00:10Z",
+        })
+
+        items = scan_tasks_aggregated(self.main_docs, self.project_root)
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0].id, "TSK-01-01")
+        self.assertEqual(items[0].status, "[dd]")
+
+    def test_worktree_newer_wins_over_main(self) -> None:
+        # main 은 오래된 PENDING, worktree 는 방금 갱신된 [im]
+        self._write_task_state(self.main_docs, "TSK-01-01", {
+            "status": "[..]", "last": {"event": "init", "at": "2026-04-23T09:00:00Z"},
+            "phase_history": [], "updated": "2026-04-23T09:00:00Z",
+        })
+        wt_docs = self._worktree_docs("WP-01")
+        self._write_task_state(wt_docs, "TSK-01-01", {
+            "status": "[im]", "last": {"event": "build.ok", "at": "2026-04-23T10:00:00Z"},
+            "phase_history": [], "updated": "2026-04-23T10:00:00Z",
+        })
+
+        items = scan_tasks_aggregated(self.main_docs, self.project_root)
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0].status, "[im]")
+
+    def test_main_newer_wins_over_stale_worktree(self) -> None:
+        # 머지 완료된 상태: main 이 최신, worktree 디렉터리가 아직 남아 잔재 state 보유
+        self._write_task_state(self.main_docs, "TSK-01-01", {
+            "status": "[xx]", "last": {"event": "refactor.ok", "at": "2026-04-23T11:00:00Z"},
+            "phase_history": [], "updated": "2026-04-23T11:00:00Z",
+        })
+        wt_docs = self._worktree_docs("WP-01")
+        self._write_task_state(wt_docs, "TSK-01-01", {
+            "status": "[ts]", "last": {"event": "test.ok", "at": "2026-04-23T10:00:00Z"},
+            "phase_history": [], "updated": "2026-04-23T10:00:00Z",
+        })
+
+        items = scan_tasks_aggregated(self.main_docs, self.project_root)
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0].status, "[xx]")
+
+    def test_tiebreak_equal_timestamp_worktree_wins(self) -> None:
+        ts = "2026-04-23T10:00:00Z"
+        self._write_task_state(self.main_docs, "TSK-01-01", {
+            "status": "[..]", "last": {"event": "init", "at": ts},
+            "phase_history": [], "updated": ts,
+        })
+        wt_docs = self._worktree_docs("WP-01")
+        self._write_task_state(wt_docs, "TSK-01-01", {
+            "status": "[dd]", "last": {"event": "design.ok", "at": ts},
+            "phase_history": [], "updated": ts,
+        })
+
+        items = scan_tasks_aggregated(self.main_docs, self.project_root)
+        self.assertEqual(len(items), 1)
+        # 타이브레이크: 진행 중 worktree 우선
+        self.assertEqual(items[0].status, "[dd]")
+
+    def test_worktree_missing_docs_dir_is_skipped(self) -> None:
+        # .claude/worktrees/WP-FOO 는 있지만 docs/ 없음 — 에러 없이 main-only
+        (self.project_root / ".claude" / "worktrees" / "WP-FOO").mkdir(parents=True)
+        self._write_task_state(self.main_docs, "TSK-MAIN", {
+            "status": "[..]", "last": {}, "phase_history": []})
+
+        items = scan_tasks_aggregated(self.main_docs, self.project_root)
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0].id, "TSK-MAIN")
+
+    def test_no_worktrees_dir_falls_back_to_main_only(self) -> None:
+        # .claude/worktrees/ 자체 부재
+        self._write_task_state(self.main_docs, "TSK-MAIN", {
+            "status": "[..]", "last": {}, "phase_history": []})
+
+        items = scan_tasks_aggregated(self.main_docs, self.project_root)
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0].id, "TSK-MAIN")
+        # main-only 결과가 scan_tasks 와 동일해야 회귀 방지
+        baseline = scan_tasks(self.main_docs)
+        self.assertEqual([i.id for i in items], [i.id for i in baseline])
+
+    def test_multi_subproject_rel_subpath_applied(self) -> None:
+        # main=docs/mes/tasks/..., worktree=.claude/worktrees/WP-01/docs/mes/tasks/...
+        sp_main = self.main_docs / "mes"
+        sp_main.mkdir()
+        self._write_task_state(sp_main, "TSK-MES-01", {
+            "status": "[..]", "last": {}, "phase_history": [],
+            "updated": "2026-04-23T08:00:00Z"})
+        wt_sp = self._worktree_docs("WP-01", subpath="docs/mes")
+        self._write_task_state(wt_sp, "TSK-MES-01", {
+            "status": "[dd]", "last": {"event": "design.ok", "at": "2026-04-23T09:00:00Z"},
+            "phase_history": [], "updated": "2026-04-23T09:00:00Z"})
+
+        items = scan_tasks_aggregated(sp_main, self.project_root)
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0].status, "[dd]")
+
+    def test_features_aggregated_merges_worktrees(self) -> None:
+        # features 경로도 동일 머지 규칙
+        (self.main_docs / "features" / "login").mkdir(parents=True)
+        _write(self.main_docs / "features" / "login" / "spec.md", "# 로그인\n")
+        _write_state(self.main_docs / "features" / "login" / "state.json", {
+            "status": "[..]", "last": {}, "phase_history": [],
+            "updated": "2026-04-23T08:00:00Z"})
+        wt_docs = self._worktree_docs("WP-feat")
+        (wt_docs / "features" / "login").mkdir(parents=True)
+        _write(wt_docs / "features" / "login" / "spec.md", "# 로그인\n")
+        _write_state(wt_docs / "features" / "login" / "state.json", {
+            "status": "[ts]", "last": {"event": "test.ok", "at": "2026-04-23T10:00:00Z"},
+            "phase_history": [], "updated": "2026-04-23T10:00:00Z"})
+
+        items = scan_features_aggregated(self.main_docs, self.project_root)
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0].status, "[ts]")
+
+    def test_without_project_root_behaves_like_scan_tasks(self) -> None:
+        # project_root=None → 기존 scan_tasks 와 동일 동작 (회귀 방지)
+        self._write_task_state(self.main_docs, "TSK-A", {
+            "status": "[..]", "last": {}, "phase_history": []})
+        items = scan_tasks_aggregated(self.main_docs, None)
+        baseline = scan_tasks(self.main_docs)
+        self.assertEqual([i.id for i in items], [i.id for i in baseline])
+
+    def test_discover_worktree_docs_ignores_non_directories(self) -> None:
+        wt_root = self.project_root / ".claude" / "worktrees"
+        wt_root.mkdir(parents=True)
+        # 평범한 파일 — glob 에서 제외되어야 함
+        (wt_root / "README").write_text("not a worktree\n")
+        # 정상 worktree
+        (wt_root / "WP-01" / "docs").mkdir(parents=True)
+
+        result = _discover_worktree_docs(self.project_root, Path("docs"))
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0].name, "docs")
 
 
 if __name__ == "__main__":

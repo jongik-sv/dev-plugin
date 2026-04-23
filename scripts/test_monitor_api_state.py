@@ -919,6 +919,87 @@ class ApiStateSubprojectAndSchemaTests(unittest.TestCase):
 
 
 import os  # noqa: E402 — 파일 하단이지만 테스트 내 os.path.join 사용을 위해
+import shutil  # noqa: E402
+import tempfile  # noqa: E402
+
+
+class ApiStateWorktreeAggregationTests(unittest.TestCase):
+    """`/api/state` 가 main ``docs/`` + ``.claude/worktrees/*/docs/`` 를 머지.
+
+    모킹된 scanner 가 아닌 실제 monitor_server.scan_tasks/scan_features 를
+    넘겨 `_aggregated_scan` 파이프라인이 handler.server.project_root 로부터
+    worktree 를 발견하고 최신 state.json 을 채택하는지 end-to-end 로 검증.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp(prefix="monitor-api-wt-"))
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.docs = self.tmp / "docs"
+        (self.docs / "tasks").mkdir(parents=True)
+        (self.docs / "features").mkdir(parents=True)
+
+    def _write(self, path: Path, data: dict) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data), encoding="utf-8")
+
+    def _call(self) -> dict:
+        h = _FakeHandler()
+        h.path = "/api/state"
+        h.server = _FakeServer(
+            project_root=str(self.tmp),
+            docs_dir=str(self.docs),
+        )
+        monitor_server._handle_api_state(
+            h,
+            scan_tasks=monitor_server.scan_tasks,
+            scan_features=monitor_server.scan_features,
+            scan_signals=lambda: [],
+            list_tmux_panes=lambda: [],
+        )
+        self.assertEqual(h.status, 200)
+        return json.loads(h.wfile.getvalue().decode("utf-8"))
+
+    def test_worktree_state_overrides_stale_main(self) -> None:
+        # main 에 TSK-01-01 PENDING — /dev-team 이 worktree 에서 [dd] 로 전진
+        self._write(self.docs / "tasks" / "TSK-01-01" / "state.json", {
+            "status": "[..]", "last": {"event": "init", "at": "2026-04-23T09:00:00Z"},
+            "phase_history": [], "updated": "2026-04-23T09:00:00Z",
+        })
+        wt_docs = self.tmp / ".claude" / "worktrees" / "WP-01" / "docs"
+        (wt_docs / "tasks").mkdir(parents=True)
+        self._write(wt_docs / "tasks" / "TSK-01-01" / "state.json", {
+            "status": "[dd]", "last": {"event": "design.ok", "at": "2026-04-23T10:00:00Z"},
+            "phase_history": [], "updated": "2026-04-23T10:00:00Z",
+        })
+
+        body = self._call()
+        tasks = body.get("wbs_tasks") or []
+        by_id = {t["id"]: t for t in tasks}
+        self.assertIn("TSK-01-01", by_id)
+        self.assertEqual(by_id["TSK-01-01"]["status"], "[dd]")
+
+    def test_worktree_only_task_appears_in_response(self) -> None:
+        # main docs 에는 해당 task 파일 자체가 없음
+        wt_docs = self.tmp / ".claude" / "worktrees" / "WP-02" / "docs"
+        (wt_docs / "tasks").mkdir(parents=True)
+        self._write(wt_docs / "tasks" / "TSK-NEW" / "state.json", {
+            "status": "[im]", "last": {"event": "build.ok", "at": "2026-04-23T11:00:00Z"},
+            "phase_history": [], "updated": "2026-04-23T11:00:00Z",
+        })
+
+        body = self._call()
+        ids = [t["id"] for t in (body.get("wbs_tasks") or [])]
+        self.assertIn("TSK-NEW", ids)
+
+    def test_no_worktrees_dir_returns_main_only(self) -> None:
+        self._write(self.docs / "tasks" / "TSK-MAIN" / "state.json", {
+            "status": "[xx]", "last": {}, "phase_history": [],
+            "updated": "2026-04-23T12:00:00Z",
+        })
+
+        body = self._call()
+        ids = [t["id"] for t in (body.get("wbs_tasks") or [])]
+        self.assertEqual(ids, ["TSK-MAIN"])
 
 
 if __name__ == "__main__":
