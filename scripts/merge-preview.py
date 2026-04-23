@@ -24,9 +24,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import pathlib
 import subprocess
 import sys
+import tempfile
 
 
 def _run_git(args: list[str], cwd: pathlib.Path, check: bool = False) -> subprocess.CompletedProcess:
@@ -158,6 +160,44 @@ def simulate_merge(
             _run_git(["reset", "--hard", "HEAD"], cwd=repo_root)
 
 
+def write_output_file(payload: dict, out_path: pathlib.Path) -> None:
+    """Write *payload* as JSON to *out_path* atomically (rename swap).
+
+    Steps:
+    1. Auto-create parent directories.
+    2. Write to a NamedTemporaryFile in the same directory (same-volume rename).
+    3. fsync + close.
+    4. Atomically replace *out_path* via Path.replace().
+
+    Raises on failure (caller should catch if needed; `|| true` absorbs exit code).
+    """
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_name: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            dir=str(out_path.parent),
+            mode="w",
+            encoding="utf-8",
+            suffix=".tmp",
+            delete=False,
+        ) as tmp_fh:
+            tmp_name = tmp_fh.name
+            json.dump(payload, tmp_fh)
+            tmp_fh.flush()
+            os.fsync(tmp_fh.fileno())
+        pathlib.Path(tmp_name).replace(out_path)
+        print(f"merge-preview: wrote output to {out_path}", file=sys.stderr)
+    except Exception as exc:
+        # Clean up temp file on error
+        if tmp_name and pathlib.Path(tmp_name).exists():
+            try:
+                pathlib.Path(tmp_name).unlink()
+            except OSError:
+                pass
+        print(f"merge-preview: failed to write {out_path}: {exc}", file=sys.stderr)
+        raise
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Simulate a git merge and report conflicts as JSON."
@@ -171,6 +211,12 @@ def main() -> None:
         "--target",
         default="main",
         help="Target branch on remote (default: main)",
+    )
+    parser.add_argument(
+        "--output",
+        default=None,
+        metavar="PATH",
+        help="Write JSON output to this file atomically (stdout also preserved)",
     )
     args = parser.parse_args()
 
@@ -192,6 +238,10 @@ def main() -> None:
         "base_sha": base_sha,
     }
     print(json.dumps(output))
+
+    # Step 5: optionally write to file (atomic rename)
+    if args.output:
+        write_output_file(output, pathlib.Path(args.output))
 
     sys.exit(0 if clean else 1)
 
