@@ -121,6 +121,7 @@ _STATIC_PATH_PREFIX = "/static/"
 _STATIC_WHITELIST: "frozenset[str]" = frozenset({
     "cytoscape.min.js",
     "dagre.min.js",
+    "cytoscape-node-html-label.min.js",
     "cytoscape-dagre.min.js",
     "graph-client.js",
 })
@@ -1010,6 +1011,13 @@ _I18N: dict[str, dict[str, str]] = {
         "live_activity": "실시간 활동",
         "phase_timeline": "단계 타임라인",
         "dep_graph": "의존성 그래프",
+        # TSK-04-04: dep-graph summary chip labels
+        "dep_stat_total":    "총",
+        "dep_stat_done":     "완료",
+        "dep_stat_running":  "진행",
+        "dep_stat_pending":  "대기",
+        "dep_stat_failed":   "실패",
+        "dep_stat_bypassed": "바이패스",
     },
     "en": {
         "work_packages": "Work Packages",
@@ -1019,6 +1027,13 @@ _I18N: dict[str, dict[str, str]] = {
         "live_activity": "Live Activity",
         "phase_timeline": "Phase Timeline",
         "dep_graph": "Dependency Graph",
+        # TSK-04-04: dep-graph summary chip labels
+        "dep_stat_total":    "Total",
+        "dep_stat_done":     "Done",
+        "dep_stat_running":  "Running",
+        "dep_stat_pending":  "Pending",
+        "dep_stat_failed":   "Failed",
+        "dep_stat_bypassed": "Bypassed",
     },
 }
 
@@ -1942,6 +1957,29 @@ body[data-filter="bypass"]  .trow:not([data-status="bypass"]) { display: none; }
 .arow .log { grid-column: 1 / -1; font-size: 10px; color: var(--ink-4); font-family: var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-top: 2px; border-top: 1px solid rgba(255,255,255,.04); }
 @keyframes fade-in{from{opacity:0; transform:translateY(-4px);}to{opacity:1; transform:translateY(0);}}
 @media (prefers-reduced-motion: reduce){ .arow{ animation: none; } }
+
+/* ---------- dep-graph summary chips (TSK-04-04) ---------- */
+/* AC-32: color values match #dep-graph-legend inline style hex 1:1 */
+#dep-graph-summary {
+  display: flex; gap: 14px; align-items: baseline;
+  font-size: 12.5px; font-variant-numeric: tabular-nums;
+}
+.dep-stat { display: inline-flex; gap: 5px; align-items: baseline; }
+.dep-stat em { font-style: normal; font-weight: 500; opacity: .85; letter-spacing: .02em; }
+.dep-stat b  { font-weight: 700; }
+.dep-stat-total    em,
+.dep-stat-total    b { color: var(--ink); }
+.dep-stat-done     em,
+.dep-stat-done     b { color: #22c55e; }
+.dep-stat-running  em,
+.dep-stat-running  b { color: #eab308; }
+.dep-stat-pending  em,
+.dep-stat-pending  b { color: #94a3b8; }
+.dep-stat-failed   em,
+.dep-stat-failed   b { color: #ef4444; }
+.dep-stat-bypassed em,
+.dep-stat-bypassed b { color: #a855f7; }
+.dep-graph-summary-extra { color: var(--ink-2); margin-left: 10px; }
 
 /* ---------- responsive ---------- */
 @media (max-width: 1280px){
@@ -3101,15 +3139,30 @@ def _section_dep_graph(lang: str = "ko", subproject: str = "all") -> str:
     sp_esc = html.escape(subproject or "all", quote=True)
     heading = _t(lang, "dep_graph")
 
+    # TSK-04-04: SSR chip markup with i18n labels.
+    # graph-client.js:updateSummary uses [data-stat] selector — tag change
+    # (<span>→<b>) is intentional and selector-compatible.
     summary_html = (
         '<aside id="dep-graph-summary" class="dep-graph-summary">'
-        '<span data-stat="total">-</span> · '
-        '<span data-stat="done">-</span> · '
-        '<span data-stat="running">-</span> · '
-        '<span data-stat="pending">-</span> · '
-        '<span data-stat="failed">-</span> · '
-        '<span data-stat="bypassed">-</span>'
-        '</aside>'
+        + '<span class="dep-stat dep-stat-total">'
+        + f'<em>{html.escape(_t(lang, "dep_stat_total"))}</em>'
+        + ' <b data-stat="total">-</b></span>'
+        + ' <span class="dep-stat dep-stat-done">'
+        + f'<em>{html.escape(_t(lang, "dep_stat_done"))}</em>'
+        + ' <b data-stat="done">-</b></span>'
+        + ' <span class="dep-stat dep-stat-running">'
+        + f'<em>{html.escape(_t(lang, "dep_stat_running"))}</em>'
+        + ' <b data-stat="running">-</b></span>'
+        + ' <span class="dep-stat dep-stat-pending">'
+        + f'<em>{html.escape(_t(lang, "dep_stat_pending"))}</em>'
+        + ' <b data-stat="pending">-</b></span>'
+        + ' <span class="dep-stat dep-stat-failed">'
+        + f'<em>{html.escape(_t(lang, "dep_stat_failed"))}</em>'
+        + ' <b data-stat="failed">-</b></span>'
+        + ' <span class="dep-stat dep-stat-bypassed">'
+        + f'<em>{html.escape(_t(lang, "dep_stat_bypassed"))}</em>'
+        + ' <b data-stat="bypassed">-</b></span>'
+        + '</aside>'
     )
 
     legend_html = (
@@ -3125,6 +3178,7 @@ def _section_dep_graph(lang: str = "ko", subproject: str = "all") -> str:
     scripts_html = (
         '<script src="/static/dagre.min.js"></script>\n'
         '<script src="/static/cytoscape.min.js"></script>\n'
+        '<script src="/static/cytoscape-node-html-label.min.js"></script>\n'
         '<script src="/static/cytoscape-dagre.min.js"></script>\n'
         '<script src="/static/graph-client.js"></script>'
     )

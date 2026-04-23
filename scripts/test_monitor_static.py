@@ -153,7 +153,8 @@ class TestIsStaticPath(unittest.TestCase):
         self.assertFalse(_is_static_path("/static/..%2Fsecrets"))
 
     def test_whitelist_constant_has_four_entries(self):
-        self.assertEqual(len(_get_static_whitelist()), 4)
+        # TSK-04-01: cytoscape-node-html-label.min.js 추가 후 5개 (이전: 4)
+        self.assertEqual(len(_get_static_whitelist()), 5)
 
     def test_prefix_constant(self):
         self.assertEqual(_get_static_prefix(), "/static/")
@@ -390,6 +391,220 @@ class TestVendorFilesExist(unittest.TestCase):
             f = vendor / fname
             if f.exists():
                 self.assertGreater(f.stat().st_size, 0, f"{fname} 는 비어있으면 안 됨")
+
+
+# ---------------------------------------------------------------------------
+# 7. TSK-04-01: cytoscape-node-html-label 벤더 추가 테스트
+# ---------------------------------------------------------------------------
+
+class TestNodeHtmlLabelStaticRoute(unittest.TestCase):
+    """TSK-04-01 AC: GET /static/cytoscape-node-html-label.min.js → 200, 올바른 MIME.
+
+    test_static_route_serves_node_html_label (design.md QA 체크리스트 항목 1)
+    """
+
+    def _make_vendor_dir_with_node_html_label(self, tmp_path: Path) -> Path:
+        """tmp_path 아래에 vendor 구조를 만들고 node-html-label 파일 포함."""
+        vendor = tmp_path / "skills" / "dev-monitor" / "vendor"
+        vendor.mkdir(parents=True)
+        # 기존 4종
+        (vendor / "cytoscape.min.js").write_text("/* cytoscape */", encoding="utf-8")
+        (vendor / "dagre.min.js").write_text("/* dagre */", encoding="utf-8")
+        (vendor / "cytoscape-dagre.min.js").write_text("/* dagre adapter */", encoding="utf-8")
+        (vendor / "graph-client.js").write_text("", encoding="utf-8")
+        # TSK-04-01 신규
+        label_content = "/* cytoscape-node-html-label v2.0.1 */\n(function(){})();"
+        (vendor / "cytoscape-node-html-label.min.js").write_text(label_content, encoding="utf-8")
+        return vendor
+
+    def test_static_route_serves_node_html_label(self):
+        """GET /static/cytoscape-node-html-label.min.js → HTTP 200."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            self._make_vendor_dir_with_node_html_label(tmp_path)
+            server = MockServer(plugin_root=tmp)
+            handler = MockHandler(server=server)
+            _handle_static(handler, "/static/cytoscape-node-html-label.min.js")
+            self.assertEqual(
+                handler._response_code,
+                200,
+                "cytoscape-node-html-label.min.js 는 200이어야 한다",
+            )
+
+    def test_node_html_label_mime_type(self):
+        """Content-Type: application/javascript; charset=utf-8."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            self._make_vendor_dir_with_node_html_label(tmp_path)
+            server = MockServer(plugin_root=tmp)
+            handler = MockHandler(server=server)
+            _handle_static(handler, "/static/cytoscape-node-html-label.min.js")
+            ct = handler.header("Content-Type")
+            self.assertIsNotNone(ct, "Content-Type 헤더가 없다")
+            self.assertIn("application/javascript", ct)
+            self.assertIn("utf-8", ct)
+
+    def test_node_html_label_body_nonempty(self):
+        """응답 바디가 비어있지 않음 (최소 100 bytes)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            self._make_vendor_dir_with_node_html_label(tmp_path)
+            server = MockServer(plugin_root=tmp)
+            handler = MockHandler(server=server)
+            _handle_static(handler, "/static/cytoscape-node-html-label.min.js")
+            body = handler.wfile.read()
+            self.assertGreater(len(body), 0, "바디가 비어있어서는 안 된다")
+
+    def test_whitelist_includes_node_html_label(self):
+        """_STATIC_WHITELIST 에 cytoscape-node-html-label.min.js 가 포함되어야 한다."""
+        whitelist = _get_static_whitelist()
+        self.assertIn(
+            "cytoscape-node-html-label.min.js",
+            whitelist,
+            "_STATIC_WHITELIST 에 cytoscape-node-html-label.min.js 가 없다",
+        )
+
+    def test_whitelist_has_five_entries(self):
+        """TSK-04-01 추가 후 화이트리스트 항목이 5개여야 한다."""
+        whitelist = _get_static_whitelist()
+        self.assertEqual(
+            len(whitelist),
+            5,
+            f"화이트리스트 항목 수가 5여야 한다 (현재: {len(whitelist)}): {whitelist}",
+        )
+
+    def test_is_static_path_node_html_label(self):
+        """_is_static_path('/static/cytoscape-node-html-label.min.js') → True."""
+        self.assertTrue(
+            _is_static_path("/static/cytoscape-node-html-label.min.js"),
+            "_is_static_path 가 True를 반환해야 한다",
+        )
+
+    def test_existing_static_routes_not_regressed(self):
+        """기존 /static/*.js 요청 regression 없음 — 기존 4종 파일 모두 200."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            self._make_vendor_dir_with_node_html_label(tmp_path)
+            server = MockServer(plugin_root=tmp)
+            for fname in (
+                "cytoscape.min.js",
+                "dagre.min.js",
+                "cytoscape-dagre.min.js",
+                "graph-client.js",
+            ):
+                handler = MockHandler(server=server)
+                _handle_static(handler, f"/static/{fname}")
+                self.assertEqual(
+                    handler._response_code,
+                    200,
+                    f"regression: {fname} 는 여전히 200이어야 한다",
+                )
+
+    def test_unknown_still_rejected(self):
+        """whitelist 방어: /static/unknown.js → 404."""
+        with tempfile.TemporaryDirectory() as tmp:
+            server = MockServer(plugin_root=tmp)
+            handler = MockHandler(server=server)
+            _handle_static(handler, "/static/unknown.js")
+            self.assertEqual(handler._response_code, 404)
+
+
+class TestDepGraphScriptLoadOrder(unittest.TestCase):
+    """TSK-04-01 AC: _section_dep_graph의 <script> 로드 순서 검증.
+
+    test_dep_graph_script_load_order (design.md QA 체크리스트 항목 3)
+    기대 순서: dagre → cytoscape → cytoscape-node-html-label → cytoscape-dagre → graph-client
+    """
+
+    def _import_server_mod(self):
+        # test_monitor_static.py 상단에서 이미 _mod 로 로드됨
+        return _mod
+
+    def _get_section_html(self):
+        """_section_dep_graph 호출 결과 HTML을 반환."""
+        mod = self._import_server_mod()
+        return mod._section_dep_graph(subproject="all", lang="en")
+
+    def test_dep_graph_script_load_order(self):
+        """script 태그 순서: dagre → cytoscape → cytoscape-node-html-label → cytoscape-dagre → graph-client."""
+        html_out = self._get_section_html()
+        scripts_to_find = [
+            "dagre.min.js",
+            "cytoscape.min.js",
+            "cytoscape-node-html-label.min.js",
+            "cytoscape-dagre.min.js",
+            "graph-client.js",
+        ]
+        positions = []
+        for script in scripts_to_find:
+            pos = html_out.find(script)
+            self.assertNotEqual(
+                pos,
+                -1,
+                f"<script> 태그에 {script} 가 없다",
+            )
+            positions.append((pos, script))
+
+        sorted_by_pos = [s for _, s in sorted(positions)]
+        self.assertEqual(
+            sorted_by_pos,
+            scripts_to_find,
+            f"script 로드 순서 오류. 실제 순서: {sorted_by_pos}",
+        )
+
+    def test_node_html_label_script_tag_present(self):
+        """cytoscape-node-html-label.min.js script 태그가 HTML에 포함되어 있다."""
+        html_out = self._get_section_html()
+        self.assertIn(
+            "cytoscape-node-html-label.min.js",
+            html_out,
+            "_section_dep_graph HTML에 node-html-label script 태그가 없다",
+        )
+
+    def test_node_html_label_after_cytoscape(self):
+        """cytoscape-node-html-label 태그가 cytoscape.min.js 직후에 위치한다."""
+        html_out = self._get_section_html()
+        pos_cy = html_out.find("cytoscape.min.js")
+        pos_nhl = html_out.find("cytoscape-node-html-label.min.js")
+        self.assertGreater(
+            pos_nhl,
+            pos_cy,
+            "cytoscape-node-html-label 이 cytoscape.min.js 보다 앞에 위치한다",
+        )
+
+    def test_node_html_label_before_cytoscape_dagre(self):
+        """cytoscape-node-html-label 태그가 cytoscape-dagre.min.js 직전에 위치한다."""
+        html_out = self._get_section_html()
+        pos_nhl = html_out.find("cytoscape-node-html-label.min.js")
+        pos_dagre = html_out.find("cytoscape-dagre.min.js")
+        self.assertLess(
+            pos_nhl,
+            pos_dagre,
+            "cytoscape-node-html-label 이 cytoscape-dagre.min.js 보다 뒤에 위치한다",
+        )
+
+
+class TestVendorNodeHtmlLabelFileExists(unittest.TestCase):
+    """TSK-04-01: skills/dev-monitor/vendor/cytoscape-node-html-label.min.js 실재 확인."""
+
+    def _vendor_dir(self) -> Path:
+        repo_root = _THIS_DIR.parent
+        return repo_root / "skills" / "dev-monitor" / "vendor"
+
+    def test_node_html_label_vendor_file_exists(self):
+        """cytoscape-node-html-label.min.js 파일이 vendor 디렉터리에 존재한다."""
+        f = self._vendor_dir() / "cytoscape-node-html-label.min.js"
+        self.assertTrue(f.exists(), f"파일 없음: {f}")
+
+    def test_node_html_label_vendor_file_nonempty(self):
+        """cytoscape-node-html-label.min.js 파일이 비어있지 않다 (최소 100 bytes)."""
+        f = self._vendor_dir() / "cytoscape-node-html-label.min.js"
+        if f.exists():
+            self.assertGreater(
+                f.stat().st_size,
+                100,
+                "파일이 너무 작다: 최소 100 bytes 이상이어야 함",
+            )
 
 
 if __name__ == "__main__":
