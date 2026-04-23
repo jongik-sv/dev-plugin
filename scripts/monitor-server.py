@@ -3142,28 +3142,14 @@ def _section_dep_graph(lang: str = "ko", subproject: str = "all") -> str:
     # TSK-04-04: SSR chip markup with i18n labels.
     # graph-client.js:updateSummary uses [data-stat] selector — tag change
     # (<span>→<b>) is intentional and selector-compatible.
-    summary_html = (
-        '<aside id="dep-graph-summary" class="dep-graph-summary">'
-        + '<span class="dep-stat dep-stat-total">'
-        + f'<em>{html.escape(_t(lang, "dep_stat_total"))}</em>'
-        + ' <b data-stat="total">-</b></span>'
-        + ' <span class="dep-stat dep-stat-done">'
-        + f'<em>{html.escape(_t(lang, "dep_stat_done"))}</em>'
-        + ' <b data-stat="done">-</b></span>'
-        + ' <span class="dep-stat dep-stat-running">'
-        + f'<em>{html.escape(_t(lang, "dep_stat_running"))}</em>'
-        + ' <b data-stat="running">-</b></span>'
-        + ' <span class="dep-stat dep-stat-pending">'
-        + f'<em>{html.escape(_t(lang, "dep_stat_pending"))}</em>'
-        + ' <b data-stat="pending">-</b></span>'
-        + ' <span class="dep-stat dep-stat-failed">'
-        + f'<em>{html.escape(_t(lang, "dep_stat_failed"))}</em>'
-        + ' <b data-stat="failed">-</b></span>'
-        + ' <span class="dep-stat dep-stat-bypassed">'
-        + f'<em>{html.escape(_t(lang, "dep_stat_bypassed"))}</em>'
-        + ' <b data-stat="bypassed">-</b></span>'
-        + '</aside>'
+    _STAT_STATES = ("total", "done", "running", "pending", "failed", "bypassed")
+    chips = " ".join(
+        f'<span class="dep-stat dep-stat-{s}">'
+        f'<em>{html.escape(_t(lang, f"dep_stat_{s}"))}</em>'
+        f' <b data-stat="{s}">-</b></span>'
+        for s in _STAT_STATES
     )
+    summary_html = f'<aside id="dep-graph-summary" class="dep-graph-summary">{chips}</aside>'
 
     legend_html = (
         '<div id="dep-graph-legend" class="dep-graph-legend">'

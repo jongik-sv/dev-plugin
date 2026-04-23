@@ -34,17 +34,26 @@ def _import_server():
     return mod
 
 
+class _DepGraphBase(unittest.TestCase):
+    """공통 setUp: monitor-server 모듈을 로드하고 필수 속성 존재 여부를 확인한다."""
+
+    _REQUIRES_DEP_GRAPH = True
+    _REQUIRES_CSS = False
+
+    def setUp(self):
+        self.ms = _import_server()
+        if self._REQUIRES_DEP_GRAPH and not hasattr(self.ms, "_section_dep_graph"):
+            self.skipTest("_section_dep_graph 미구현")
+        if self._REQUIRES_CSS and not hasattr(self.ms, "DASHBOARD_CSS"):
+            self.skipTest("DASHBOARD_CSS 미구현")
+
+
 # ---------------------------------------------------------------------------
 # test_dep_graph_summary_labels_ko
 # ---------------------------------------------------------------------------
 
-class TestDepGraphSummaryLabelsKo(unittest.TestCase):
+class TestDepGraphSummaryLabelsKo(_DepGraphBase):
     """_section_dep_graph(lang='ko') HTML에 6개 ko 레이블이 모두 포함됨."""
-
-    def setUp(self):
-        self.ms = _import_server()
-        if not hasattr(self.ms, "_section_dep_graph"):
-            self.skipTest("_section_dep_graph 미구현")
 
     def test_dep_graph_summary_labels_ko(self):
         html = self.ms._section_dep_graph(lang="ko")
@@ -56,13 +65,8 @@ class TestDepGraphSummaryLabelsKo(unittest.TestCase):
 # test_dep_graph_summary_labels_en
 # ---------------------------------------------------------------------------
 
-class TestDepGraphSummaryLabelsEn(unittest.TestCase):
+class TestDepGraphSummaryLabelsEn(_DepGraphBase):
     """_section_dep_graph(lang='en') HTML에 6개 en 레이블이 모두 포함됨."""
-
-    def setUp(self):
-        self.ms = _import_server()
-        if not hasattr(self.ms, "_section_dep_graph"):
-            self.skipTest("_section_dep_graph 미구현")
 
     def test_dep_graph_summary_labels_en(self):
         html = self.ms._section_dep_graph(lang="en")
@@ -74,7 +78,7 @@ class TestDepGraphSummaryLabelsEn(unittest.TestCase):
 # test_dep_graph_summary_color_matches_palette
 # ---------------------------------------------------------------------------
 
-class TestDepGraphSummaryColorPalette(unittest.TestCase):
+class TestDepGraphSummaryColorPalette(_DepGraphBase):
     """DASHBOARD_CSS에 6개 상태 칩의 색상이 팔레트 색상 또는 기본 토큰으로 매핑됨.
 
     AC-31: 5개 상태 칩의 글자색이 팔레트 색상과 일치, total은 기본 텍스트 색.
@@ -83,26 +87,23 @@ class TestDepGraphSummaryColorPalette(unittest.TestCase):
     검증: DASHBOARD_CSS에 .dep-stat-{state}가 존재하고 color 선언이 있음.
     """
 
-    def setUp(self):
-        self.ms = _import_server()
-        if not hasattr(self.ms, "DASHBOARD_CSS"):
-            self.skipTest("DASHBOARD_CSS 미구현")
+    _REQUIRES_CSS = True
+
+    _STAT_STATES = [
+        "dep-stat-total",
+        "dep-stat-done",
+        "dep-stat-running",
+        "dep-stat-pending",
+        "dep-stat-failed",
+        "dep-stat-bypassed",
+    ]
 
     def test_dep_graph_summary_color_matches_palette(self):
         css = self.ms.DASHBOARD_CSS
         # DASHBOARD_CSS는 _minify_css로 압축됨 — 패턴은 압축 형태로 확인
         # 각 상태별로 .dep-stat-{state} 클래스에 color 선언이 존재하는지 검증
         # (hex 직접 사용 또는 var(--token) 모두 허용 — AC-32와의 일관성 허용)
-        states = [
-            "dep-stat-total",
-            "dep-stat-done",
-            "dep-stat-running",
-            "dep-stat-pending",
-            "dep-stat-failed",
-            "dep-stat-bypassed",
-        ]
-        for state in states:
-            # .dep-stat-{state} 이후 color 선언(hex 또는 var()) 존재 확인
+        for state in self._STAT_STATES:
             pattern = re.compile(
                 re.escape(state) + r"[^}]*?color:\s*(?:#[0-9a-fA-F]{3,8}|var\(--[^)]+\))",
                 re.DOTALL,
@@ -137,7 +138,7 @@ class TestDepGraphSummaryColorPalette(unittest.TestCase):
 # test_dep_graph_summary_legend_parity
 # ---------------------------------------------------------------------------
 
-class TestDepGraphSummaryLegendParity(unittest.TestCase):
+class TestDepGraphSummaryLegendParity(_DepGraphBase):
     """summary 칩 CSS 색상과 #dep-graph-legend 인라인 style 색상이 1:1 일치.
 
     AC-32: 칩 색상과 #dep-graph-legend 색상이 1:1 일치.
@@ -146,18 +147,12 @@ class TestDepGraphSummaryLegendParity(unittest.TestCase):
     bypassed는 양쪽 모두 #a855f7 하드코딩으로 직접 비교 가능.
     """
 
-    def setUp(self):
-        self.ms = _import_server()
-        if not hasattr(self.ms, "DASHBOARD_CSS"):
-            self.skipTest("DASHBOARD_CSS 미구현")
-        if not hasattr(self.ms, "_section_dep_graph"):
-            self.skipTest("_section_dep_graph 미구현")
+    _REQUIRES_CSS = True
 
     def _extract_dep_stat_color(self, css: str, state: str) -> str | None:
         """DASHBOARD_CSS에서 .dep-stat-{state} 의 색상 값(hex 또는 var()) 추출."""
         # minified CSS 형태: ".dep-stat-done em,.dep-stat-done b{color:#22c55e}"
-        # 또는 "color: #22c55e;" 형태
-        # state 클래스 이후 첫 번째 color 값 추출
+        # 또는 "color: #22c55e;" 형태 — state 클래스 이후 첫 번째 color 값 추출
         pattern = re.compile(
             r"dep-stat-" + re.escape(state) + r"[^}]*?color:\s*([^;}]+)",
             re.DOTALL,
@@ -167,18 +162,18 @@ class TestDepGraphSummaryLegendParity(unittest.TestCase):
 
     def test_dep_graph_summary_legend_parity(self):
         css = self.ms.DASHBOARD_CSS
-        legend_html = self.ms._section_dep_graph(lang="ko")
+        section_html = self.ms._section_dep_graph(lang="ko")
 
         # legend 인라인 style에서 state별 색상 추출
         # <span class="leg-item" style="color:#22c55e">&#9632; done</span>
-        legend_colors: dict[str, str] = {}
-        for m in re.finditer(
-            r'style="color:(#[0-9a-fA-F]{3,8})"[^>]*>.*?(\w+)</span>',
-            legend_html,
-        ):
-            color_hex = m.group(1).lower()
-            label = m.group(2).strip().lower()
-            legend_colors[label] = color_hex
+        legend_colors: dict[str, str] = {
+            label: color_hex.lower()
+            for m in re.finditer(
+                r'style="color:(#[0-9a-fA-F]{3,8})"[^>]*>.*?(\w+)</span>',
+                section_html,
+            )
+            for color_hex, label in [(m.group(1), m.group(2).strip().lower())]
+        }
 
         # AC-32: 각 state에 대해 CSS .dep-stat-{state} 색상이 legend hex와 일치
         for state in ["done", "running", "pending", "failed", "bypassed"]:
@@ -206,21 +201,18 @@ class TestDepGraphSummaryLegendParity(unittest.TestCase):
 # test_dep_graph_summary_preserves_data_stat_selector
 # ---------------------------------------------------------------------------
 
-class TestDepGraphSummaryDataStatSelector(unittest.TestCase):
+class TestDepGraphSummaryDataStatSelector(_DepGraphBase):
     """SSR HTML에 [data-stat] 선택자 6종 모두 존재 — graph-client.js 계약 유지."""
 
-    def setUp(self):
-        self.ms = _import_server()
-        if not hasattr(self.ms, "_section_dep_graph"):
-            self.skipTest("_section_dep_graph 미구현")
+    _STAT_STATES = ("total", "done", "running", "pending", "failed", "bypassed")
 
     def test_dep_graph_summary_preserves_data_stat_selector(self):
         html = self.ms._section_dep_graph(lang="ko")
-        for state in ["total", "done", "running", "pending", "failed", "bypassed"]:
+        for state in self._STAT_STATES:
             attr = f'data-stat="{state}"'
             self.assertIn(
                 attr, html,
-                f"data-stat=\"{state}\" 선택자가 SSR HTML에 없음 — "
+                f'data-stat="{state}" 선택자가 SSR HTML에 없음 — '
                 "graph-client.js:updateSummary 계약 위반",
             )
 

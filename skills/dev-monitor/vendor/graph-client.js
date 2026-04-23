@@ -1,5 +1,5 @@
-// graph-client.js — Dependency Graph 클라이언트 (TSK-03-04)
-// cytoscape + dagre LR, 2초 폴링, diff delta. IIFE. ES2020. ≤300 LOC.
+// graph-client.js — Dependency Graph 클라이언트 (TSK-04-02)
+// cytoscape + dagre LR + nodeHtmlLabel, 2초 폴링, diff delta. IIFE. ES2020. ≤350 LOC.
 (function () {
   "use strict";
 
@@ -22,6 +22,36 @@
   let popoverNodeId = null;
   let _popoverEl = null;
 
+  // -- XSS 방지 헬퍼 --
+  function escapeHtml(s) {
+    return String(s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
+  // -- 노드 HTML 템플릿 --
+  function nodeHtmlTemplate(nd) {
+    const statusRaw = nd.bypassed ? "bypassed"
+                    : nd.status === "[xx]" ? "done"
+                    : (nd.status === "[im]" || nd.status === "[ts]" || nd.status === "[dd]") ? "running"
+                    : (nd.status === "failed" || nd.status === "[fail]") ? "failed"
+                    : nd.status || "pending";
+    const classes = ["dep-node", `status-${statusRaw}`];
+    if (nd.is_critical) classes.push("critical");
+    if (nd.is_bottleneck) classes.push("bottleneck");
+    const nodeId    = escapeHtml(nd.id || "");
+    const nodeTitle = escapeHtml(nd.label || nd.id || "");
+    return (
+      `<div class="${classes.join(" ")}">`
+      + `<span class="dep-node-id">${nodeId}</span>`
+      + `<span class="dep-node-title">${nodeTitle}</span>`
+      + `</div>`
+    );
+  }
+
   // -- 노드 스타일 --
   function nodeStyle(node) {
     const color = node.bypassed ? COLOR.bypassed
@@ -35,7 +65,6 @@
       color,
       borderColor: isCrit ? COLOR.edge_critical : color,
       borderWidth: isCrit ? 2 : 0,
-      label: (node.is_bottleneck ? "⚠ " : "") + (node.label || node.id),
     };
   }
 
@@ -65,13 +94,14 @@
         const style = nodeStyle(nd);
         if (!curNodeIds.has(nd.id)) {
           cy.add({ group: "nodes", data: {
-            id: nd.id, label: style.label,
+            id: nd.id,
             color: style.color, borderWidth: style.borderWidth,
             borderColor: style.borderColor,
             status: nd.status, is_critical: nd.is_critical,
             is_bottleneck: nd.is_bottleneck,
             fan_in: nd.fan_in, fan_out: nd.fan_out,
             bypassed: nd.bypassed, wp_id: nd.wp_id,
+            label: nd.label,
             _raw: nd,
           }});
           topoChanged = true;
@@ -80,10 +110,10 @@
           ele.data("color", style.color);
           ele.data("borderWidth", style.borderWidth);
           ele.data("borderColor", style.borderColor);
-          ele.data("label", style.label);
           ele.data("status", nd.status);
           ele.data("is_critical", nd.is_critical);
           ele.data("is_bottleneck", nd.is_bottleneck);
+          ele.data("label", nd.label);
           ele.data("_raw", nd);
           ele.toggleClass("bottleneck", !!nd.is_bottleneck);
         }
@@ -105,7 +135,7 @@
     });
 
     if (topoChanged) {
-      cy.layout({ name: "dagre", rankDir: "LR", nodeSep: 40, rankSep: 80 }).run();
+      cy.layout({ name: "dagre", rankDir: "LR", nodeSep: 60, rankSep: 120 }).run();
     }
 
     if (popoverNodeId) {
@@ -217,18 +247,11 @@
         {
           selector: "node",
           style: {
-            "background-color": "data(color)",
-            "label": "data(label)",
-            "font-size": "11px",
-            "color": "#e2e8f0",
-            "text-valign": "center",
-            "text-halign": "center",
-            "width": "label",
-            "height": "label",
-            "padding": "6px",
+            "background-opacity": 0,
+            "border-width": 0,
+            "width": 180,
+            "height": 54,
             "shape": "roundrectangle",
-            "border-width": "data(borderWidth)",
-            "border-color": "data(borderColor)",
             "transition-property": "background-color border-color",
             "transition-duration": "400ms",
           },
@@ -248,8 +271,16 @@
           style: { "border-style": "dashed", "border-width": 2 },
         },
       ],
-      layout: { name: "dagre", rankDir: "LR", nodeSep: 40, rankSep: 80 },
+      layout: { name: "dagre", rankDir: "LR", nodeSep: 60, rankSep: 120 },
     });
+
+    // -- HTML 레이블 플러그인 등록 --
+    if (typeof cy.nodeHtmlLabel === "function") {
+      cy.nodeHtmlLabel([{
+        query: "node",
+        tpl: function(data) { return nodeHtmlTemplate(data); },
+      }]);
+    }
 
     cy.on("tap", "node", evt => {
       const ele = evt.target;
