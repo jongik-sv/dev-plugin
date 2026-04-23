@@ -921,7 +921,7 @@ monitor-server, monitor-launcher
 - category: documentation
 - domain: fullstack
 - model: sonnet
-- status: [dd]
+- status: [xx]
 - priority: medium
 - assignee: -
 - schedule: 2026-05-02 ~ 2026-05-02
