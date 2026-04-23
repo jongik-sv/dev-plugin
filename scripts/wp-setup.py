@@ -267,6 +267,23 @@ def main():
             run_cmd(["git", "worktree", "add", wt_path, "-b", f"dev/{wt_name}"])
             print(f"[{wp_id}] worktree: created ({wt_path})")
 
+        # --- 1b. rerere + merge drivers (idempotent, local .git/config only) ---
+        init_rerere_script = os.path.join(script_dir, "init-git-rerere.py")
+        wt_path_abs = os.path.abspath(wt_path)
+        r_rerere = subprocess.run(
+            [sys.executable, init_rerere_script, "--worktree", wt_path_abs],
+            capture_output=True, text=True,
+        )
+        if r_rerere.returncode != 0:
+            print(
+                f"[{wp_id}] rerere init WARN (non-fatal): {r_rerere.stderr.strip()}",
+                file=sys.stderr,
+            )
+        else:
+            # Print last line of output (Done: X changed, Y no-op)
+            last_line = r_rerere.stdout.strip().splitlines()[-1] if r_rerere.stdout.strip() else ""
+            print(f"[{wp_id}] rerere: {last_line}")
+
         # --- 2. Signal dir + restore ---
         os.makedirs(shared_signal_dir, exist_ok=True)
 

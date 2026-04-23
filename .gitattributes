@@ -1,0 +1,11 @@
+# dev-plugin merge drivers (TSK-06-03)
+#
+# Driver registration lives in git config (see scripts/init-git-rerere.py —
+# TSK-06-02). `merge=union` is a git built-in that combines both sides'
+# added lines. The other two are custom drivers: if they are not registered
+# (e.g. before TSK-06-02 ran), git falls back to the standard 3-way merge.
+
+docs/todo.md                    merge=union
+docs/**/state.json              merge=state-json-smart
+docs/**/tasks/**/state.json     merge=state-json-smart
+docs/**/wbs.md                  merge=wbs-status-smart
