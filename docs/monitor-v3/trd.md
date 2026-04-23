@@ -18,6 +18,22 @@
 | (신규) `scripts/test_monitor_subproject.py` | `discover_subprojects` 단독 |
 | (신규) `scripts/test_monitor_graph_api.py` | `/api/graph` 응답 구조·필터·폴링 idempotency |
 | (신규) `scripts/test_dep_analysis_critical_path.py` | `--graph-stats` 의 `critical_path`, `fan_out` 검증 |
+| `scripts/monitor-server.py` | **(WP-04/05)** `_STATIC_WHITELIST`에 `cytoscape-node-html-label.min.js` 추가, `_section_dep_graph` script 로드 순서 갱신, `.dep-node*` CSS inline, fold 영속성 JS 헬퍼 + `patchSection('wp-cards')` 훅 |
+| (신규) `skills/dev-monitor/vendor/cytoscape-node-html-label.min.js` | **(WP-04)** HTML 레이블 플러그인 v2.0.1 (~7 KB) |
+| `skills/dev-monitor/vendor/graph-client.js` | **(WP-04)** `nodeHtmlTemplate` + `cy.nodeHtmlLabel([...])` 등록, `nodeStyle.label` 제거, `nodeSep 40→60` / `rankSep 80→120`, canvas height 640 |
+| (신규) `scripts/merge-preview.py` | **(WP-06)** Task 완료 전 main과의 잠재 충돌 시뮬레이션 |
+| (신규) `scripts/init-git-rerere.py` | **(WP-06)** `git config rerere.*` + 머지 드라이버 등록 (idempotent) |
+| (신규) `scripts/merge-state-json.py` | **(WP-06)** `state.json` 3-way 머지 드라이버 |
+| (신규) `scripts/merge-wbs-status.py` | **(WP-06)** `wbs.md` 상태 라인 머지 드라이버 |
+| (신규) `.gitattributes` | **(WP-06)** `union` + `state-json-smart` + `wbs-status-smart` 매핑 |
+| `skills/dev-build/SKILL.md` | **(WP-06)** 워커 프롬프트에 "Task `[im]` 진입 전 `merge-preview.py` 실행" 단계 추가 |
+| `skills/dev-team/references/merge-procedure.md` | **(WP-06)** rerere/드라이버 순서, 충돌 로그 보존 경로(`docs/merge-log/{WT}-{UTC}.json`) |
+| (신규) `scripts/test_monitor_dep_graph_html.py` | **(WP-04)** 2줄 레이블, 3중 시각 단서, nodeSep/rankSep 회귀 |
+| (신규) `scripts/test_monitor_fold.py` | **(WP-05)** localStorage 저장/복원 JS 존재 및 서버 계약 검증 |
+| (신규) `scripts/test_merge_preview.py` | **(WP-06)** 충돌 탐지 / clean-merge 케이스 |
+| (신규) `scripts/test_merge_state_json.py` | **(WP-06)** phase_history union, status 우선순위, bypassed OR |
+| (신규) `scripts/test_merge_wbs_status.py` | **(WP-06)** 진행도 높은 status 우선 선택 |
+| (신규) `scripts/test_init_git_rerere.py` | **(WP-06)** rerere/드라이버 설정 idempotent |
 | `~/.claude/plugins/cache/dev-tools/dev/1.5.0/` | 위 변경 미러링 |
 
 **변경하지 않을 파일**
@@ -455,6 +471,220 @@ i18n 키 추가:
 - 토폴로지 변경(Task 추가/삭제) 없으면 레이아웃 재실행 안 함 → 지터 없음.
 - `refresh_seconds` 와 별개 주기 (대시보드 나머지 섹션은 기존 refresh 유지). 추후 통일 고려.
 - WebSocket/SSE 미채택 사유: 상태 머신이 이미 파일 기반(.done 시그널 + state.json)이라 폴링이 push 없이도 지연 2초 이내로 수렴. 복잡도 대비 이득 없음.
+
+### 3.10 Dep-Graph 노드 HTML 카드 레이블 (WP-04)
+
+#### 3.10.1 목표 및 제약
+
+- 노드에 Task ID + 제목을 2줄 카드로 표시(기존 단일 라인 `title or id` 레이블 교체).
+- 상태(done/running/pending/failed/bypassed) 별로 **3중 시각 단서**(좌측 스트립, ID 글자색, 배경 틴트) 동시 적용 — 한 눈에 상태 식별.
+- 기존 cytoscape 스택(+ cytoscape-dagre)은 유지, HTML 레이블만 추가 플러그인으로 오버레이.
+- 번들 증분 ≤ 10 KB, 기존 pan/zoom / 팝오버 동작 보존.
+
+#### 3.10.2 벤더링
+
+- 파일: `skills/dev-monitor/vendor/cytoscape-node-html-label.min.js` v2.0.1
+- `scripts/monitor-server.py` `_STATIC_WHITELIST`(line 121)에 파일명 추가
+- `_section_dep_graph` 의 `<script>` 로드 순서:
+  `dagre → cytoscape → cytoscape-node-html-label → cytoscape-dagre → graph-client`
+
+#### 3.10.3 graph-client.js 변경
+
+- `escapeHtml(s)` 헬퍼 추가 (`& < > " '` 이스케이프).
+- `nodeHtmlTemplate(data)` — 상태 클래스 + critical/bottleneck 플래그를 계산하여 아래 HTML 반환:
+
+```html
+<div class="dep-node status-{st} [critical] [bottleneck]">
+  <div class="dep-node-id">{id}</div>
+  <div class="dep-node-title">{title or id}</div>
+</div>
+```
+
+- `nodeStyle()`의 `label` 필드 제거 (HTML 레이어가 담당) — ⚠ 이모지 prefix도 제거.
+- cytoscape 초기화 직후 `cy.nodeHtmlLabel([{query:"node", valign:"center", halign:"center", tpl: data => nodeHtmlTemplate(data)}])` 등록.
+- cytoscape 노드 스타일: `background-opacity: 0`, `border-width: 0`, `width: 180`, `height: 54`, `shape: roundrectangle` — 자리만 점유.
+- 레이아웃: `nodeSep 40→60`, `rankSep 80→120`, rankDir `LR` 유지.
+
+#### 3.10.4 CSS 토큰 (monitor-server.py inline `<style>` 또는 `_section_dep_graph` 내부)
+
+```css
+.dep-node {
+  width: 180px; min-height: 50px;
+  padding: 10px 12px 10px 16px;
+  background: var(--bg-2);
+  border: 1px solid var(--ink-4);
+  border-left: 4px solid var(--ink-4);   /* 단서 1 */
+  border-radius: 8px;
+  box-shadow: 0 2px 6px rgba(0,0,0,.35);
+  font-family: "Space Grotesk", system-ui, sans-serif;
+  transition: transform .15s ease, box-shadow .15s ease;
+  cursor: pointer;
+  background-image: linear-gradient(90deg, var(--_tint, transparent), transparent 45%); /* 단서 3 */
+}
+.dep-node:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,.45); }
+.dep-node-id {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10px; font-weight: 600; color: var(--ink-3);  /* 단서 2 — 상태별 override */
+  letter-spacing: .02em; text-transform: uppercase;
+  margin-bottom: 3px;
+}
+.dep-node-title {
+  font-size: 12.5px; font-weight: 500; color: var(--ink); /* 제목은 가독성 위해 고정 밝은색 */
+  line-height: 1.3;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.dep-node.status-done     { border-left-color: var(--done); --_tint: color-mix(in srgb, var(--done) 12%, transparent); }
+.dep-node.status-done .dep-node-id     { color: var(--done); }
+.dep-node.status-running  { border-left-color: var(--run);  --_tint: color-mix(in srgb, var(--run)  12%, transparent); }
+.dep-node.status-running .dep-node-id  { color: var(--run); }
+.dep-node.status-pending  { border-left-color: var(--ink-3); }
+.dep-node.status-pending .dep-node-id  { color: var(--ink-3); }
+.dep-node.status-failed   { border-left-color: var(--fail); --_tint: color-mix(in srgb, var(--fail) 12%, transparent); }
+.dep-node.status-failed .dep-node-id   { color: var(--fail); }
+.dep-node.status-bypassed { border-left-color: #a855f7;     --_tint: color-mix(in srgb, #a855f7    12%, transparent); }
+.dep-node.status-bypassed .dep-node-id { color: #a855f7; }
+.dep-node.critical   { box-shadow: 0 0 0 1px var(--fail), 0 2px 10px rgba(255,93,93,.25); border-color: var(--fail); }
+.dep-node.bottleneck { border-style: dashed; }
+```
+
+※ `color-mix()` 미지원 브라우저 대응은 Chromium 111+ / Safari 16.2+ / Firefox 113+ 기준이면 OK. fallback 은 투명 배경(단서 1/2만 유지).
+
+#### 3.10.5 캔버스
+
+- `_section_dep_graph` 내부 `<div id="dep-graph-canvas" style="height:520px;">` → `640px`.
+
+### 3.11 WP 카드 Fold 상태 영속성 (WP-05)
+
+#### 3.11.1 문제
+
+- `<details class="wp wp-tasks" data-wp="{WP-ID}" open>` 는 서버가 항상 `open` 렌더(monitor-server.py line 2730 근방).
+- 5초 `fetchAndPatch`가 `patchSection` 로 `innerHTML` 전체 교체 → 사용자 fold 상태 리셋.
+- 유사 문제를 `hdr` 섹션 chip/refresh-toggle 은 snapshot/restore 패턴으로 해결(line 3668-3689) — 동일 패턴 확장.
+
+#### 3.11.2 저장 계약
+
+- 저장소: `localStorage`
+- 키 스키마: `dev-monitor:fold:{WP-ID}`, 값 `"open"|"closed"` (그 외 값은 무시, 서버 기본 따름)
+- quota/disabled 대응: 모든 read/write try/catch silent skip
+- 다중 탭 sync(`storage` 이벤트)는 범위 밖(비대상)
+
+#### 3.11.3 클라이언트 JS 헬퍼 (monitor-server.py inline script)
+
+```js
+var FOLD_KEY_PREFIX = 'dev-monitor:fold:';
+function readFold(wpId){ try{return localStorage.getItem(FOLD_KEY_PREFIX+wpId);}catch(e){return null;} }
+function writeFold(wpId,open){ try{localStorage.setItem(FOLD_KEY_PREFIX+wpId, open?'open':'closed');}catch(e){} }
+function applyFoldStates(root){
+  (root||document).querySelectorAll('details[data-wp]').forEach(function(el){
+    var s=readFold(el.getAttribute('data-wp'));
+    if(s==='closed') el.removeAttribute('open');
+    else if(s==='open') el.setAttribute('open','');
+  });
+}
+function bindFoldListeners(root){
+  (root||document).querySelectorAll('details[data-wp]').forEach(function(el){
+    if(el.__foldBound) return;
+    el.__foldBound=true;
+    el.addEventListener('toggle', function(){
+      writeFold(el.getAttribute('data-wp'), el.open);
+    });
+  });
+}
+```
+
+#### 3.11.4 통합 지점
+
+- **초기 로드**: `startMainPoll()` 호출 직전에 `applyFoldStates(); bindFoldListeners();`
+- **patchSection 후**: `name === 'wp-cards'` 분기에서 교체 뒤 `applyFoldStates(current); bindFoldListeners(current);`
+
+#### 3.11.5 서버 계약
+
+- 서버는 `<details ... open>` 하드코딩 유지. JS 비활성화/첫 방문자 호환.
+- 클라이언트 JS가 localStorage 기반으로 덮어씀.
+
+### 3.12 워크트리 머지 충돌 저감 MVP (WP-06)
+
+#### 3.12.1 목표
+
+- `/dev-team` 머지 단계의 충돌 빈도와 해결 토큰비용 저감.
+- Layer 2 (조기 탐지) + Layer 3 (자동 해결) + Layer 4 (주기 동기화) 조합을 MVP 로 구현.
+- Layer 1 (파일 오너십 사전 선언), Layer 5 (충돌 예측 대시보드 카드) 는 범위 밖(후속 릴리스).
+
+#### 3.12.2 merge-preview.py (Layer 2)
+
+- 위치: `scripts/merge-preview.py` (신규). Python stdlib subprocess. zero-LLM.
+- CLI: `python3 scripts/merge-preview.py [--remote origin] [--target main]`
+- 동작:
+  1. `git fetch {remote} {target}` (조용히)
+  2. `git merge --no-commit --no-ff {remote}/{target}` 시뮬레이션
+  3. 충돌 시 파일/hunk 목록 수집 → 즉시 `git merge --abort` (부작용 0)
+  4. JSON stdout: `{"clean": bool, "conflicts": [{"file": str, "hunks": [...]}], "base_sha": str}`
+- 실패 모드: 깨끗한 git 상태가 아니면 exit 2 + stderr 경고 ("uncommitted changes prevent preview").
+- 워커 통합 (`skills/dev-build/SKILL.md` 프롬프트에 1줄 추가):
+  > "Task `[im]` 단계 진입 전 `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/merge-preview.py` 를 실행하고, 출력 `clean`이 `false` 이면 `conflicts[*].file` 들을 현재 컨텍스트에서 `git rebase origin/main` 로 해결한 뒤 `[im]` 진행."
+
+#### 3.12.3 git rerere + 머지 드라이버 등록 (Layer 3)
+
+- 위치: `scripts/init-git-rerere.py` (신규). Idempotent.
+- 수행하는 `git config` 셋:
+
+```
+git config rerere.enabled true
+git config rerere.autoupdate true
+git config merge.state-json-smart.driver  "python3 {PLUGIN}/scripts/merge-state-json.py %O %A %B %L"
+git config merge.state-json-smart.name    "Smart state.json merger (phase_history union + status priority)"
+git config merge.wbs-status-smart.driver  "python3 {PLUGIN}/scripts/merge-wbs-status.py %O %A %B %L"
+git config merge.wbs-status-smart.name    "Smart wbs.md status-line merger"
+```
+
+- 호출 시점: `/dev-team` 팀리더가 각 WP 워크트리 생성 직후 1회 — `scripts/wp-setup.py` 또는 dev-team 리더 스폰 지점에 후크 추가.
+- Idempotence: 이미 설정된 값과 동일하면 no-op.
+
+#### 3.12.4 .gitattributes (신규, 프로젝트 루트)
+
+```
+docs/todo.md                    merge=union
+docs/**/state.json              merge=state-json-smart
+docs/**/tasks/**/state.json     merge=state-json-smart
+docs/**/wbs.md                  merge=wbs-status-smart
+```
+
+`union`은 git 내장 드라이버 (양쪽 줄 단순 합치기). 실패해도 일반 충돌로 폴백.
+
+#### 3.12.5 merge-state-json.py (Layer 3 드라이버)
+
+- 서명: `%O %A %B %L` (base / ours / theirs / conflict_marker_size).
+- 알고리즘:
+  1. 세 파일을 JSON 로드. 파싱 실패 시 exit 1 (일반 3-way 충돌로 폴백).
+  2. `phase_history` union: `(event, at)` 기준 dedup, `at` 오름차순 정렬.
+  3. `status` 우선순위: `[xx] > [ts] > [im] > [dd] > [ ]`. 동률이면 ours 우선.
+  4. `bypassed`: ours OR theirs.
+  5. `completed_at`, `elapsed_seconds`: 둘 중 non-null 이면서 더 최신(`updated` 비교)인 쪽.
+  6. `updated`: max(ours.updated, theirs.updated).
+  7. 결과를 `%A` 경로에 원자적으로 기록 (tmp → rename). exit 0.
+
+#### 3.12.6 merge-wbs-status.py (Layer 3 드라이버)
+
+- 서명: `%O %A %B %L`.
+- 알고리즘:
+  1. `- status: [xxx]` 라인만 따로 파싱(task_id 키 매칭).
+  2. 각 task 의 status 는 `[xx] > [ts] > [im] > [dd] > [ ]` 우선 선택.
+  3. 비-status 라인은 git 표준 3-way 시도 (Python `difflib` 기반 merge3), 실패 시 conflict marker 유지 (exit 1).
+  4. status-only 충돌만 있는 경우 자동 해결(exit 0), 그 외는 exit 1.
+
+#### 3.12.7 merge-procedure.md 개정
+
+- `skills/dev-team/references/merge-procedure.md` 에 다음 순서 명시:
+  1. early-merge 시도.
+  2. 충돌 발생 시: rerere 자동 해결 확인 → 해결 안 된 파일은 등록된 머지 드라이버 시도 → 여전히 잔존하면 `docs/merge-log/{WT_NAME}-{UTC}.json` 저장 후 `--abort`.
+  3. abort 시 기존 auto-preserve 워크트리 동작 유지 (수동 복구 가능).
+- 충돌 로그 JSON 스키마: `{wt_name, utc, conflicts: [{file, hunks[], lines_added, lines_removed}], base_sha, result: "aborted"|"resolved"}`.
+
+#### 3.12.8 WP-06 내부 재귀 주의
+
+- WP-06 이 merge-preview / rerere 자기 자신을 구현하므로, WP-06 Task 진행 중에는 **해당 기능 없이** 진행. TSK-06-01 완료 전 워커 프롬프트 훅 비활성, TSK-06-02 완료 전 rerere 비활성.
+- 팀리더 프롬프트는 WP-06 머지 시 특별히 "드라이버 미설정 상태에서 수동 3-way 충돌 해결 가능" 주의사항 포함.
 
 ## 4. 테스트 전략
 

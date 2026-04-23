@@ -1,11 +1,11 @@
 # WBS - dev-monitor v3
 
-> version: 1.0
-> description: dev-monitor 대시보드 v3 — 프로젝트/서브프로젝트 격리 + 실시간 의존성 그래프 + pane URL 버그 수정 + i18n/폰트 UX 개선
+> version: 1.1
+> description: dev-monitor 대시보드 v3 — 프로젝트/서브프로젝트 격리 + 실시간 의존성 그래프 + pane URL 버그 수정 + i18n/폰트 UX 개선 + (v1.1) Dep-graph 노드 카드 디자인 / WP 카드 fold 영속성 / 워크트리 머지 충돌 저감 MVP
 > depth: 3
 > start-date: 2026-04-22
-> target-date: 2026-04-28
-> updated: 2026-04-22
+> target-date: 2026-05-05
+> updated: 2026-04-23
 
 ---
 
@@ -563,6 +563,352 @@ monitor-server, monitor-launcher
 
 ---
 
+## WP-04: Dep-Graph 노드 카드 디자인 개편
+- schedule: 2026-04-24 ~ 2026-04-26
+- description: 현재 단일 라인 레이블(title-only, 11px, 단색)을 HTML 기반 2줄 카드(ID monospace + 제목 sans + 상태 3중 시각 단서)로 교체. `cytoscape-node-html-label` 플러그인 벤더링.
+
+### TSK-04-01: cytoscape-node-html-label 벤더 추가
+- category: infrastructure
+- domain: infra
+- model: sonnet
+- status: [ ]
+- priority: high
+- assignee: -
+- schedule: 2026-04-24 ~ 2026-04-24
+- tags: vendor, whitelist, plugin, infra
+- depends: -
+- blocked-by: -
+- entry-point: -
+- note: v2.0.1 (~7 KB). GitHub release 에서 다운로드. `_STATIC_WHITELIST` 등록 + `_section_dep_graph` script 태그에 dagre 직후 주입.
+
+#### PRD 요구사항
+- prd-ref: PRD §2 P0-7, §5 AC-19
+- requirements:
+  - `skills/dev-monitor/vendor/cytoscape-node-html-label.min.js` 추가 (버전 v2.0.1 고정, 외부 네트워크 의존 없음)
+  - `scripts/monitor-server.py` `_STATIC_WHITELIST` 에 파일명 등록
+  - `_section_dep_graph` 의 `<script>` 로드 순서: `dagre → cytoscape → cytoscape-node-html-label → cytoscape-dagre → graph-client`
+- acceptance:
+  - `GET /static/cytoscape-node-html-label.min.js` → 200, MIME `application/javascript; charset=utf-8`
+  - 기존 `/static/*.js` 요청 regression 없음
+- constraints:
+  - Python stdlib 만 사용 (기존 `_handle_static` 재사용)
+  - 벤더 파일 서명 검증 불요 (localhost 전용)
+- test-criteria:
+  - `test_static_route_serves_node_html_label`
+  - `test_dep_graph_script_load_order`
+
+#### 기술 스펙 (TRD)
+- tech-spec: TRD §3.10.2
+- api-spec: `/static/` 화이트리스트 확장만, 기존 라우터 재사용
+- data-model: -
+- ui-spec: -
+
+---
+
+### TSK-04-02: graph-client.js 노드 HTML 템플릿
+- category: development
+- domain: frontend
+- model: sonnet
+- status: [ ]
+- priority: high
+- assignee: -
+- schedule: 2026-04-25 ~ 2026-04-25
+- tags: graph, cytoscape, html-label, template, frontend
+- depends: TSK-04-01
+- blocked-by: -
+- entry-point: -
+- note: `nodeStyle.label` 제거 및 ⚠ 이모지 prefix 제거. `cy.nodeHtmlLabel([...])` 등록 및 `escapeHtml` 헬퍼 추가. 기존 팝오버/폴링 로직은 변경 없음.
+
+#### PRD 요구사항
+- prd-ref: PRD §2 P0-7, §5 AC-19, AC-20, AC-21
+- requirements:
+  - `nodeHtmlTemplate(data)` — 상태 클래스(`status-{done|running|pending|failed|bypassed}`) + `critical` + `bottleneck` 플래그를 포함한 2줄 카드 HTML
+  - `escapeHtml` 헬퍼 추가 (XSS 방지)
+  - cytoscape node 스타일: `background-opacity: 0`, `border-width: 0`, `width: 180`, `height: 54`
+  - 레이아웃: `nodeSep: 60`, `rankSep: 120`, rankDir `LR` 유지
+  - `nodeStyle()` 에서 `label` 필드 제거
+- acceptance:
+  - WBS Task 50개 기준 pan/zoom 시 HTML 레이블이 노드 위치 추종
+  - 기존 클릭 팝오버 이벤트(`cy.on("tap","node",...)`) 정상 동작
+- constraints:
+  - IIFE 패턴 / ES2020 / ≤350 LOC 유지 (기존 285 LOC 기준 여유)
+- test-criteria:
+  - `test_dep_graph_two_line_label`
+  - `test_dep_graph_node_template_contains_id_and_title`
+  - `test_dep_graph_bottleneck_class_renders`
+
+#### 기술 스펙 (TRD)
+- tech-spec: TRD §3.10.3
+- api-spec: `/api/graph` 응답 구조 변경 없음 (기존 `label` 필드 재사용)
+- data-model: 클라이언트 측 `nd.id`, `nd.label`, `nd.status`, `nd.is_critical`, `nd.is_bottleneck` 활용
+- ui-spec: TRD §3.10.4 CSS 계약
+
+---
+
+### TSK-04-03: dep-node CSS + 캔버스 높이 조정
+- category: development
+- domain: frontend
+- model: sonnet
+- status: [ ]
+- priority: high
+- assignee: -
+- schedule: 2026-04-26 ~ 2026-04-26
+- tags: css, theme, design-tokens, frontend
+- depends: TSK-04-02
+- blocked-by: -
+- entry-point: -
+- note: monitor-server.py inline `<style>` 또는 `_section_dep_graph` 내부에 CSS 추가. `color-mix()` 사용 — 최신 브라우저 전제.
+
+#### PRD 요구사항
+- prd-ref: PRD §2 P0-7, §5 AC-19, AC-20, AC-21
+- requirements:
+  - `.dep-node`, `.dep-node-id`, `.dep-node-title` 기본 규칙
+  - 상태 5종별 규칙: `border-left-color` + `--_tint` CSS 변수 + `.dep-node-id` 글자색 override
+  - `.dep-node.critical` (붉은 글로우 + border), `.dep-node.bottleneck` (dashed border)
+  - hover lift(transform + shadow)
+  - canvas 인라인 스타일 `height: 520px → 640px`
+- acceptance:
+  - AC-19~AC-21 전부 충족
+  - 기존 범례(legend) 색상과 스트립 색상 일치
+  - 시각 회귀 없음
+- constraints:
+  - CSS 토큰(`--done`, `--run`, `--ink-3`, `--fail`, `--bg-2`, `--ink-4`, `--ink`) 재사용
+  - `color-mix()` 미지원 환경은 단서 1/2만 유지(graceful degradation)
+- test-criteria:
+  - `test_dep_graph_css_rules_present`
+  - `test_dep_graph_canvas_height_640`
+  - `test_dep_graph_status_multi_cue`
+
+#### 기술 스펙 (TRD)
+- tech-spec: TRD §3.10.4, §3.10.5
+- api-spec: -
+- data-model: -
+- ui-spec: TRD §3.10.4
+
+---
+
+## WP-05: WP 카드 Fold 상태 영속성
+- schedule: 2026-04-27 ~ 2026-04-27
+- description: localStorage 기반으로 WP 카드(`<details data-wp>`) 접힘 상태를 자동 refresh 및 하드 리로드 후에도 유지. 서버 계약 변경 없이 클라이언트 JS 확장으로만 해결.
+
+### TSK-05-01: Fold 영속성 JS + patchSection 훅 확장
+- category: development
+- domain: frontend
+- model: sonnet
+- status: [ ]
+- priority: medium
+- assignee: -
+- schedule: 2026-04-27 ~ 2026-04-27
+- tags: localstorage, ux, details, fold, frontend
+- depends: -
+- blocked-by: -
+- entry-point: -
+- note: 서버는 기본 `<details ... open>` 유지 (JS 비활성/첫 방문자 호환). 클라이언트 JS가 localStorage 로 덮어씀.
+
+#### PRD 요구사항
+- prd-ref: PRD §2 P1-6, §5 AC-22, AC-23, AC-24
+- requirements:
+  - 키 스키마: `dev-monitor:fold:{WP-ID}`, 값 `"open"|"closed"`
+  - 헬퍼 4종: `readFold`, `writeFold`, `applyFoldStates(root)`, `bindFoldListeners(root)`
+  - 초기 로드(`startMainPoll` 직전) 호출
+  - `patchSection('wp-cards')` 교체 직후 `applyFoldStates(current); bindFoldListeners(current);`
+  - toggle 이벤트 → `writeFold` (per-element listener, __foldBound 플래그로 중복 방지)
+  - try/catch 로 quota/disabled localStorage 대응
+- acceptance:
+  - AC-22: toggle 시 localStorage 키 값 정상 저장
+  - AC-23: 5초 auto-refresh 후 접힌 상태 유지
+  - AC-24: 하드 리로드(F5) 후 접힌 상태 유지
+- constraints:
+  - 서버 계약 변경 없음 (`<details open>` 기본값 유지)
+  - 다중 탭 `storage` 이벤트 동기화는 범위 밖
+- test-criteria:
+  - `test_fold_localstorage_write` (브라우저 비의존 — JS 코드 존재 검증)
+  - `test_fold_restore_on_patch` (patchSection 훅 호출 여부)
+  - `test_fold_bind_idempotent` (__foldBound 중복 방지)
+
+#### 기술 스펙 (TRD)
+- tech-spec: TRD §3.11
+- api-spec: 서버 계약 변경 없음
+- data-model: localStorage key-value (`dev-monitor:fold:{WP-ID}` → `"open"|"closed"`)
+- ui-spec: `<details data-wp="WP-ID">` 토글 UX
+
+---
+
+## WP-06: 워크트리 머지 충돌 저감 MVP
+- schedule: 2026-04-28 ~ 2026-05-02
+- description: `/dev-team` 머지 단계의 충돌 빈도·해결 토큰비용 저감. Layer 2(merge-preview) + Layer 3(rerere + 머지 드라이버) + Layer 4(주기 main-sync) MVP. Layer 1/5 는 범위 밖(후속).
+
+### TSK-06-01: merge-preview.py 작성 + dev-build 워커 프롬프트 통합
+- category: infrastructure
+- domain: fullstack
+- model: sonnet
+- status: [ ]
+- priority: high
+- assignee: -
+- schedule: 2026-04-28 ~ 2026-04-29
+- tags: git, merge, preview, worker, infrastructure
+- depends: -
+- blocked-by: -
+- entry-point: -
+- note: Python stdlib subprocess. zero-LLM 스크립트. `skills/dev-build/SKILL.md` 워커 프롬프트에 1줄 통합.
+
+#### PRD 요구사항
+- prd-ref: PRD §2 P1-7, §5 AC-25, AC-29
+- requirements:
+  - `scripts/merge-preview.py` — `--remote origin`, `--target main` 옵션, 기본값 동일
+  - JSON stdout: `{"clean": bool, "conflicts": [{"file": str, "hunks": [...]}], "base_sha": str}`
+  - `git merge --no-commit --no-ff` 시뮬레이션 후 **반드시** `--abort` (부작용 0)
+  - 깨끗하지 않은 워크트리(uncommitted) 면 exit 2 + stderr 경고
+  - `skills/dev-build/SKILL.md` 워커 프롬프트에 Task `[im]` 진입 전 실행 단계 추가
+- acceptance:
+  - AC-25: clean / 충돌 케이스 모두 정확 분류
+  - AC-29: 프롬프트 문자열 grep 검증
+- constraints:
+  - Python 3 stdlib, subprocess 로 `git` 호출
+  - exit code: 0 (clean+JSON), 1 (conflicts+JSON), 2 (워크트리 dirty)
+- test-criteria:
+  - `test_merge_preview_detects_conflicts`
+  - `test_merge_preview_clean_merge`
+  - `test_merge_preview_dirty_worktree_exits_2`
+  - `test_dev_build_skill_contains_merge_preview_step`
+
+#### 기술 스펙 (TRD)
+- tech-spec: TRD §3.12.2
+- api-spec: CLI JSON stdout
+- data-model: `{clean, conflicts[], base_sha}`
+- ui-spec: -
+
+---
+
+### TSK-06-02: init-git-rerere.py + dev-team 자동 호출
+- category: infrastructure
+- domain: infra
+- model: sonnet
+- status: [ ]
+- priority: high
+- assignee: -
+- schedule: 2026-04-30 ~ 2026-04-30
+- tags: git, rerere, config, infrastructure
+- depends: -
+- blocked-by: -
+- entry-point: -
+- note: Idempotent (재호출 안전). `/dev-team` 워크트리 생성 직후 1회 호출. WP-06 TSK-06-03 의 드라이버 등록까지 여기서 수행.
+
+#### PRD 요구사항
+- prd-ref: PRD §2 P1-7, §5 AC-26
+- requirements:
+  - `scripts/init-git-rerere.py` — `git config rerere.enabled true`, `rerere.autoupdate true`
+  - 머지 드라이버 등록: `merge.state-json-smart.driver`, `merge.state-json-smart.name`, `merge.wbs-status-smart.driver`, `merge.wbs-status-smart.name`
+  - `{CLAUDE_PLUGIN_ROOT}` 경로 치환을 환경변수 기반으로 자동 해결
+  - Idempotent: 동일 값이면 no-op (변경 없음 로그)
+  - `/dev-team` 팀리더 스폰 지점 또는 `wp-setup.py` 에서 1회 호출
+- acceptance:
+  - AC-26: `git config --get rerere.enabled` = `true`
+  - 드라이버 4개 설정 모두 존재 (`git config --get merge.state-json-smart.driver`)
+- constraints:
+  - 프로젝트 로컬 `.git/config` 만 수정 (전역 사용자 설정 건드리지 않음)
+- test-criteria:
+  - `test_init_git_rerere_idempotent`
+  - `test_init_git_rerere_sets_drivers`
+
+#### 기술 스펙 (TRD)
+- tech-spec: TRD §3.12.3
+- api-spec: -
+- data-model: -
+- ui-spec: -
+
+---
+
+### TSK-06-03: .gitattributes + merge-state-json.py + merge-wbs-status.py
+- category: infrastructure
+- domain: infra
+- model: opus
+- status: [ ]
+- priority: high
+- assignee: -
+- schedule: 2026-05-01 ~ 2026-05-02
+- tags: git, merge-driver, gitattributes, state-json, wbs, infrastructure
+- depends: TSK-06-02
+- blocked-by: -
+- entry-point: -
+- note: 머지 세만틱 복잡(3-way JSON / markdown 라인 merge) — Opus 선정. 드라이버 실패 시 exit 1 로 일반 3-way 충돌 폴백.
+
+#### PRD 요구사항
+- prd-ref: PRD §2 P1-7, §5 AC-27, AC-28
+- requirements:
+  - `.gitattributes` (프로젝트 루트 신규):
+    ```
+    docs/todo.md                    merge=union
+    docs/**/state.json              merge=state-json-smart
+    docs/**/tasks/**/state.json     merge=state-json-smart
+    docs/**/wbs.md                  merge=wbs-status-smart
+    ```
+  - `scripts/merge-state-json.py` — 알고리즘 TRD §3.12.5 준수(phase_history union + status 우선순위 + bypassed OR + updated max)
+  - `scripts/merge-wbs-status.py` — 알고리즘 TRD §3.12.6 준수(status 라인 진행도 우선, 비-status 는 3-way)
+  - 두 드라이버 모두 실패(파싱 에러/스키마 불일치) 시 exit 1 → 일반 3-way 충돌 폴백
+- acceptance:
+  - AC-27: phase_history 양쪽 합쳐 중복 제거, status 우선순위 `[xx]>[ts]>[im]>[dd]>[ ]`
+  - AC-28: `docs/todo.md` 양쪽 라인 보존
+  - 드라이버 자체 테스트 통과
+- constraints:
+  - Python 3 stdlib (`json`, `difflib.ndiff` 등)
+  - Signed write (tmp → rename) 원자성 보장
+- test-criteria:
+  - `test_merge_state_json_phase_history_union`
+  - `test_merge_state_json_status_priority`
+  - `test_merge_state_json_bypassed_or`
+  - `test_merge_state_json_fallback_on_invalid_json`
+  - `test_merge_wbs_status_priority`
+  - `test_merge_wbs_status_non_status_conflict_preserved`
+  - `test_merge_todo_union` (git 내장 확인)
+
+#### 기술 스펙 (TRD)
+- tech-spec: TRD §3.12.4, §3.12.5, §3.12.6
+- api-spec: `%O %A %B %L` 드라이버 서명
+- data-model: state.json 스키마 + wbs.md status 라인 파서
+- ui-spec: -
+
+---
+
+### TSK-06-04: merge-procedure.md 개정 + 충돌 로그 저장
+- category: documentation
+- domain: fullstack
+- model: sonnet
+- status: [ ]
+- priority: medium
+- assignee: -
+- schedule: 2026-05-02 ~ 2026-05-02
+- tags: docs, merge, procedure, fullstack
+- depends: TSK-06-01, TSK-06-02, TSK-06-03
+- blocked-by: -
+- entry-point: -
+- note: 기존 auto-abort 플로우에 rerere/드라이버 단계 삽입. 충돌 로그 저장 경로 명시로 학습 데이터 축적.
+
+#### PRD 요구사항
+- prd-ref: PRD §2 P1-7
+- requirements:
+  - `skills/dev-team/references/merge-procedure.md` 에 다음 명시:
+    - 머지 순서: early-merge → rerere 자동 해결 → 드라이버 시도 → 잔존 충돌은 `docs/merge-log/{WT_NAME}-{UTC}.json` 기록 후 abort
+    - 충돌 로그 JSON 스키마: `{wt_name, utc, conflicts[], base_sha, result: "aborted"|"resolved"}`
+    - WP-06 내부 재귀 주의 (TRD §3.12.8) — WP-06 Task 진행 중 자기 구현 기능 비활성
+  - 문서 변경만(코드 변경 없음) — dev-team 워커가 재현 가능한 수준으로 상세
+- acceptance:
+  - 문서 기준으로 실제 `/dev-team` 실행이 재현 가능
+  - 기존 `test_dev_team_*` 통과 유지
+- constraints:
+  - 한국어 작성, 예시 명령 포함
+- test-criteria:
+  - 문서 lint(존재 확인)
+  - 기존 `test_dev_team_*` regression 없음
+
+#### 기술 스펙 (TRD)
+- tech-spec: TRD §3.12.7, §3.12.8
+- api-spec: -
+- data-model: 충돌 로그 JSON 스키마
+- ui-spec: -
+
+---
+
 ## 의존 그래프
 
 ### 그래프 (Mermaid)
@@ -594,6 +940,26 @@ graph LR
   TSK-03-03 --> TSK-03-04
   TSK-02-02 --> TSK-03-04
 
+  %% WP-04 (v1.1)
+  TSK-04-01["TSK-04-01<br/>vendor plugin"]
+  TSK-04-02["TSK-04-02<br/>HTML template"]
+  TSK-04-03["TSK-04-03<br/>dep-node CSS"]
+  TSK-04-01 --> TSK-04-02
+  TSK-04-02 --> TSK-04-03
+
+  %% WP-05 (v1.1) — 독립
+  TSK-05-01["TSK-05-01<br/>fold localStorage"]
+
+  %% WP-06 (v1.1)
+  TSK-06-01["TSK-06-01<br/>merge-preview.py"]
+  TSK-06-02["TSK-06-02<br/>init-git-rerere.py"]
+  TSK-06-03["TSK-06-03<br/>gitattributes+drivers"]
+  TSK-06-04["TSK-06-04<br/>merge-procedure.md"]
+  TSK-06-02 --> TSK-06-03
+  TSK-06-01 --> TSK-06-04
+  TSK-06-02 --> TSK-06-04
+  TSK-06-03 --> TSK-06-04
+
   style TSK-00-01 fill:#e8f5e9,stroke:#2e7d32
   style TSK-00-02 fill:#e8f5e9,stroke:#2e7d32
   style TSK-00-03 fill:#e8f5e9,stroke:#c62828,stroke-width:2px
@@ -604,12 +970,14 @@ graph LR
 ### 통계
 
 > `dep-analysis.py --graph-stats` 기준 (`fan_in` = 이 Task를 `depends`로 지목한 downstream Task 수)
+>
+> v1.1 확장(WP-04/05/06) 포함 기준. WP-04 는 3-task 선형 체인, WP-05 는 독립, WP-06 는 01/02/03 → 04 로 수렴.
 
 | 항목 | 값 | 임계값 |
 |------|-----|--------|
-| 최장 체인 깊이 | 3 | 3 초과 시 검토 |
-| 전체 Task 수 | 12 | — |
-| Fan-in ≥ 3 Task 수 | 1 | 계약 추출 후보 |
+| 최장 체인 깊이 | 3 (WP-00~03 경로 유지) / 2 (WP-04) / 2 (WP-06) | 3 초과 시 검토 |
+| 전체 Task 수 | 20 (기존 12 + v1.1 신규 8) | — |
+| Fan-in ≥ 3 Task 수 | 1 (TSK-00-03) | 계약 추출 후보 |
 | Diamond 패턴 수 | 0 | 자주 발생 시 apex 계약 추출 |
 
 **Fan-in Top 5** (downstream 소비자 수):
@@ -617,10 +985,10 @@ graph LR
 | Task | Fan-in | 소비 downstream | 계약 추출 상태 |
 |------|--------|-----------------|----------------|
 | TSK-00-03 | 3 | TSK-01-01, TSK-01-02, TSK-03-02 | ✅ 이미 계약 전용으로 분리 완료 |
+| TSK-06-04 | 3 | — (수렴점, WP-06 문서화) | — (WP 종결 Task) |
 | TSK-00-01 | 2 | TSK-01-01, TSK-01-02 | ✅ 이미 계약 전용으로 분리 완료 |
 | TSK-00-02 | 2 | TSK-01-01, TSK-01-02 | ✅ 이미 계약 전용으로 분리 완료 |
-| TSK-02-02 | 1 | TSK-03-04 | — |
-| TSK-03-01 | 1 | TSK-03-02 | — |
+| TSK-04-02 | 1 | TSK-04-03 | — |
 
 **Diamond 패턴**: 없음. TSK-00-01/02/03이 TSK-01-01과 TSK-01-02로 팬아웃되지만 downstream에서 단일 apex로 재수렴하지 않아 diamond가 형성되지 않는다.
 
@@ -630,4 +998,21 @@ graph LR
 |------|------|------|------|
 | TSK-00-03 | fan_in=3 | 유지 | TSK-00-03(discover_subprojects + _filter_by_subproject)은 WP-00 0단계 공유 계약 분석에서 선행 분리된 **계약 전용 Task**다. 세 downstream(/api/state, 대시보드 라우트, /api/graph)이 모두 서브프로젝트 해석이 필요하므로 fan_in=3은 설계 의도. 계약이 이미 분리돼 있어 추가 작업 불필요. |
 
-**판정 요약**: `max_chain_depth=3` (임계값 내), `fan_in≥3` 1건은 이미 계약 전용 Task로 선행 분리된 상태. 그래프 건전성 양호 — 추가 재분해 불필요.
+**판정 요약**: `max_chain_depth=3` (임계값 내), `fan_in≥3` 1건(TSK-00-03)은 이미 계약 전용 Task로 선행 분리됨. TSK-06-04 는 WP-06 종결 Task로 fan_in=3 이지만 downstream 없어(terminal) 계약 추출 무관. WP-04 / WP-05 / WP-06 추가 후에도 그래프 건전성 양호 — 추가 재분해 불필요.
+
+---
+
+## v1.1 확장 요약 (WP-04/05/06)
+
+### 변경 요약
+- **WP-04** (3 tasks, 2026-04-24~26): Dep-graph 노드를 cytoscape-node-html-label 플러그인 기반 2줄 HTML 카드로 교체. 상태별 3중 시각 단서(스트립 색 / ID 글자색 / 배경 틴트).
+- **WP-05** (1 task, 2026-04-27): localStorage 기반 WP 카드 fold 상태 영속화. 서버 계약 변경 없이 클라이언트 JS로만 해결.
+- **WP-06** (4 tasks, 2026-04-28~05-02): merge-preview + git rerere + 커스텀 머지 드라이버 MVP. 충돌 빈도·해결 토큰비용 저감.
+
+### 관련 문서
+- PRD: §2 P0-7, P1-6, P1-7 / §3 비목표 확장 / §4 S6·S7·S8 / §5 AC-19~AC-29
+- TRD: §1 변경 파일 확장 / §3.10 / §3.11 / §3.12
+
+### 실행 경로
+- `/dev:dev-team monitor-v3` — tmux 세션 안에서 호출. 각 WP 별 worktree 생성 → WP 리더 spawn → 워커가 DDTR 사이클 수행 → early-merge.
+- WP-06 내부 재귀 주의: merge-preview / rerere / 드라이버 자체가 WP-06 산출물이므로 **WP-06 실행 중에는 해당 기능 없이 진행** (TRD §3.12.8).
