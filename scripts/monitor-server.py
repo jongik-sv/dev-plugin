@@ -4673,16 +4673,16 @@ def _serialize_phase_history_tail_for_graph(
     if not entries:
         return []
     tail = entries[-limit:] if limit > 0 else []
-    result = []
-    for entry in tail:
-        result.append({
-            "event": getattr(entry, "event", None),
-            "from": getattr(entry, "from_status", None),
-            "to": getattr(entry, "to_status", None),
-            "at": getattr(entry, "at", None),
-            "elapsed_seconds": getattr(entry, "elapsed_seconds", None),
-        })
-    return result
+    return [
+        {
+            "event": entry.event,
+            "from": entry.from_status,
+            "to": entry.to_status,
+            "at": entry.at,
+            "elapsed_seconds": entry.elapsed_seconds,
+        }
+        for entry in tail
+    ]
 
 
 def _is_api_graph_path(path: str) -> bool:
@@ -4764,6 +4764,7 @@ def _build_graph_payload(
     fan_out_map: dict = graph_stats.get("fan_out_map", {})
     critical_path: dict = graph_stats.get("critical_path", {"nodes": [], "edges": []})
     bottleneck_ids: list = graph_stats.get("bottleneck_ids", [])
+    bottleneck_set: set = set(bottleneck_ids)
     cp_node_set = set(critical_path.get("nodes", []))
 
     # Derive per-task status and count stats
@@ -4783,7 +4784,7 @@ def _build_graph_payload(
             "label": task.title or task.id,
             "status": node_status,
             "is_critical": task.id in cp_node_set,
-            "is_bottleneck": task.id in bottleneck_ids,
+            "is_bottleneck": task.id in bottleneck_set,
             "fan_in": fan_in_map.get(task.id, 0),
             "fan_out": fan_out_map.get(task.id, 0),
             "bypassed": task.bypassed,
@@ -4791,7 +4792,7 @@ def _build_graph_payload(
             "depends": list(task.depends),
             # v4 payload fields (TSK-00-02)
             "phase_history_tail": _serialize_phase_history_tail_for_graph(
-                getattr(task, "phase_history_tail", None)
+                task.phase_history_tail
             ),
             "last_event": task.last_event,
             "last_event_at": task.last_event_at,
