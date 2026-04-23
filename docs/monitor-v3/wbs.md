@@ -740,9 +740,9 @@ monitor-server, monitor-launcher
 
 ### TSK-05-01: Fold 영속성 JS + patchSection 훅 확장
 - category: development
-- domain: frontend
+- domain: fullstack
 - model: sonnet
-- status: [ ]
+- status: [xx]
 - priority: medium
 - assignee: -
 - schedule: 2026-04-27 ~ 2026-04-27
