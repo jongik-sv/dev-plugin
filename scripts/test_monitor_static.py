@@ -1,4 +1,4 @@
-"""Unit tests for monitor-server.py /static/ route (TSK-03-03).
+"""Unit tests for monitor-server.py /static/ route (TSK-03-03, TSK-04-01).
 
 대상 심볼:
 - ``_is_static_path(path)`` — URL 분기 판별
@@ -6,10 +6,13 @@
 - ``_STATIC_PATH_PREFIX`` / ``_STATIC_WHITELIST`` 상수
 - ``ThreadingMonitorServer.plugin_root`` 속성
 - ``_resolve_plugin_root()`` — 환경변수 fallback
+- ``_section_dep_graph(...)`` — dep-graph HTML 스크립트 로드 순서 (TSK-04-01)
 
 QA 체크리스트 매핑 (design.md §QA 체크리스트):
   test_static_route_whitelist_allows_vendor_js   — 화이트리스트 파일 → 200
   test_static_route_rejects_traversal            — .. 포함 경로 → 404
+  test_static_route_serves_node_html_label       — TSK-04-01: 신규 벤더 파일 200
+  test_dep_graph_script_load_order               — TSK-04-01: script 태그 로드 순서
   + edge cases for whitelist, MIME, Cache-Control, plugin_root fallback
 
 실행: python3 -m unittest scripts/test_monitor_static.py -v
