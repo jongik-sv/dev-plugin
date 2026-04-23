@@ -1255,6 +1255,19 @@ summary::-webkit-details-marker{ display:none; }
   70%  { box-shadow: 0 0 0 10px rgba(78,208,138,0);  }
   100% { box-shadow: 0 0 0 0 rgba(78,208,138,0);   }
 }
+/* shared — do not duplicate */
+@keyframes spin{ to{ transform: rotate(360deg); } }
+.spinner,.node-spinner{
+  display:none;
+  width:10px; height:10px; border-radius:50%;
+  border: 2px solid var(--ink-3);
+  border-top-color: var(--run);
+  animation: spin 1s linear infinite;
+}
+.trow[data-running="true"] .spinner{ display:inline-block; }
+.dep-node[data-running="true"] .node-spinner{
+  display:inline-block; position:absolute; top:4px; right:4px;
+}
 
 .btn{
   display:inline-flex; align-items:center; gap: 8px;
@@ -2816,11 +2829,11 @@ def _section_wp_cards(
             _render_task_row_v2(item, running_ids, failed_ids, lang=lang) for item in wp_tasks
         )
         card_body_html = (
-            f'<details class="wp wp-tasks" data-wp="{_esc(wp)}" open>\n'
+            f'<details class="wp wp-tasks" data-wp="{_esc(wp)}" data-fold-key="{_esc(wp)}" data-fold-default-open open>\n'
             f'  <summary>{wp_head_html}<span class="ct">({total})</span></summary>\n'
             f'  <div class="task-list">\n{task_rows}\n  </div>\n'
             '</details>'
-        ) if wp_tasks else f'<details class="wp" data-wp="{_esc(wp)}"><p class="empty">no tasks</p></details>'
+        ) if wp_tasks else f'<details class="wp" data-wp="{_esc(wp)}" data-fold-key="{_esc(wp)}"><p class="empty">no tasks</p></details>'
         blocks.append(card_body_html)
 
     return _section_wrap("wp-cards", heading, "\n".join(blocks))
@@ -3467,40 +3480,40 @@ _DASHBOARD_JS = """\
       clock.textContent=now.toISOString().slice(0,19).replace('T',' ')+'Z';
     },1000);
   }
-  /* ---- fold persistence (TSK-05-01 + TSK-01-02) ---- */
+  /* ---- fold persistence (TSK-00-01 generic + TSK-05-01/TSK-01-02 data-wp 호환) ---- */
   var FOLD_KEY_PREFIX='dev-monitor:fold:';
-  function readFold(key,defaultOpen){
+  function readFold(key, defaultOpen){
     try{
-      var saved=localStorage.getItem(FOLD_KEY_PREFIX+key);
-      if(saved==='open')return true;
-      if(saved==='closed')return false;
+      var v=localStorage.getItem(FOLD_KEY_PREFIX+key);
+      if(v==='open')return true;
+      if(v==='closed')return false;
       return defaultOpen===undefined?false:defaultOpen;
     }catch(e){return defaultOpen===undefined?false:defaultOpen;}
   }
-  function writeFold(key,open){
+  function writeFold(key, open){
     try{localStorage.setItem(FOLD_KEY_PREFIX+key,open?'open':'closed');}catch(e){}
   }
   function _foldKeyOf(el){
     /* data-fold-key 우선, 하위 호환으로 data-wp도 지원 */
     return el.getAttribute('data-fold-key')||el.getAttribute('data-wp');
   }
-  function applyFoldStates(root){
-    root.querySelectorAll('details[data-fold-key],details[data-wp]').forEach(function(el){
+  function applyFoldStates(container){
+    container.querySelectorAll('[data-fold-key],[data-wp]').forEach(function(el){
       var key=_foldKeyOf(el);
       if(!key)return;
       var defaultOpen=el.hasAttribute('data-fold-default-open');
-      var shouldOpen=readFold(key,defaultOpen);
-      if(shouldOpen){el.setAttribute('open','');}
+      var isOpen=readFold(key, defaultOpen);
+      if(isOpen){el.setAttribute('open','');}
       else{el.removeAttribute('open');}
     });
   }
-  function bindFoldListeners(root){
-    root.querySelectorAll('details[data-fold-key],details[data-wp]').forEach(function(el){
+  function bindFoldListeners(container){
+    container.querySelectorAll('[data-fold-key],[data-wp]').forEach(function(el){
       if(el.__foldBound)return;
       el.__foldBound=true;
       el.addEventListener('toggle',function(){
         var key=_foldKeyOf(el);
-        if(key)writeFold(key,el.open);
+        if(key)writeFold(key, el.open);
       });
     });
   }
@@ -4345,6 +4358,44 @@ _DEP_ANALYSIS_TIMEOUT = 3  # seconds
 # Active statuses that map to "running" (no signal needed)
 _RUNNING_STATUSES = {"[dd]", "[im]", "[ts]"}
 
+# Number of phase_history entries to include in /api/graph node payload.
+# Distinct from server-internal _PHASE_TAIL_LIMIT=10 (used for dashboard history table).
+_GRAPH_PHASE_TAIL_LIMIT = 3
+
+
+def _serialize_phase_history_tail_for_graph(
+    entries: "Optional[List[PhaseEntry]]",
+    limit: int = _GRAPH_PHASE_TAIL_LIMIT,
+) -> "List[dict]":
+    """Convert the last *limit* PhaseEntry items to /api/graph spec dicts.
+
+    Mapping:
+      - ``PhaseEntry.from_status`` → ``"from"``  (avoids Python reserved word)
+      - ``PhaseEntry.to_status``   → ``"to"``
+      - Other fields (``event``, ``at``, ``elapsed_seconds``) pass through unchanged.
+
+    Args:
+        entries: list of PhaseEntry (may be None or empty).
+        limit: maximum number of tail entries to return (default: _GRAPH_PHASE_TAIL_LIMIT=3).
+
+    Returns:
+        List of dicts with keys ``event``, ``from``, ``to``, ``at``, ``elapsed_seconds``.
+        Empty list when *entries* is None or empty.
+    """
+    if not entries:
+        return []
+    tail = entries[-limit:] if limit > 0 else []
+    return [
+        {
+            "event": entry.event,
+            "from": entry.from_status,
+            "to": entry.to_status,
+            "at": entry.at,
+            "elapsed_seconds": entry.elapsed_seconds,
+        }
+        for entry in tail
+    ]
+
 
 def _is_api_graph_path(path: str) -> bool:
     """Return True iff *path* matches ``/api/graph`` exactly (query allowed).
@@ -4425,12 +4476,16 @@ def _build_graph_payload(
     fan_out_map: dict = graph_stats.get("fan_out_map", {})
     critical_path: dict = graph_stats.get("critical_path", {"nodes": [], "edges": []})
     bottleneck_ids: list = graph_stats.get("bottleneck_ids", [])
+    bottleneck_set: set = set(bottleneck_ids)
     cp_node_set = set(critical_path.get("nodes", []))
 
     # Derive per-task status and count stats
     status_counts = {"done": 0, "running": 0, "pending": 0, "failed": 0, "bypassed": 0}
     nodes = []
     task_id_set = {t.id for t in tasks}
+
+    # Compute running_ids once (O(N+M)) — reuse same set for all nodes (no per-node scan)
+    running_ids_set = _signal_set(signals, "running")
 
     for task in tasks:
         node_status = _derive_node_status(task, signals)
@@ -4441,12 +4496,20 @@ def _build_graph_payload(
             "label": task.title or task.id,
             "status": node_status,
             "is_critical": task.id in cp_node_set,
-            "is_bottleneck": task.id in bottleneck_ids,
+            "is_bottleneck": task.id in bottleneck_set,
             "fan_in": fan_in_map.get(task.id, 0),
             "fan_out": fan_out_map.get(task.id, 0),
             "bypassed": task.bypassed,
             "wp_id": task.wp_id,
             "depends": list(task.depends),
+            # v4 payload fields (TSK-00-02)
+            "phase_history_tail": _serialize_phase_history_tail_for_graph(
+                task.phase_history_tail
+            ),
+            "last_event": task.last_event,
+            "last_event_at": task.last_event_at,
+            "elapsed_seconds": task.elapsed_seconds,
+            "is_running_signal": task.id in running_ids_set,
         })
 
     # Build edges from task depends relationships

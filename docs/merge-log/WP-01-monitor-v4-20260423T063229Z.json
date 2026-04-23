@@ -1,0 +1,10 @@
+{
+  "wt_name": "WP-01-monitor-v4",
+  "utc": "20260423T063229Z",
+  "conflicts": [
+    "scripts/monitor-server.py"
+  ],
+  "base_sha": "8004ad628d67dfbe5e4d443603484b942c891600",
+  "result": "aborted",
+  "note": "Single conflict block in scripts/monitor-server.py (~65 lines, JS fold persistence helpers). HEAD has TSK-00-01 generic [data-fold-key] selector; WP-01 has TSK-05-01+TSK-01-02 details[data-fold-key],details[data-wp] selector. Not strictly comparable — needs human review."
+}
