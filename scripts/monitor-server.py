@@ -56,7 +56,6 @@ _I18N: dict = {
         "team_agents": "팀 에이전트 (tmux)",
         "subagents": "서브 에이전트 (agent-pool)",
         "live_activity": "실시간 활동",
-        "phase_timeline": "단계 타임라인",
     },
     "en": {
         "work_packages": "Work Packages",
@@ -64,7 +63,6 @@ _I18N: dict = {
         "team_agents": "Team Agents (tmux)",
         "subagents": "Subagents (agent-pool)",
         "live_activity": "Live Activity",
-        "phase_timeline": "Phase Timeline",
     },
 }
 
@@ -999,7 +997,7 @@ def _filter_by_subproject(state: dict, sp: str, project_name: str) -> dict:
 _DEFAULT_REFRESH_SECONDS = 3
 _PHASES_SECTION_LIMIT = 10
 _ERROR_TITLE_CAP = 200
-_SECTION_ANCHORS = ("wp-cards", "features", "team", "subagents", "activity", "timeline", "phases", "dep-graph")
+_SECTION_ANCHORS = ("wp-cards", "features", "team", "subagents", "activity", "phases", "dep-graph")
 
 # ---------------------------------------------------------------------------
 # i18n (TSK-03-04) — minimal table; other sections adopt as follow-on Tasks
@@ -1012,7 +1010,6 @@ _I18N: dict[str, dict[str, str]] = {
         "team_agents": "팀 에이전트 (tmux)",
         "subagents": "서브 에이전트 (agent-pool)",
         "live_activity": "실시간 활동",
-        "phase_timeline": "단계 타임라인",
         "dep_graph": "의존성 그래프",
         # TSK-04-04: dep-graph summary chip labels
         "dep_stat_total":    "총",
@@ -1029,7 +1026,6 @@ _I18N: dict[str, dict[str, str]] = {
         "team_agents": "Team Agents (tmux)",
         "subagents": "Subagents (agent-pool)",
         "live_activity": "Live Activity",
-        "phase_timeline": "Phase Timeline",
         "dep_graph": "Dependency Graph",
         # TSK-04-04: dep-graph summary chip labels
         "dep_stat_total":    "Total",
@@ -1638,58 +1634,6 @@ body[data-filter="bypass"]  .trow:not([data-status="bypass"]) { display: none; }
 }
 .activity{ max-height: 420px; overflow-y: auto; padding: 4px 0; }
 
-/* ---------- 7. Phase Timeline ---------- */
-.timeline{ padding: 8px 14px 14px; }
-.timeline-head{
-  display:flex; justify-content: space-between;
-  font-size: 10px; color: var(--ink-4);
-  letter-spacing: .1em; text-transform: uppercase;
-  padding: 0 4px 8px;
-}
-.tl-row{
-  display:grid;
-  grid-template-columns: 82px 1fr;
-  align-items: center;
-  gap: 10px; padding: 3px 0; font-size: 11px;
-}
-.tl-row .lbl{ color: var(--ink-3); font-family: var(--mono); font-size: 10.5px; white-space:nowrap; }
-.tl-track{
-  position: relative; height: 14px;
-  background: var(--bg-2);
-  border: 1px solid var(--line);
-  border-radius: 2px; overflow: hidden;
-}
-.tl-track .seg{ position: absolute; top:0; bottom:0; }
-.tl-track .seg-done   { background: var(--done); }
-.tl-track .seg-running{ background: linear-gradient(90deg, var(--run) 0%, var(--run) 70%, rgba(74,163,255,.2)); }
-.tl-track .seg-failed { background: var(--fail); }
-.tl-track .seg-bypass { background: var(--bypass); }
-.tl-track .seg-pending{ background: repeating-linear-gradient(45deg, rgba(240,194,74,.2) 0 4px, rgba(240,194,74,.35) 4px 8px); }
-.tl-track .seg-idle   { background: transparent; }
-
-.tl-axis{ position: relative; height: 18px; margin-top: 6px; border-top: 1px solid var(--line); }
-.tl-axis .tick{ position: absolute; top: 0; bottom: 10px; width: 1px; background: var(--line-2); }
-.tl-axis .tick.major{ background: var(--line-hi); bottom: 6px;}
-.tl-axis .tlabel{
-  position:absolute; top: 4px; transform: translateX(-50%);
-  font-family: var(--mono); font-size: 9.5px;
-  color: var(--ink-4); white-space: nowrap;
-}
-.tl-now{ position:absolute; top:-2px; bottom:0; width: 1px; background: var(--accent); box-shadow: 0 0 8px var(--accent-dim); }
-.tl-now::before{
-  content:""; position:absolute; top:-3px; left:-3px;
-  width: 7px; height: 7px; border-radius: 50%;
-  background: var(--accent); box-shadow: 0 0 8px var(--accent);
-}
-
-/* ---------- 7b. Phase Timeline SVG (used by _timeline_svg) ---------- */
-.timeline-svg{ width:100%; overflow:visible; }
-.timeline-svg .tl-dd{ fill: var(--run); }
-.timeline-svg .tl-im{ fill: var(--bypass); }
-.timeline-svg .tl-ts{ fill: var(--done); }
-.timeline-svg .tl-xx{ fill: var(--ink-3); }
-.timeline-svg .tl-fail{ fill: url(#hatch); }
-
 /* ---------- 8. Team Agents ---------- */
 .team{ padding: 0; }
 .pane{ border-bottom: 1px solid var(--line); }
@@ -2198,7 +2142,6 @@ _SECTION_EYEBROWS = {
     "wp-cards":   ("planning",    ""),
     "features":   ("unassigned",  ""),
     "activity":   ("stream",      'last 20 events · <b style="color:var(--done)">tailing</b>'),
-    "timeline":   ("last 60 min", "tick: 15m"),
     "team":       ("tmux",        ""),
     "subagents":  ("agent-pool",  "fan-out / fan-in signals"),
     "phases":     ("audit",       "last 10 transitions"),
@@ -2208,7 +2151,6 @@ _SECTION_DEFAULT_HEADINGS = {
     "wp-cards": "Work Packages",
     "features": "Features",
     "activity": "Live Activity",
-    "timeline": "Phase Timeline",
     "team": "Team Agents (tmux)",
     "subagents": "Subagents (agent-pool)",
 }
@@ -2280,7 +2222,6 @@ def _section_header(model: dict, lang: str = "ko", subproject: str = "") -> str:
         '<a href="#team">Team</a>'
         '<a href="#subagents">Subagents</a>'
         '<a href="#activity">Activity</a>'
-        '<a href="#timeline">Timeline</a>'
         '<a href="#phases">Phases</a>'
         '</nav>\n'
     )
@@ -3277,13 +3218,11 @@ def _section_dep_graph(lang: str = "ko", subproject: str = "all") -> str:
 
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
-# TSK-01-04: Live Activity + Phase Timeline render functions
+# TSK-01-04: Live Activity render functions
 # ---------------------------------------------------------------------------
 
 _KNOWN_PHASES = {"dd", "im", "ts", "xx"}
 _LIVE_ACTIVITY_LIMIT = 20
-_TIMELINE_MAX_ROWS = 50
-_TIMELINE_SPAN_MINUTES = 60
 
 
 def _parse_iso_utc(s):
@@ -3365,6 +3304,33 @@ def _live_activity_rows(tasks, features, limit=_LIVE_ACTIVITY_LIMIT):
     return collected[:limit]
 
 
+def _live_activity_details_wrap(heading: str, body: str) -> str:
+    """Live Activity 섹션을 <details data-fold-key="live-activity"> 구조로 래핑한다.
+
+    TSK-01-02: data-fold-default-open 속성을 부여하지 않음 → readFold('live-activity', false)
+    → 첫 로드(localStorage 비어있음) 시 기본 접힘 (PRD §5 AC-7).
+
+    eyebrow/aside 는 <summary> 내부에 포함하여 기존 section-head 와 동일한 정보를 제공한다.
+    in-page anchor 호환을 위해 id="activity" 를 <details> 에 부여한다.
+    """
+    eyebrow, aside = _SECTION_EYEBROWS.get("activity", ("", ""))
+    eyebrow_html = f'\n    <div class="eyebrow">{eyebrow}</div>' if eyebrow else ""
+    aside_html = f'\n    <div class="aside">{aside}</div>' if aside else ""
+    summary = (
+        f'<summary class="section-head">\n'
+        f'  <div>{eyebrow_html}\n'
+        f'    <h2>{heading}</h2>\n'
+        f'  </div>{aside_html}\n'
+        f'</summary>'
+    )
+    return (
+        f'<details class="activity-section" data-fold-key="live-activity" id="activity">\n'
+        f'{summary}\n'
+        f'{body}\n'
+        f'</details>'
+    )
+
+
 def _section_live_activity(model, heading: "Optional[str]" = None):
     """Live Activity 섹션을 렌더링한다.
 
@@ -3372,6 +3338,7 @@ def _section_live_activity(model, heading: "Optional[str]" = None):
     내림차순으로 activity-row div 목록으로 렌더한다.
 
     TSK-02-02: heading 파라미터 추가 — i18n 지원.
+    TSK-01-02: <details data-fold-key="live-activity"> 로 래핑 — 기본 접힘.
     """
     heading = _resolve_heading("activity", heading)
     tasks = model.get("wbs_tasks") or []
@@ -3379,7 +3346,8 @@ def _section_live_activity(model, heading: "Optional[str]" = None):
     rows = _live_activity_rows(tasks, features)
 
     if not rows:
-        return _empty_section("activity", heading, "no recent events")
+        empty_body = '  <div class="panel"><p class="empty">no recent events</p></div>'
+        return _live_activity_details_wrap(heading, empty_body)
 
     # Build {task_id: {kind: content}} lookup from shared signal files
     sig_content: dict = {}
@@ -3443,7 +3411,7 @@ def _section_live_activity(model, heading: "Optional[str]" = None):
         row_htmls.append(row_html)
 
     body = '<div class="panel"><div class="activity" aria-live="polite">\n' + "\n".join(row_htmls) + '\n</div></div>'
-    return _section_wrap("activity", heading, body)
+    return _live_activity_details_wrap(heading, body)
 
 
 def _phase_label(status_str):
@@ -3472,265 +3440,6 @@ def _phase_of(to_status):
     return None
 
 
-def _timeline_rows(tasks, features, now, span_minutes=_TIMELINE_SPAN_MINUTES):
-    """tasks + features를 phase segment 행 리스트로 변환한다.
-
-    phase_history_tail이 0건인 item은 skip한다.
-    반환 행: {'id', 'title', 'bypassed', 'segments': [(start_dt, end_dt, phase, fail), ...]}
-    """
-    result = []
-    for item in list(tasks or []) + list(features or []):
-        item_id = getattr(item, "id", None) or ""
-        title = getattr(item, "title", None)
-        bypassed = bool(getattr(item, "bypassed", False))
-        tail = getattr(item, "phase_history_tail", None) or []
-
-        if not tail:
-            continue
-
-        pairs = []
-        for e in tail:
-            dt = _parse_iso_utc(getattr(e, "at", None))
-            if dt is None:
-                continue
-            pairs.append((e, dt))
-
-        pairs.sort(key=lambda p: p[1])
-
-        segments = []
-        for i, (e, dt) in enumerate(pairs):
-            phase = _phase_of(getattr(e, "to_status", None))
-            if phase is None:
-                continue
-            end_dt = pairs[i + 1][1] if i + 1 < len(pairs) else now
-            event = getattr(e, "event", None)
-            fail = bool(event and event.endswith(".fail"))
-            segments.append((dt, end_dt, phase, fail))
-
-        if not segments:
-            continue
-
-        result.append({
-            "id": item_id,
-            "title": title,
-            "bypassed": bypassed,
-            "segments": segments,
-        })
-
-    return result
-
-
-def _x_of(t, now, span_minutes, W=600):
-    """t 시각을 SVG X 좌표로 변환한다 (0.0 ~ W 클램프)."""
-    origin = now - timedelta(minutes=span_minutes)
-    delta_sec = (t - origin).total_seconds()
-    total_sec = span_minutes * 60
-    return max(0.0, min(float(W), W * delta_sec / total_sec))
-
-
-def _timeline_svg(rows, span_minutes, now, max_rows=_TIMELINE_MAX_ROWS, W=600):
-    """SVG 타임라인을 생성한다.
-
-    빈 rows이면 empty-state SVG를 반환한다. max_rows 초과 row는 잘린다.
-    외부 자원 참조 없음, 시간 파싱 실패 이벤트 skip.
-    """
-    if not rows:
-        return (
-            '<svg class="timeline-svg" viewBox="0 0 ' + str(W) + ' 40">\n'
-            '  <text x="' + str(W // 2) + '" y="24" text-anchor="middle" '
-            'fill="var(--ink-3)">no phase history</text>\n'
-            '</svg>'
-        )
-
-    visible = rows[:max_rows]
-    row_count = len(visible)
-    H = row_count * 20
-
-    parts = []
-    parts.append(
-        '<svg class="timeline-svg" viewBox="0 0 ' + str(W) + ' ' + str(H) + '">'
-    )
-
-    # <defs> — 해칭 패턴
-    parts.append(
-        '  <defs>\n'
-        '    <pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse"'
-        ' patternTransform="rotate(45)">\n'
-        '      <line x1="0" y1="0" x2="0" y2="6" stroke="var(--fail)" stroke-width="2"/>\n'
-        '    </pattern>\n'
-        '  </defs>'
-    )
-
-    # X축 tick (13개: i=0..12, 5분 간격)
-    tick_parts = ['  <g class="tl-ticks">']
-    for i in range(13):
-        x = i * W / 12
-        minutes_ago = span_minutes - i * (span_minutes / 12)
-        label = "0m" if i == 12 else ("-" + str(int(minutes_ago)) + "m")
-        tick_parts.append(
-            '    <line x1="' + ("%.1f" % x) + '" y1="0" x2="' + ("%.1f" % x) + '" y2="' + str(H) + '" '
-            'stroke="var(--line)" stroke-width="0.5"/>'
-        )
-        tick_parts.append(
-            '    <text x="' + ("%.1f" % x) + '" y="' + str(H - 4) + '" text-anchor="middle" '
-            'font-size="8" fill="var(--ink-3)">' + _esc(label) + '</text>'
-        )
-    tick_parts.append('  </g>')
-    parts.extend(tick_parts)
-
-    # 각 row 렌더
-    for row_idx, row in enumerate(visible):
-        y_base = row_idx * 20
-        bypassed = row.get("bypassed", False)
-        segments = row.get("segments", [])
-
-        g_parts = ['  <g transform="translate(0,' + str(y_base) + ')">']
-
-        for start_dt, end_dt, phase, fail in segments:
-            x1 = _x_of(start_dt, now, span_minutes, W)
-            x2 = _x_of(end_dt, now, span_minutes, W)
-            rect_w = max(1.0, x2 - x1)
-
-            g_parts.append(
-                '    <rect x="' + ("%.1f" % x1) + '" y="2" width="' + ("%.1f" % rect_w) + '" height="16" '
-                'class="tl-' + _esc(phase) + '"/>'
-            )
-
-            if fail:
-                g_parts.append(
-                    '    <rect x="' + ("%.1f" % x1) + '" y="2" width="' + ("%.1f" % rect_w) + '" height="16" '
-                    'class="tl-fail"/>'
-                )
-
-        if bypassed:
-            g_parts.append(
-                '    <text x="' + str(W + 5) + '" y="13" font-size="10">\U0001f7e1</text>'
-            )
-
-        g_parts.append('  </g>')
-        parts.extend(g_parts)
-
-    parts.append('</svg>')
-    return "\n".join(parts)
-
-
-def _section_phase_timeline(tasks, features, heading: "Optional[str]" = None):
-    """Phase Timeline 섹션을 렌더링한다 (v3: CSS positional .tl-track/.seg divs).
-
-    시간축: 현재 - 60분 = left:0%, 현재 = left:100%.
-    Task 수 50 초과 시 상위 50건만 렌더 후 +N more 링크 표시.
-    SVG 사용 안 함 — CSS left%/width% 배치.
-
-    TSK-02-02: heading 파라미터 추가 — i18n 지원.
-    """
-    heading = _resolve_heading("timeline", heading)
-    now = datetime.now(timezone.utc)
-    rows = _timeline_rows(tasks, features, now)
-
-    total = len(rows)
-    visible = rows[:_TIMELINE_MAX_ROWS]
-
-    svg_html = _timeline_svg(rows, _TIMELINE_SPAN_MINUTES, now)
-    if not visible:
-        body = f'<div class="panel timeline">{svg_html}</div>'
-        return _section_wrap("timeline", heading, body)
-
-    span_sec = _TIMELINE_SPAN_MINUTES * 60
-    origin = now - timedelta(minutes=_TIMELINE_SPAN_MINUTES)
-
-    def _left_pct(t):
-        delta = (t - origin).total_seconds()
-        return max(0.0, min(100.0, delta / span_sec * 100))
-
-    def _width_pct(start_t, end_t):
-        l = _left_pct(start_t)
-        r = _left_pct(end_t)
-        return max(0.1, r - l)
-
-    # v3 segment class mapping: phase + fail → semantic colour
-    # (matches .tl-track .seg-done/.seg-running/.seg-failed/.seg-bypass in CSS)
-    _PHASE_TO_SEG = {"dd": "running", "im": "running", "ts": "running", "xx": "done"}
-
-    track_rows = []
-    for row in visible:
-        item_id = _esc(row.get("id", ""))
-        bypassed = row.get("bypassed", False)
-        segs = row.get("segments", [])
-        seg_divs = []
-        total_segs = len(segs)
-        for i, (start_dt, end_dt, phase, fail) in enumerate(segs):
-            l = _left_pct(start_dt)
-            w = _width_pct(start_dt, end_dt)
-            if fail:
-                cls = "failed"
-            elif bypassed and i == total_segs - 1:
-                cls = "bypass"
-            else:
-                cls = _PHASE_TO_SEG.get(phase, "running")
-            seg_divs.append(
-                f'<div class="seg seg-{cls}"'
-                f' style="left:{l:.2f}%;width:{w:.2f}%"></div>'
-            )
-        segs_html = "\n    ".join(seg_divs) if seg_divs else ""
-        track_rows.append(
-            f'<div class="tl-row" data-id="{item_id}">\n'
-            f'  <span class="lbl">{item_id}</span>\n'
-            f'  <div class="tl-track">\n'
-            f'    {segs_html}\n'
-            f'  </div>\n'
-            f'</div>'
-        )
-
-    # X-axis labels (tl-axis) — 5 major ticks at 0/25/50/75/100%
-    axis_ticks = []
-    for i in range(5):
-        pct = i * 25
-        mins_ago = _TIMELINE_SPAN_MINUTES - i * (_TIMELINE_SPAN_MINUTES // 4)
-        label = "now" if mins_ago == 0 else f"−{mins_ago}m"
-        axis_ticks.append(
-            f'<div class="tick major" style="left:{pct}%"></div>'
-            f'<div class="tlabel" style="left:{pct}%">{_esc(label)}</div>'
-        )
-
-    # Current-time indicator at right edge
-    tl_now_html = '<div class="tl-now" style="left:100%"></div>'
-
-    more_html = ""
-    if total > _TIMELINE_MAX_ROWS:
-        extra = total - _TIMELINE_MAX_ROWS
-        more_html = (
-            f'\n<p class="timeline-more">'
-            f'<a href="#timeline-full">+{extra} more</a></p>'
-        )
-
-    header_html = (
-        '<div class="timeline-head">\n'
-        f'  <span>−{_TIMELINE_SPAN_MINUTES}m</span>\n'
-        '  <span>now</span>\n'
-        '</div>'
-    )
-
-    axis_row_html = (
-        '<div class="tl-row" style="margin-top:8px;">\n'
-        '  <span class="lbl"></span>\n'
-        '  <div class="tl-axis" aria-hidden="true">\n'
-        + "\n".join(axis_ticks)
-        + f'\n    {tl_now_html}\n'
-        + '  </div>\n'
-        '</div>'
-    )
-
-    body = (
-        '<div class="panel timeline">\n'
-        + header_html + '\n'
-        + "\n".join(track_rows)
-        + '\n'
-        + axis_row_html
-        + '\n</div>'
-        + more_html
-    )
-    return _section_wrap("timeline", heading, body)
-
 # Compiled once at module load; used by _wrap_with_data_section.
 _DATA_SECTION_TAG_RE = re.compile(r'(<(?:section|header)(\s[^>]*)?>)', re.DOTALL)
 
@@ -3755,27 +3464,40 @@ _DASHBOARD_JS = """\
       clock.textContent=now.toISOString().slice(0,19).replace('T',' ')+'Z';
     },1000);
   }
-  /* ---- fold persistence (TSK-05-01) ---- */
+  /* ---- fold persistence (TSK-05-01 + TSK-01-02) ---- */
   var FOLD_KEY_PREFIX='dev-monitor:fold:';
-  function readFold(wpId){
-    try{return localStorage.getItem(FOLD_KEY_PREFIX+wpId);}catch(e){return null;}
+  function readFold(key,defaultOpen){
+    try{
+      var saved=localStorage.getItem(FOLD_KEY_PREFIX+key);
+      if(saved==='open')return true;
+      if(saved==='closed')return false;
+      return defaultOpen===undefined?false:defaultOpen;
+    }catch(e){return defaultOpen===undefined?false:defaultOpen;}
   }
-  function writeFold(wpId,open){
-    try{localStorage.setItem(FOLD_KEY_PREFIX+wpId,open?'open':'closed');}catch(e){}
+  function writeFold(key,open){
+    try{localStorage.setItem(FOLD_KEY_PREFIX+key,open?'open':'closed');}catch(e){}
+  }
+  function _foldKeyOf(el){
+    /* data-fold-key 우선, 하위 호환으로 data-wp도 지원 */
+    return el.getAttribute('data-fold-key')||el.getAttribute('data-wp');
   }
   function applyFoldStates(root){
-    root.querySelectorAll('details[data-wp]').forEach(function(el){
-      var saved=readFold(el.getAttribute('data-wp'));
-      if(saved==='closed'){el.removeAttribute('open');}
-      else if(saved==='open'){el.setAttribute('open','');}
+    root.querySelectorAll('details[data-fold-key],details[data-wp]').forEach(function(el){
+      var key=_foldKeyOf(el);
+      if(!key)return;
+      var defaultOpen=el.hasAttribute('data-fold-default-open');
+      var shouldOpen=readFold(key,defaultOpen);
+      if(shouldOpen){el.setAttribute('open','');}
+      else{el.removeAttribute('open');}
     });
   }
   function bindFoldListeners(root){
-    root.querySelectorAll('details[data-wp]').forEach(function(el){
+    root.querySelectorAll('details[data-fold-key],details[data-wp]').forEach(function(el){
       if(el.__foldBound)return;
       el.__foldBound=true;
       el.addEventListener('toggle',function(){
-        writeFold(el.getAttribute('data-wp'),el.open);
+        var key=_foldKeyOf(el);
+        if(key)writeFold(key,el.open);
       });
     });
   }
@@ -3869,6 +3591,13 @@ _DASHBOARD_JS = """\
     }
     if(name==='wp-cards'){
       /* TSK-05-01: fold 상태 복원 — DOM 교체 후 localStorage 기반으로 덮어씀 */
+      if(current.innerHTML!==newHtml){current.innerHTML=newHtml;}
+      applyFoldStates(current);
+      bindFoldListeners(current);
+      return;
+    }
+    if(name==='live-activity'){
+      /* TSK-01-02: fold 상태 복원 — auto-refresh 후에도 open/closed 유지 */
       if(current.innerHTML!==newHtml){current.innerHTML=newHtml;}
       applyFoldStates(current);
       bindFoldListeners(current);
@@ -4091,8 +3820,8 @@ def _build_dashboard_body(s: dict) -> str:
 
     v3 layout mirrors the reference ``dev-plugin Monitor.html``:
       shell > cmdbar → kpi → grid[ col-left: wp-cards + features,
-                                    col-right: activity + timeline + team + subagents ]
-             → phase-history
+                                    col-right: activity + team + subagents ]
+             → phase-history → dep-graph
 
     The entire page is wrapped in ``<div class="shell">`` so the cmdbar's
     sticky/backdrop effect aligns with the KPI strip and grid columns.
@@ -4114,7 +3843,6 @@ def _build_dashboard_body(s: dict) -> str:
         '    </div>\n',
         '    <div class="col">\n',
         s["live-activity"], "\n",
-        s["phase-timeline"], "\n",
         s["team"], "\n",
         s["subagents"], "\n",
         '    </div>\n',
@@ -4130,8 +3858,8 @@ def render_dashboard(model: dict, lang: str = "ko", subproject: str = "all") -> 
 
     Assembly order (design.md §구현방향):
       sticky_header → kpi → .page[col-left: wp_cards + features,
-      col-right: live_activity + phase_timeline + team + subagents]
-      → dep-graph (full-width, TSK-03-04) → phase_history (full-width footer)
+      col-right: live_activity + team + subagents]
+      → phase_history (full-width) → dep-graph (full-width, TSK-03-04)
 
     Changes from v1:
     - ``<meta http-equiv="refresh">`` removed (JS polling TBD in WP-02).
@@ -4191,8 +3919,6 @@ def render_dashboard(model: dict, lang: str = "ko", subproject: str = "all") -> 
                                             lang=lang),
         "live-activity":  _section_live_activity(model,
                                                   heading=_t(lang, "live_activity")),
-        "phase-timeline": _section_phase_timeline(tasks, features,
-                                                   heading=_t(lang, "phase_timeline")),
         "team":           _section_team(panes, heading=_t(lang, "team_agents")),
         "subagents":      _section_subagents(ap_sigs,
                                               heading=_t(lang, "subagents")),
@@ -4205,11 +3931,6 @@ def render_dashboard(model: dict, lang: str = "ko", subproject: str = "all") -> 
     sections["live-activity"] = (
         '<div data-section="live-activity">\n'
         f'{sections["live-activity"]}\n'
-        '</div>'
-    )
-    sections["phase-timeline"] = (
-        '<div data-section="phase-timeline">\n'
-        f'{sections["phase-timeline"]}\n'
         '</div>'
     )
     sections["phase-history"] = (

@@ -137,26 +137,6 @@ class TestResponsiveBreakpoints(unittest.TestCase):
                       "prefers-reduced-motion 블록에 animation 재정의가 없습니다.")
 
 
-class TestTimelineSVGClasses(unittest.TestCase):
-    """Phase timeline SVG 클래스 (.timeline-svg + 5개 phase 셀렉터)."""
-
-    CLASSES = ["tl-dd", "tl-im", "tl-ts", "tl-xx", "tl-fail"]
-
-    def test_timeline_classes_present(self):
-        css = _load_css()
-        for cls in self.CLASSES:
-            self.assertIn(
-                cls,
-                css,
-                f"timeline SVG 클래스 .{cls}가 CSS에 없습니다."
-            )
-
-    def test_timeline_svg_parent_class(self):
-        css = _load_css()
-        self.assertIn(".timeline-svg", css,
-                      ".timeline-svg 부모 클래스가 없습니다.")
-
-
 class TestDrawer(unittest.TestCase):
     """v3 사이드 드로어: 640px + aria-hidden 토글 + 모바일 100vw."""
 

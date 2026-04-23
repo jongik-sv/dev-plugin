@@ -445,18 +445,15 @@ class StickyHeaderKpiSectionE2ETests(unittest.TestCase):
 
 @unittest.skipUnless(_SERVER_UP, f"monitor-server not reachable at {_E2E_URL}")
 class LiveActivityTimelineE2ETests(unittest.TestCase):
-    """TSK-01-04 — Live Activity + Phase Timeline 섹션 E2E 검증.
+    """TSK-01-04 — Live Activity 섹션 E2E 검증.
 
     수락 기준 (design.md QA 체크리스트 fullstack/frontend 필수 항목):
     1. GET / 접속 → sticky 헤더 nav의 #activity 링크 클릭 → Live Activity 섹션으로 스크롤
-    2. GET / 접속 → sticky 헤더 nav의 #timeline 링크 클릭 → Phase Timeline 섹션으로 스크롤
-    3. id="activity" 섹션이 페이지에 렌더됨
-    4. id="timeline" 섹션이 페이지에 렌더됨
-    5. Phase Timeline 섹션에 <svg> 인라인 포함 (외부 자원 없음)
+    2. id="activity" 섹션이 페이지에 렌더됨
+
+    TSK-01-01: Phase Timeline 섹션 제거됨 — #timeline 앵커/섹션 테스트 제거.
 
     주의: 이 테스트는 live 서버가 기동된 상태에서만 실행된다 (skipUnless 조건).
-    TSK-01-07(render_dashboard 조립)이 완료되면 activity/timeline 섹션이 실제로 렌더된다.
-    dev-test 단계에서 TSK-01-04+TSK-01-07 완료 후 수행된다.
     """
 
     def _dashboard_html(self) -> str:
@@ -482,47 +479,14 @@ class LiveActivityTimelineE2ETests(unittest.TestCase):
         self.assertIn('id="activity"', html_body,
                       "#activity 섹션 id가 대시보드 HTML에 없음")
 
-    def test_timeline_nav_anchor_present(self) -> None:
-        """상단 네비에 href="#timeline" 링크가 존재한다 (reachability gate).
-
-        Reachability: sticky 헤더 nav의 #timeline 앵커를 클릭하여 섹션으로 도달한다.
-        """
+    def test_timeline_section_absent(self) -> None:
+        """TSK-01-01: id="timeline" 섹션이 라이브 응답에 존재하지 않아야 한다."""
         html_body = self._dashboard_html()
-        self.assertIn('href="#timeline"', html_body,
-                      "#timeline 네비 앵커가 대시보드 HTML에 없음")
-
-    def test_timeline_section_id_present(self) -> None:
-        """GET / 응답 HTML에 id="timeline" 섹션이 존재한다."""
-        html_body = self._dashboard_html()
-        self.assertIn('id="timeline"', html_body,
-                      "#timeline 섹션 id가 대시보드 HTML에 없음")
-
-    def test_timeline_section_contains_inline_svg(self) -> None:
-        """Phase Timeline 섹션에 인라인 <svg> 가 있고 외부 자원 참조가 없다.
-
-        design.md 제약: SVG는 인라인, 외부 자원 참조 금지.
-        """
-        html_body = self._dashboard_html()
-        # id="timeline" 섹션 블록 추출
-        section_match = re.search(
-            r'<section id="timeline">(.*?)</section>',
-            html_body,
-            re.DOTALL,
-        )
-        self.assertIsNotNone(section_match,
-                             'id="timeline" 섹션 블록을 HTML에서 추출할 수 없음')
-        section_html = section_match.group(1)
-        self.assertIn('<svg', section_html,
-                      "#timeline 섹션에 <svg> 없음")
-        # 외부 자원 참조 없어야 함
-        ext = re.findall(
-            r'<(?:image|script|use)[^>]*\s(?:href|src|xlink:href)=["\']?https?://',
-            section_html,
-        )
-        self.assertEqual(ext, [], f"외부 자원 참조 발견: {ext!r}")
+        self.assertNotIn('id="timeline"', html_body,
+                         "TSK-01-01: #timeline 섹션이 아직 남아있음")
 
     def test_no_external_resources_in_full_dashboard(self) -> None:
-        """라이브 응답 전체에 외부 http(s) 자원 참조 없음 (activity/timeline 포함).
+        """라이브 응답 전체에 외부 http(s) 자원 참조 없음 (activity 포함).
 
         design.md 공통 제약: 외부 CDN/폰트/스크립트 참조 금지.
         """
@@ -530,6 +494,50 @@ class LiveActivityTimelineE2ETests(unittest.TestCase):
         external = re.findall(r"https?://(?!localhost|127\.0\.0\.1)", html_body)
         self.assertEqual(external, [],
                          f"external http(s) links found: {external!r}")
+
+    # ---- TSK-01-02: live-activity <details> 기본 접힘 E2E ----
+
+    def test_activity_section_is_details_element(self) -> None:
+        """TSK-01-02 AC-7: live-activity 섹션이 <details> 엘리먼트로 렌더된다."""
+        html_body = self._dashboard_html()
+        self.assertIn('<details class="activity-section"', html_body,
+                      "activity-section이 <details> 엘리먼트가 아님")
+
+    def test_activity_details_has_fold_key(self) -> None:
+        """TSK-01-02: <details> 에 data-fold-key="live-activity" 속성이 있다."""
+        html_body = self._dashboard_html()
+        self.assertIn('data-fold-key="live-activity"', html_body,
+                      "live-activity details에 data-fold-key 속성 없음")
+
+    def test_activity_details_no_open_attribute(self) -> None:
+        """TSK-01-02 AC-7: 첫 로드 시 <details> 에 open 속성이 없다 (기본 접힘)."""
+        html_body = self._dashboard_html()
+        # <details class="activity-section" ... open> 패턴이 없어야 함
+        match = re.search(r'<details[^>]*activity-section[^>]*\bopen\b', html_body)
+        self.assertIsNone(match,
+                          "activity-section <details> 에 open 속성이 있음 (기본 접힘 위반)")
+
+    def test_activity_details_no_data_fold_default_open(self) -> None:
+        """TSK-01-02: data-fold-default-open 속성 없음 → readFold 기본값 false."""
+        html_body = self._dashboard_html()
+        # activity-section details에는 data-fold-default-open이 없어야 함
+        # (wp-cards와 구분: wp는 data-fold-default-open 유지)
+        import re as _re
+        # activity-section 태그만 추출
+        m = _re.search(r'<details[^>]*activity-section[^>]*>', html_body)
+        if m:
+            tag = m.group(0)
+            self.assertNotIn("data-fold-default-open", tag,
+                             "activity-section에 data-fold-default-open 있음")
+
+    def test_patchsection_live_activity_in_js(self) -> None:
+        """TSK-01-02 AC-8: 대시보드 JS에 live-activity patchSection 분기가 있다."""
+        html_body = self._dashboard_html()
+        self.assertIn("live-activity", html_body,
+                      "JS에 live-activity 분기가 없음")
+        # applyFoldStates + bindFoldListeners 가 live-activity 관련 코드와 함께 존재
+        self.assertIn("applyFoldStates", html_body)
+        self.assertIn("bindFoldListeners", html_body)
 
 
 @unittest.skipUnless(_SERVER_UP, f"monitor-server not reachable at {_E2E_URL}")
@@ -577,11 +585,11 @@ class RenderDashboardV2E2ETests(unittest.TestCase):
         self.assertIn('<div class="page-col-right">', html)
 
     def test_data_section_attributes_unique(self) -> None:
-        """9개 data-section 속성이 각 1회씩 출현."""
+        """8개 data-section 속성이 각 1회씩 출현 (TSK-01-01: phase-timeline 제거됨)."""
         html = self._dashboard_html()
         expected_keys = [
             "sticky-header", "kpi", "wp-cards", "features",
-            "live-activity", "phase-timeline", "team", "subagents", "phase-history",
+            "live-activity", "team", "subagents", "phase-history",
         ]
         for key in expected_keys:
             count = html.count(f'data-section="{key}"')
@@ -613,11 +621,11 @@ class RenderDashboardV2E2ETests(unittest.TestCase):
         self.assertIn('aria-hidden="true"', aside_tag)
 
     def test_section_order_in_live_response(self) -> None:
-        """섹션 순서: sticky-header < kpi < wp-cards < ... < phase-history."""
+        """섹션 순서: sticky-header < kpi < wp-cards < ... < phase-history (TSK-01-01: phase-timeline 제거됨)."""
         html = self._dashboard_html()
         keys_in_order = [
             "sticky-header", "kpi", "wp-cards", "features",
-            "live-activity", "phase-timeline", "team", "subagents", "phase-history",
+            "live-activity", "team", "subagents", "phase-history",
         ]
         positions = {}
         for key in keys_in_order:
