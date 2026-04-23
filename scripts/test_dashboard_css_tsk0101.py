@@ -1,6 +1,13 @@
-"""
-TDD 단위 테스트: DASHBOARD_CSS 확장 (TSK-01-01)
-design.md QA 체크리스트 기반
+"""DASHBOARD_CSS 구조 계약 단위 테스트.
+
+원본은 TSK-01-01 시점의 v1 디자인 계약을 잠그는 회귀 테스트였으나,
+monitor-redesign-v3 머지 후 v1 셀렉터 강제(`task-row`, `.page`, `.activity-row`,
+`@keyframes slide`, `.drawer.open`, v1 색상 팔레트 등)가 디자인 회귀의
+무한 루프 트리거로 작동했음 (bbc7cef → monitor-redesign feature → 다시 회귀).
+
+이 파일은 v3에서도 유효한 셀렉터·계약만 남기고, v1 강제 부분은 제거했다.
+새 v3 토큰/셀렉터 검증은 `test_monitor_render.py` 및 향후 토큰 모듈
+(`monitor_design_tokens.py`)이 담당한다.
 """
 import importlib
 import importlib.util
@@ -40,80 +47,8 @@ class TestPyCompile(unittest.TestCase):
             self.fail(f"py_compile 실패: {e}")
 
 
-class TestCSSLineCount(unittest.TestCase):
-    """DASHBOARD_CSS 라인 수가 400 이하여야 한다."""
-
-    def test_line_count_le_400(self):
-        css = _load_css()
-        lines = css.splitlines()
-        count = len(lines)
-        self.assertLessEqual(
-            count, 400,
-            f"CSS 라인 수 {count}가 400을 초과합니다."
-        )
-
-
-class TestConicGradientFallback(unittest.TestCase):
-    """`@supports not (background: conic-gradient(...))` fallback이 포함되어야 한다."""
-
-    def test_supports_not_conic_gradient_present(self):
-        css = _load_css()
-        self.assertIn(
-            "@supports not",
-            css,
-            "@supports not 블록이 CSS에 없습니다."
-        )
-        self.assertIn(
-            "conic-gradient",
-            css,
-            "conic-gradient 키워드가 CSS에 없습니다."
-        )
-
-
-class TestV1CSSVariables(unittest.TestCase):
-    """v1 CSS 변수 15개가 :root 블록에 모두 존재해야 한다."""
-
-    V1_VARS = [
-        "--bg", "--fg", "--muted", "--border", "--panel",
-        "--accent", "--warn", "--blue", "--purple", "--green",
-        "--gray", "--orange", "--red", "--yellow", "--light-gray",
-    ]
-
-    def test_all_v1_variables_present(self):
-        css = _load_css()
-        for var in self.V1_VARS:
-            self.assertIn(var, css, f"v1 CSS 변수 {var}가 없습니다.")
-
-    def test_v1_variable_values(self):
-        """v1 CSS 변수값이 원본과 동일해야 한다."""
-        css = _load_css()
-        expected_values = {
-            "--bg": "#0d1117",
-            "--fg": "#e6edf3",
-            "--muted": "#8b949e",
-            "--border": "#30363d",
-            "--panel": "#161b22",
-            "--accent": "#58a6ff",
-            "--warn": "#f85149",
-            "--blue": "#388bfd",
-            "--purple": "#bc8cff",
-            "--green": "#3fb950",
-            "--gray": "#8b949e",
-            "--orange": "#d29922",
-            "--red": "#f85149",
-            "--yellow": "#e3b341",
-            "--light-gray": "#6e7681",
-        }
-        for var, val in expected_values.items():
-            self.assertIn(
-                f"{var}: {val}",
-                css,
-                f"v1 CSS 변수 {var}의 값이 {val}이어야 합니다."
-            )
-
-
 class TestKPICardColorBars(unittest.TestCase):
-    """KPI 카드 5가지 상태에 좌측 4px 컬러 바가 정의되어야 한다."""
+    """KPI 카드 호환 클래스 5개 + border-left 4px 컬러바 정의 (v3 legacy 블록)."""
 
     STATES = ["running", "failed", "bypass", "done", "pending"]
 
@@ -127,7 +62,6 @@ class TestKPICardColorBars(unittest.TestCase):
             )
 
     def test_kpi_card_border_left_4px(self):
-        """KPI 카드에 border-left: 4px solid가 있어야 한다."""
         css = _load_css()
         self.assertIn(
             "border-left: 4px solid",
@@ -137,7 +71,7 @@ class TestKPICardColorBars(unittest.TestCase):
 
 
 class TestFilterChip(unittest.TestCase):
-    """.chip[aria-pressed='true'] 선택자가 활성 스타일과 함께 존재해야 한다."""
+    """.chip[aria-pressed='true'] 활성 셀렉터 + 배경 스타일."""
 
     def test_chip_aria_pressed_selector(self):
         css = _load_css()
@@ -156,50 +90,33 @@ class TestFilterChip(unittest.TestCase):
                       'chip[aria-pressed="true"] 블록에 background 스타일이 없습니다.')
 
 
-class TestPageGridLayout(unittest.TestCase):
-    """`.page`가 grid-template-columns: 3fr 2fr로 설정되어야 한다."""
-
-    def test_page_grid_3fr_2fr(self):
-        css = _load_css()
-        self.assertIn(
-            "3fr 2fr",
-            css,
-            ".page grid-template-columns: 3fr 2fr가 없습니다."
-        )
-
-    def test_page_display_grid(self):
-        css = _load_css()
-        self.assertIn(".page", css)
-        self.assertIn("display: grid", css)
-
-
 class TestResponsiveBreakpoints(unittest.TestCase):
-    """반응형 브레이크포인트가 존재해야 한다."""
+    """v3 반응형 브레이크포인트 (1280px tablet, 768px mobile, reduced-motion)."""
 
-    def test_breakpoint_1279px(self):
+    def test_breakpoint_1280px(self):
         css = _load_css()
         self.assertIn(
-            "max-width: 1279px",
+            "max-width: 1280px",
             css,
-            "@media (max-width: 1279px) 브레이크포인트가 없습니다."
+            "@media (max-width: 1280px) 브레이크포인트가 없습니다."
         )
 
-    def test_breakpoint_1279_page_1fr(self):
-        """1279px 이하에서 .page가 grid-template-columns: 1fr로 전환되어야 한다."""
+    def test_breakpoint_1280_grid_1fr(self):
+        """1280px 이하에서 .grid가 1fr 단일 컬럼으로 전환되어야 한다."""
         css = _load_css()
-        idx = css.find("max-width: 1279px")
+        idx = css.find("max-width: 1280px")
         if idx < 0:
-            self.skipTest("1279px 브레이크포인트 미존재")
+            self.skipTest("1280px 브레이크포인트 미존재")
         nearby = css[idx:idx+300]
         self.assertIn("1fr", nearby,
-                      "1279px 미디어쿼리에 grid-template-columns: 1fr 전환이 없습니다.")
+                      "1280px 미디어쿼리에 grid-template-columns: 1fr 전환이 없습니다.")
 
-    def test_breakpoint_767px(self):
+    def test_breakpoint_768px(self):
         css = _load_css()
         self.assertIn(
-            "max-width: 767px",
+            "max-width: 768px",
             css,
-            "@media (max-width: 767px) 브레이크포인트가 없습니다."
+            "@media (max-width: 768px) 브레이크포인트가 없습니다."
         )
 
     def test_prefers_reduced_motion(self):
@@ -211,7 +128,6 @@ class TestResponsiveBreakpoints(unittest.TestCase):
         )
 
     def test_reduced_motion_disables_animation(self):
-        """prefers-reduced-motion 블록에서 animation이 비활성화되어야 한다."""
         css = _load_css()
         idx = css.find("prefers-reduced-motion")
         if idx < 0:
@@ -222,7 +138,7 @@ class TestResponsiveBreakpoints(unittest.TestCase):
 
 
 class TestTimelineSVGClasses(unittest.TestCase):
-    """Phase timeline SVG 클래스가 정의되어야 한다."""
+    """Phase timeline SVG 클래스 (.timeline-svg + 5개 phase 셀렉터)."""
 
     CLASSES = ["tl-dd", "tl-im", "tl-ts", "tl-xx", "tl-fail"]
 
@@ -242,7 +158,7 @@ class TestTimelineSVGClasses(unittest.TestCase):
 
 
 class TestDrawer(unittest.TestCase):
-    """사이드 드로어가 640px 너비로 정의되어야 한다."""
+    """v3 사이드 드로어: 640px + aria-hidden 토글 + 모바일 100vw."""
 
     def test_drawer_class_present(self):
         css = _load_css()
@@ -256,90 +172,70 @@ class TestDrawer(unittest.TestCase):
         css = _load_css()
         self.assertIn("640px", css, "drawer 640px 너비가 없습니다.")
 
-    def test_drawer_open_class(self):
+    def test_drawer_aria_hidden_toggle(self):
+        """v3는 .drawer.open 클래스가 아닌 [aria-hidden="false"] 속성으로 토글한다."""
         css = _load_css()
-        self.assertIn(".drawer.open", css, ".drawer.open 클래스가 없습니다.")
+        self.assertIn('.drawer[aria-hidden="false"]', css,
+                      '.drawer[aria-hidden="false"] 셀렉터가 없습니다.')
 
-    def test_drawer_backdrop_open(self):
+    def test_drawer_backdrop_aria_hidden_toggle(self):
         css = _load_css()
-        self.assertIn(".drawer-backdrop.open", css,
-                      ".drawer-backdrop.open 클래스가 없습니다.")
+        self.assertIn('.drawer-backdrop[aria-hidden="false"]', css,
+                      '.drawer-backdrop[aria-hidden="false"] 셀렉터가 없습니다.')
 
     def test_drawer_mobile_100vw(self):
-        """@media (max-width: 767px)에서 drawer가 100vw여야 한다."""
+        """@media (max-width: 768px)에서 drawer가 100vw여야 한다."""
         css = _load_css()
         self.assertIn("100vw", css, "drawer 모바일 100vw가 없습니다.")
 
 
-class TestTaskRowColorBar(unittest.TestCase):
-    """.task-row::before로 좌측 컬러 바가 구현되어야 한다."""
+class TestTaskRowStatusbar(unittest.TestCase):
+    """v3 task row: .trow + 좌측 .statusbar div + data-status 셀렉터."""
 
-    def test_task_row_position_relative(self):
+    def test_trow_class_present(self):
         css = _load_css()
-        idx = css.find(".task-row")
-        self.assertGreater(idx, -1, ".task-row 클래스가 없습니다.")
-        task_row_block = css[idx:idx + 500]
-        self.assertIn("position: relative", task_row_block,
-                      ".task-row에 position: relative가 없습니다.")
+        self.assertIn(".trow", css, ".trow 클래스가 없습니다.")
 
-    def test_task_row_before_pseudo(self):
+    def test_statusbar_4px_width(self):
         css = _load_css()
-        self.assertIn(".task-row::before", css,
-                      ".task-row::before pseudo-element가 없습니다.")
-
-    def test_task_row_before_width_4px(self):
-        css = _load_css()
-        idx = css.find(".task-row::before")
+        idx = css.find(".trow .statusbar")
         if idx < 0:
-            self.skipTest(".task-row::before 미존재")
-        nearby = css[idx:idx + 300]
-        self.assertIn("width: 4px", nearby,
-                      ".task-row::before에 width: 4px가 없습니다.")
+            self.skipTest(".trow .statusbar 미존재")
+        nearby = css[idx:idx+200]
+        self.assertIn("4px", nearby,
+                      ".trow .statusbar에 width: 4px가 없습니다.")
 
-    def test_task_row_state_classes(self):
-        """task-row 5개 상태 클래스가 있어야 한다."""
+    def test_trow_state_data_attribute(self):
+        """task row 5개 상태가 data-status 속성으로 정의되어야 한다."""
         css = _load_css()
         for state in ["done", "running", "failed", "bypass", "pending"]:
             self.assertIn(
-                f".task-row.{state}",
+                f'.trow[data-status="{state}"]',
                 css,
-                f".task-row.{state} 클래스가 없습니다."
+                f'.trow[data-status="{state}"] 셀렉터가 없습니다.'
             )
 
 
-class TestRunningAnimation(unittest.TestCase):
-    """.task-row.running .run-line에 @keyframes slide 애니메이션이 연결되어야 한다."""
+class TestKeyframesAnimations(unittest.TestCase):
+    """v3 핵심 애니메이션: pulse / breathe / fade-in (v1의 slide는 제거됨)."""
 
-    def test_run_line_class_present(self):
+    def test_keyframes_pulse_present(self):
         css = _load_css()
-        self.assertIn(".run-line", css, ".run-line 클래스가 없습니다.")
-
-    def test_keyframes_slide_present(self):
-        css = _load_css()
-        self.assertIn("@keyframes slide", css,
-                      "@keyframes slide가 없습니다.")
-
-    def test_running_row_animation(self):
-        css = _load_css()
-        idx = css.find(".task-row.running")
-        if idx < 0:
-            self.skipTest(".task-row.running 미존재")
-        nearby = css[idx:idx + 400]
-        self.assertIn("run-line", nearby,
-                      ".task-row.running 블록 안에 .run-line 참조가 없습니다.")
-
-
-class TestLiveActivityFadeIn(unittest.TestCase):
-    """.activity-row에 @keyframes fade-in 애니메이션이 있어야 한다."""
-
-    def test_activity_row_present(self):
-        css = _load_css()
-        self.assertIn(".activity-row", css, ".activity-row 클래스가 없습니다.")
+        self.assertIn("@keyframes pulse", css,
+                      "@keyframes pulse가 없습니다.")
 
     def test_keyframes_fade_in_present(self):
         css = _load_css()
         self.assertIn("@keyframes fade-in", css,
                       "@keyframes fade-in이 없습니다.")
+
+
+class TestActivityRow(unittest.TestCase):
+    """v3 Live Activity: .arow (v1의 .activity-row 대체)."""
+
+    def test_arow_class_present(self):
+        css = _load_css()
+        self.assertIn(".arow", css, ".arow 클래스가 없습니다.")
 
 
 class TestPanePreview(unittest.TestCase):
@@ -351,7 +247,7 @@ class TestPanePreview(unittest.TestCase):
 
 
 class TestStickyHeader(unittest.TestCase):
-    """.sticky-hdr와 .kpi-row가 정의되어야 한다."""
+    """v1 호환 .sticky-hdr는 v3 backward-compat 블록으로 유지된다."""
 
     def test_sticky_hdr_present(self):
         css = _load_css()
@@ -372,7 +268,7 @@ class TestStickyHeader(unittest.TestCase):
 
 
 class TestWPDonut(unittest.TestCase):
-    """.wp-donut이 conic-gradient와 fallback으로 정의되어야 한다."""
+    """.wp-donut SVG 도넛 차트 컨테이너."""
 
     def test_wp_donut_present(self):
         css = _load_css()

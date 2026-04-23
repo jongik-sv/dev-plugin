@@ -267,29 +267,35 @@ class TestDashboardJsPlaceholder(unittest.TestCase):
 
 
 class TestPageGridLayout(unittest.TestCase):
-    """.page 2컬럼 그리드 wrapper 존재."""
+    """v3 2컬럼 그리드 wrapper: .grid > .col × 2 (v1의 .page 이중 래퍼는 제거됨).
 
-    def test_page_div_exists(self):
-        html = render_dashboard(_valid_model_30tasks())
-        count = html.count('<div class="page">')
-        self.assertEqual(count, 1,
-                         f"Expected exactly 1 <div class=\"page\">, found {count}")
+    v1: <div class="grid"><div class="page"><div class="page-col-left">...</div>...
+    v3: <div class="grid"><div class="col">...</div><div class="col">...</div></div>
 
-    def test_page_col_left_exists(self):
-        html = render_dashboard(_valid_model_30tasks())
-        count = html.count('<div class="page-col-left">')
-        self.assertEqual(count, 1,
-                         f"Expected exactly 1 page-col-left, found {count}")
+    .page 이중 래퍼가 .grid의 한 셀만 차지해 오른쪽 40%가 비는 회귀가
+    monitor-redesign feature design.md에서 진단되어 제거됨.
+    """
 
-    def test_page_col_right_exists(self):
+    def test_grid_div_exists(self):
         html = render_dashboard(_valid_model_30tasks())
-        count = html.count('<div class="page-col-right">')
+        count = html.count('<div class="grid">')
         self.assertEqual(count, 1,
-                         f"Expected exactly 1 page-col-right, found {count}")
+                         f"Expected exactly 1 <div class=\"grid\">, found {count}")
+
+    def test_two_col_divs_exist(self):
+        """.grid 안에 .col div가 정확히 2개 (left + right)."""
+        html = render_dashboard(_valid_model_30tasks())
+        count = html.count('<div class="col">')
+        self.assertEqual(count, 2,
+                         f"Expected exactly 2 <div class=\"col\">, found {count}")
 
 
 class TestSectionOrder(unittest.TestCase):
-    """섹션 순서: sticky-header < kpi < wp-cards < features < live-activity < phase-timeline < team < subagents < phase-history."""
+    """v3 섹션 순서: kpi < wp-cards < features < live-activity < phase-timeline
+    < team < subagents < phase-history.
+
+    v1의 sticky-header 섹션은 cmdbar로 통합되어 제거됨 (monitor-redesign-v3).
+    """
 
     def _get_pos(self, html: str, key: str) -> int:
         # data-section="{key}" 또는 id="{key}" 가 나타나는 첫 번째 위치
@@ -301,7 +307,6 @@ class TestSectionOrder(unittest.TestCase):
     def test_section_order(self):
         html = render_dashboard(_valid_model_30tasks())
         keys_in_order = [
-            "sticky-header",
             "kpi",
             "wp-cards",
             "features",
@@ -330,8 +335,9 @@ class TestDataSectionAttributes(unittest.TestCase):
 
     def test_each_data_section_unique(self):
         html = render_dashboard(_valid_model_30tasks())
+        # sticky-header는 v3에서 cmdbar로 통합되어 제거됨
         expected_keys = [
-            "sticky-header", "kpi", "wp-cards", "features",
+            "kpi", "wp-cards", "features",
             "live-activity", "phase-timeline", "team", "subagents", "phase-history",
         ]
         for key in expected_keys:
@@ -480,13 +486,13 @@ class TestDrawerPositionRelativeToBody(unittest.TestCase):
 
 
 class TestCSSContainsGridRules(unittest.TestCase):
-    """DASHBOARD_CSS에 .page, .page-col-left, .page-col-right, .drawer-backdrop, .drawer 규칙 포함."""
+    """DASHBOARD_CSS에 v3 그리드(.grid + .col) + drawer 규칙 포함."""
 
-    def test_page_grid_css_exists(self):
+    def test_grid_css_exists(self):
+        """v3는 .grid > .col 단순 구조 (v1의 .page 이중 래퍼는 제거됨)."""
         css = monitor_server.DASHBOARD_CSS
-        self.assertIn('.page', css)
-        self.assertIn('.page-col-left', css)
-        self.assertIn('.page-col-right', css)
+        self.assertIn('.grid', css)
+        self.assertIn('.col', css)
 
     def test_drawer_css_exists(self):
         css = monitor_server.DASHBOARD_CSS

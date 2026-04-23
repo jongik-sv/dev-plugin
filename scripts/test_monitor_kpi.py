@@ -382,10 +382,11 @@ class TestKpiSparkSvg(unittest.TestCase):
         self.assertIn(color, svg)
 
     def test_css_class_kpi_sparkline(self):
-        """SVG에 class="kpi-sparkline" 포함"""
+        """redesign: SVG에 class="spark" 포함 (kpi-sparkline 제거)"""
         buckets = [0] * 10
         svg = _kpi_spark_svg(buckets, "#58a6ff")
-        self.assertIn('class="kpi-sparkline"', svg)
+        # redesign: sparkline uses class="spark" not class="kpi-sparkline"
+        self.assertIn('class="spark"', svg)
 
 
 # ---------------------------------------------------------------------------
@@ -490,10 +491,11 @@ class TestSectionKpi(unittest.TestCase):
                           f'data-filter="{f}" not found in HTML')
 
     def test_sparkline_svgs_present(self):
-        """각 KPI 카드에 sparkline SVG 포함"""
+        """각 KPI 카드에 sparkline SVG 포함 (redesign: class="spark")"""
         model = self._make_model()
         html = _section_kpi(model)
-        self.assertGreaterEqual(html.count('class="kpi-sparkline"'), 5)
+        # redesign: sparkline uses class="spark" not class="kpi-sparkline"
+        self.assertGreaterEqual(html.count('class="spark"'), 5)
 
     def test_kpi_counts_sum_equals_total(self):
         """렌더 된 카운트 숫자의 합 == 전체 Task 수 (0건 경계값)"""
@@ -504,14 +506,16 @@ class TestSectionKpi(unittest.TestCase):
             self.assertIn(f'data-kpi="{kind}"', html)
 
     def test_kpi_section_class(self):
-        """kpi-section 클래스 존재"""
+        """redesign: kpi-section 클래스 제거, data-section="kpi" 섹션 존재 확인"""
         html = _section_kpi(self._make_model())
-        self.assertIn("kpi-section", html)
+        # redesign: kpi-section class removed; data-section="kpi" is the identifier
+        self.assertIn('data-section="kpi"', html)
 
     def test_kpi_row_class(self):
-        """kpi-row 클래스 존재"""
+        """redesign: kpi-row 클래스 제거, kpi-strip 존재 확인"""
         html = _section_kpi(self._make_model())
-        self.assertIn("kpi-row", html)
+        # redesign: kpi-row class removed; kpi-strip is the container
+        self.assertIn('class="kpi-strip"', html)
 
     def test_bypass_priority_reflected(self):
         """bypass 태스크가 있을 때 bypass 카드에 수 반영"""
@@ -523,9 +527,10 @@ class TestSectionKpi(unittest.TestCase):
         self.assertIn('data-kpi="bypass"', html)
 
     def test_chip_group_present(self):
-        """chip-group 클래스 존재"""
+        """redesign: chip-group 제거, chips 컨테이너 존재 확인"""
         html = _section_kpi(self._make_model())
-        self.assertIn("chip-group", html)
+        # redesign: chip-group class removed; chips is the container
+        self.assertIn('class="chips"', html)
 
     def test_kpi_card_labels(self):
         """KPI 라벨 텍스트(Running/Failed/Bypass/Done/Pending) 존재 (CSS text-transform:uppercase로 화면 표시)"""
@@ -534,10 +539,10 @@ class TestSectionKpi(unittest.TestCase):
             self.assertIn(label, html)
 
     def test_color_vars_in_kpi(self):
-        """CSS 색상 변수 참조 존재"""
+        """KPI 스파크라인이 v3 phase 색상 변수(--run/--fail/--bypass/--done/--pending) 사용"""
         html = _section_kpi(self._make_model())
-        # color vars from design.md
-        self.assertIn("var(--orange)", html)
+        for var in ("var(--run)", "var(--fail)", "var(--bypass)", "var(--done)", "var(--pending)"):
+            self.assertIn(var, html)
 
     def test_title_tags_in_sparklines(self):
         """sparkline SVG에 <title> 태그 존재"""
@@ -583,6 +588,88 @@ class TestDashboardCssExtensions(unittest.TestCase):
         """.kpi-row CSS 클래스가 DASHBOARD_CSS에 존재"""
         css = monitor_server.DASHBOARD_CSS
         self.assertIn(".kpi-row", css)
+
+
+# ---------------------------------------------------------------------------
+# monitor-redesign: KPI 클래스명 재설계 검증 테스트
+# ---------------------------------------------------------------------------
+
+class RedesignKpiHtmlTests(unittest.TestCase):
+    """KPI 컴포넌트 클래스명 재설계 검증."""
+
+    def _make_model(self, tasks=None, features=None, signals=None):
+        return {
+            "wbs_tasks": tasks or [],
+            "features": features or [],
+            "shared_signals": signals or [],
+            "refresh_seconds": 3,
+        }
+
+    def test_no_kpi_card_class(self):
+        """`kpi-card` 클래스가 KPI HTML에 없어야 한다."""
+        html = _section_kpi(self._make_model())
+        self.assertNotIn('kpi-card', html,
+                         'kpi-card class should be removed from KPI cards')
+
+    def test_kpi_class_without_prefix(self):
+        """`<div class="kpi kpi--run">` 형식이어야 한다 (kpi-card 접두어 없음)."""
+        html = _section_kpi(self._make_model())
+        # Should have kpi kpi--run NOT kpi-card running kpi kpi--run
+        for suffix in ("run", "fail", "bypass", "done", "pend"):
+            self.assertIn(f'"kpi kpi--{suffix}"', html,
+                          f'class="kpi kpi--{suffix}" not found (kpi-card prefix removed)')
+
+    def test_label_class_not_kpi_label(self):
+        """`class="label"` 사용, `class="kpi-label"` 미사용."""
+        html = _section_kpi(self._make_model())
+        self.assertNotIn('class="kpi-label', html,
+                         'kpi-label class should be replaced by label')
+        self.assertIn('class="label"', html)
+
+    def test_num_class_not_kpi_num(self):
+        """`class="num"` 사용, `class="kpi-num"` 미사용."""
+        html = _section_kpi(self._make_model())
+        self.assertNotIn('class="kpi-num', html,
+                         'kpi-num class should be replaced by num')
+        self.assertIn('class="num"', html)
+
+    def test_spark_class_not_kpi_sparkline_in_html(self):
+        """`class="spark"` 사용 in KPI section HTML."""
+        html = _section_kpi(self._make_model())
+        self.assertIn('class="spark"', html,
+                      'spark class should be used for sparkline SVG')
+
+    def test_kpi_strip_not_kpi_row_strip(self):
+        """`class="kpi-strip"` 사용, `class="kpi-row kpi-strip"` 미사용."""
+        html = _section_kpi(self._make_model())
+        self.assertNotIn('class="kpi-row kpi-strip"', html,
+                         'kpi-row should be removed from kpi-strip container')
+        self.assertIn('class="kpi-strip"', html)
+
+    def test_chips_class_not_chip_group(self):
+        """`class="chips"` 사용, `class="chip-group chips"` 미사용."""
+        html = _section_kpi(self._make_model())
+        self.assertNotIn('chip-group', html,
+                         'chip-group class should be removed')
+        self.assertIn('class="chips"', html)
+
+    def test_no_kpi_section_class(self):
+        """컨테이너에 `kpi-section` 클래스가 없어야 한다."""
+        html = _section_kpi(self._make_model())
+        self.assertNotIn('class="kpi-section"', html,
+                         'kpi-section class should be removed from section element')
+
+    def test_spark_svg_uses_spark_class(self):
+        """`_kpi_spark_svg` 반환 SVG에 `class="spark"` 가 포함되어야 한다."""
+        svg = _kpi_spark_svg([0] * 10, "#58a6ff")
+        self.assertIn('class="spark"', svg,
+                      'SVG should use class="spark" not class="kpi-sparkline"')
+
+    def test_spark_svg_no_kpi_sparkline_class(self):
+        """`_kpi_spark_svg` 반환 SVG에 `class="kpi-sparkline"` 없어야 한다."""
+        svg = _kpi_spark_svg([0] * 10, "#58a6ff")
+        self.assertNotIn('class="kpi-sparkline"', svg,
+                         'kpi-sparkline class should be replaced by spark')
 
 
 if __name__ == "__main__":

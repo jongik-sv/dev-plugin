@@ -133,8 +133,12 @@ class TestVarReferencesApplied(unittest.TestCase):
             ".section-head h2 블록에 font-size: var(--font-h2) 가 없습니다.",
         )
 
-    def test_wp_donut_pct_uses_font_h2_var(self):
-        """.wp-donut .pct 규칙에 font-size: var(--font-h2) 가 있어야 한다."""
+    def test_wp_donut_pct_uses_font_pct_var(self):
+        """.wp-donut .pct 규칙에 font-size: var(--font-pct) 가 있어야 한다.
+
+        design 샘플 (`dev-plugin Monitor.html`) 이 도넛 중앙 퍼센트를 15px 로
+        렌더하므로, 공용 `--font-h2`(17px) 대신 전용 `--font-pct` 변수를 사용한다.
+        """
         block_match = re.search(
             r"\.wp-donut\s+\.pct\s*\{([^}]*)\}", DASHBOARD_CSS, re.DOTALL
         )
@@ -143,9 +147,9 @@ class TestVarReferencesApplied(unittest.TestCase):
             "DASHBOARD_CSS에서 .wp-donut .pct { } 블록을 찾지 못했습니다.",
         )
         self.assertIn(
-            "font-size: var(--font-h2)",
+            "font-size: var(--font-pct)",
             block_match.group(1),
-            ".wp-donut .pct 블록에 font-size: var(--font-h2) 가 없습니다.",
+            ".wp-donut .pct 블록에 font-size: var(--font-pct) 가 없습니다.",
         )
 
     def test_wp_title_h3_uses_font_h2_var(self):

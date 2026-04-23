@@ -301,34 +301,34 @@ class RenderTaskRowV2Tests(unittest.TestCase):
     def test_done_task_row_has_done_class(self):
         task = _make_task(tsk_id="T1", status="[xx]")
         html = self.fn(task, set(), set())
-        self.assertIn('class="task-row done"', html)
+        self.assertIn('class="trow" data-status="done"', html)
 
     def test_running_task_row_has_running_class(self):
         task = _make_task(tsk_id="T2", status="[im]")
         html = self.fn(task, {"T2"}, set())
-        self.assertIn('class="task-row running"', html)
+        self.assertIn('class="trow" data-status="running"', html)
 
     def test_failed_task_row_has_failed_class(self):
         task = _make_task(tsk_id="T3", status="[im]")
         html = self.fn(task, set(), {"T3"})
-        self.assertIn('class="task-row failed"', html)
+        self.assertIn('class="trow" data-status="failed"', html)
 
     def test_bypass_task_row_has_bypass_class(self):
         task = _make_task(tsk_id="T4", bypassed=True)
         html = self.fn(task, set(), set())
-        self.assertIn('class="task-row bypass"', html)
+        self.assertIn('class="trow" data-status="bypass"', html)
 
     def test_pending_task_row_has_pending_class(self):
         task = _make_task(tsk_id="T5", status="[dd]")
         html = self.fn(task, set(), set())
-        self.assertIn('class="task-row pending"', html)
+        self.assertIn('class="trow" data-status="pending"', html)
 
     def test_bypass_priority_over_failed_css_class(self):
         """QA: bypassed Task에 bypass 클래스, failed 클래스 미포함."""
         task = _make_task(tsk_id="T6", bypassed=True)
         html = self.fn(task, set(), {"T6"})
-        self.assertIn('class="task-row bypass"', html)
-        self.assertNotIn('class="task-row failed"', html)
+        self.assertIn('class="trow" data-status="bypass"', html)
+        self.assertNotIn('class="trow" data-status="failed"', html)
 
     def test_task_id_and_title_rendered(self):
         task = _make_task(tsk_id="TSK-01-03", title="WP 카드 렌더")
@@ -336,11 +336,11 @@ class RenderTaskRowV2Tests(unittest.TestCase):
         self.assertIn("TSK-01-03", html)
         self.assertIn("WP 카드 렌더", html)
 
-    def test_run_line_div_present(self):
-        """run-line div가 task-row 내부에 존재해야 한다."""
+    def test_statusbar_div_present(self):
+        """statusbar div가 .trow 내부에 존재해야 한다 (v3: run-line → statusbar)."""
         task = _make_task(tsk_id="T7", status="[im]")
         html = self.fn(task, {"T7"}, set())
-        self.assertIn('run-line', html)
+        self.assertIn('statusbar', html)
 
 
 # ---------------------------------------------------------------------------
@@ -375,16 +375,16 @@ class SectionWpCardsSingleTaskTests(unittest.TestCase):
         self.fn = monitor_server._section_wp_cards
 
     def test_single_done_task_renders_one_wp_card(self):
-        """QA: <div class="wp-card"> 1개 존재."""
+        """QA: <details data-wp="WP-XX"> 1개 존재 (v3: wp-card → details.wp)."""
         task = _make_task(tsk_id="TSK-01-01", status="[xx]", wp_id="WP-01")
         html = self.fn([task], set(), set())
-        self.assertEqual(html.count('class="wp-card"'), 1)
+        self.assertEqual(html.count('data-wp="WP-01"'), 1)
 
     def test_single_done_task_row_has_done_class(self):
         """QA: task-row done CSS 클래스 포함."""
         task = _make_task(tsk_id="TSK-01-01", status="[xx]", wp_id="WP-01")
         html = self.fn([task], set(), set())
-        self.assertIn('class="task-row done"', html)
+        self.assertIn('class="trow" data-status="done"', html)
 
     def test_section_id_is_wp_cards(self):
         task = _make_task(tsk_id="TSK-01-01", status="[xx]", wp_id="WP-01")
@@ -404,7 +404,7 @@ class SectionWpCardsSingleTaskTests(unittest.TestCase):
         details_start = html.find("<details")
         details_end = html.find("</details>", details_start)
         self.assertGreater(details_start, -1)
-        self.assertIn("task-row", html[details_start:details_end])
+        self.assertIn('class="trow"', html[details_start:details_end])
 
     def test_donut_style_in_wp_card(self):
         """도넛 스타일 inline style 속성이 wp-donut 요소에 포함."""
@@ -420,10 +420,11 @@ class SectionWpCardsSingleTaskTests(unittest.TestCase):
         self.assertIn("WP-01", html)
 
     def test_progress_bar_present(self):
-        """progress bar 요소 존재."""
+        """progress bar 요소 존재 (v3: wp-progress → wp-title > .bar)."""
         task = _make_task(tsk_id="TSK-01-01", status="[xx]", wp_id="WP-01")
         html = self.fn([task], set(), set())
-        self.assertIn("wp-progress", html)
+        self.assertIn('class="bar"', html)
+        self.assertIn('class="b-done"', html)
 
 
 class SectionWpCardsMixedStateTests(unittest.TestCase):
@@ -446,20 +447,20 @@ class SectionWpCardsMixedStateTests(unittest.TestCase):
     def test_mixed_7_tasks_single_wp_card(self):
         tasks = self._make_mixed_tasks()
         html = self.fn(tasks, {"T4"}, {"T5"})
-        self.assertEqual(html.count('class="wp-card"'), 1)
+        self.assertEqual(html.count('data-wp="WP-01"'), 1)
 
     def test_bypass_task_row_has_bypass_class(self):
         """QA: bypassed Task의 task-row에 bypass CSS 클래스 포함."""
         tasks = self._make_mixed_tasks()
         html = self.fn(tasks, {"T4"}, {"T5"})
-        self.assertIn('class="task-row bypass"', html)
+        self.assertIn('class="trow" data-status="bypass"', html)
 
     def test_bypass_task_row_does_not_have_failed_class(self):
         """QA: bypass row에 failed 클래스 미포함 (우선순위 검증)."""
         tasks = [_make_task("T6", bypassed=True, wp_id="WP-01")]
         html = self.fn(tasks, set(), {"T6"})
         # bypass task-row가 정확히 bypass 클래스여야 함
-        bypass_row_match = re.findall(r'class="task-row ([^"]+)"', html)
+        bypass_row_match = re.findall(r'class="trow" data-status="([^"]+)"', html)
         self.assertTrue(any("bypass" in c for c in bypass_row_match))
         self.assertFalse(any("failed" in c for c in bypass_row_match))
 
@@ -467,7 +468,7 @@ class SectionWpCardsMixedStateTests(unittest.TestCase):
         """QA: running Task의 task-row에 running 클래스 포함."""
         tasks = self._make_mixed_tasks()
         html = self.fn(tasks, {"T4"}, {"T5"})
-        self.assertIn('class="task-row running"', html)
+        self.assertIn('class="trow" data-status="running"', html)
 
     def test_count_spans_present(self):
         """wp-counts 스팬들이 렌더됨."""
@@ -488,7 +489,8 @@ class SectionWpCardsMultiWpTests(unittest.TestCase):
             _make_task("T2", wp_id="WP-02"),
         ]
         html = self.fn(tasks, set(), set())
-        self.assertEqual(html.count('class="wp-card"'), 2)
+        self.assertEqual(html.count('data-wp="WP-01"'), 1)
+        self.assertEqual(html.count('data-wp="WP-02"'), 1)
 
     def test_task_order_preserved_within_wp(self):
         """QA: Task ID 순서 보존 (v1 _group_preserving_order 사용)."""
@@ -611,17 +613,17 @@ class SectionFeaturesV2Tests(unittest.TestCase):
         """QA: Feature task-row에도 상태별 CSS 클래스 적용됨."""
         feat = _make_feat(feat_id="login", status="[xx]")
         html = self.fn([feat], set(), set())
-        self.assertIn('class="task-row done"', html)
+        self.assertIn('class="trow" data-status="done"', html)
 
     def test_running_feature_task_row_has_running_class(self):
         feat = _make_feat(feat_id="auth", status="[im]")
         html = self.fn([feat], {"auth"}, set())
-        self.assertIn('class="task-row running"', html)
+        self.assertIn('class="trow" data-status="running"', html)
 
     def test_bypass_feature_task_row_has_bypass_class(self):
         feat = _make_feat(feat_id="feat-b", status="[im]", bypassed=True)
         html = self.fn([feat], set(), set())
-        self.assertIn('class="task-row bypass"', html)
+        self.assertIn('class="trow" data-status="bypass"', html)
 
     def test_feature_title_rendered(self):
         feat = _make_feat(feat_id="login", title="로그인 기능")

@@ -433,12 +433,16 @@ class StatusBadgeMappingTests(unittest.TestCase):
 
 
 class NoExternalDomainTests(unittest.TestCase):
-    """(통합) 외부 도메인 요청 0건 (localhost 제외)."""
+    """(통합) 외부 도메인 요청 0건 (localhost · Google Fonts 화이트리스트 제외).
+
+    Google Fonts(JetBrains Mono / Space Grotesk)는 브랜드 타이포 복원을 위해
+    예외 허용한다. 미접속 시에도 시스템 mono 폴백으로 정상 렌더된다.
+    """
 
     def test_no_external_http_in_output(self) -> None:
         html = render_dashboard(_normal_model())
         matches = re.findall(
-            r"https?://(?!localhost|127\.0\.0\.1)",
+            r"https?://(?!localhost|127\.0\.0\.1|fonts\.googleapis\.com|fonts\.gstatic\.com)([^\"'\s)]+)",
             html,
         )
         self.assertEqual(
@@ -1948,6 +1952,272 @@ class DepGraphI18nTests(unittest.TestCase):
         result = monitor_server._t('xx', 'dep_graph')
         self.assertIsInstance(result, str)
         self.assertTrue(len(result) > 0)
+
+
+# ---------------------------------------------------------------------------
+# monitor-redesign: 레이아웃/그리드/컴포넌트 재설계 검증 테스트
+# ---------------------------------------------------------------------------
+
+class RedesignLayoutTests(unittest.TestCase):
+    """레이아웃 재설계: .page 이중 래퍼 제거, .col 2열 구조 확인."""
+
+    def test_no_page_wrapper(self):
+        """`class="page"` div가 존재하지 않아야 한다."""
+        html = render_dashboard(_normal_model())
+        self.assertNotIn('class="page"', html,
+                         '.page wrapper should be removed in redesign')
+
+    def test_no_page_col_left(self):
+        """`class="page-col-left"` div가 존재하지 않아야 한다."""
+        html = render_dashboard(_normal_model())
+        self.assertNotIn('class="page-col-left"', html,
+                         '.page-col-left should be removed in redesign')
+
+    def test_no_page_col_right(self):
+        """`class="page-col-right"` div가 존재하지 않아야 한다."""
+        html = render_dashboard(_normal_model())
+        self.assertNotIn('class="page-col-right"', html,
+                         '.page-col-right should be removed in redesign')
+
+    def test_col_div_present(self):
+        """`class="col"` div가 2개 이상 존재해야 한다."""
+        html = render_dashboard(_normal_model())
+        count = html.count('class="col"')
+        self.assertGreaterEqual(count, 2,
+                                f'Expected >=2 class="col" divs, got {count}')
+
+    def test_no_sticky_header_data_section(self):
+        """`data-section="sticky-header"` 블록이 제거되어야 한다."""
+        html = render_dashboard(_normal_model())
+        self.assertNotIn('data-section="sticky-header"', html,
+                         'sticky-header data-section should be removed')
+
+    def test_grid_has_col_children(self):
+        """.grid 직하에 .col이 있는 구조여야 한다."""
+        html = render_dashboard(_normal_model())
+        grid_idx = html.find('class="grid"')
+        self.assertGreater(grid_idx, -1, '.grid div not found')
+        # .col should appear after .grid
+        col_idx = html.find('class="col"', grid_idx)
+        self.assertGreater(col_idx, grid_idx, '.col should appear inside .grid')
+
+    def test_col_css_in_dashboard_css(self):
+        """DASHBOARD_CSS에 `.col` CSS 선택자가 존재해야 한다."""
+        css = monitor_server.DASHBOARD_CSS
+        self.assertIn('.col', css, '.col CSS missing from DASHBOARD_CSS')
+
+
+class RedesignTrowTests(unittest.TestCase):
+    """task row 재설계: .trow (not .task-row), data-status, run-line 제거."""
+
+    def test_trow_class_not_task_row(self):
+        """`class="trow"` 사용, `class="task-row"` 미사용."""
+        task = _make_task(tsk_id="TSK-01-01", status="[dd]")
+        html = monitor_server._render_task_row_v2(task, set(), set())
+        self.assertIn('class="trow"', html)
+        self.assertNotIn('class="task-row', html,
+                         'task-row class should be replaced by trow')
+
+    def test_trow_has_data_status(self):
+        """`.trow`에 `data-status` 속성이 있어야 한다."""
+        task = _make_task(tsk_id="TSK-01-01", status="[xx]")
+        html = monitor_server._render_task_row_v2(task, set(), set())
+        self.assertIn('data-status="done"', html)
+
+    def test_no_run_line_div(self):
+        """`.run-line` div가 없어야 한다."""
+        task = _make_task(tsk_id="TSK-01-01", status="[im]")
+        html = monitor_server._render_task_row_v2(task, {"TSK-01-01"}, set())
+        self.assertNotIn('run-line', html,
+                         '.run-line div should be removed from trow')
+
+    def test_no_hidden_trow_dummy(self):
+        """hidden 더미 `.trow` div가 없어야 한다."""
+        task = _make_task(tsk_id="TSK-01-01", status="[dd]")
+        html = monitor_server._render_task_row_v2(task, set(), set())
+        # The hidden dummy: <div class="trow" data-status="..." hidden>
+        self.assertNotIn(' hidden>', html,
+                         'hidden dummy trow should be removed')
+
+    def test_trow_class_in_dashboard_css(self):
+        """DASHBOARD_CSS에 `.trow .badge` 선택자 존재 (기존 계약)."""
+        css = monitor_server.DASHBOARD_CSS
+        self.assertIn('.trow .badge', css)
+
+    def test_no_task_row_css_in_compat(self):
+        """`.task-row` CSS 선택자가 DASHBOARD_CSS에 없어야 한다."""
+        css = monitor_server.DASHBOARD_CSS
+        self.assertNotIn('.task-row{', css,
+                         '.task-row CSS should be removed in redesign')
+
+
+class RedesignArowTests(unittest.TestCase):
+    """live-activity 재설계: .arow, .t/.tid/.evt/.el 자식 클래스."""
+
+    def _make_model_with_history(self):
+        from datetime import datetime, timezone, timedelta
+        now = datetime(2026, 4, 20, 12, 0, 0, tzinfo=timezone.utc)
+        history = [
+            PhaseEntry(
+                event="build.ok",
+                from_status="[dd]",
+                to_status="[im]",
+                at=(now - timedelta(minutes=2)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                elapsed_seconds=120.0,
+            ),
+        ]
+        model = _normal_model()
+        model["wbs_tasks"] = [_make_task(tsk_id="TSK-01-01", phase_history_tail=history)]
+        return model
+
+    def test_arow_class_present(self):
+        """`class="arow"` 가 activity 행에 있어야 한다."""
+        model = self._make_model_with_history()
+        html = monitor_server._section_live_activity(model)
+        self.assertIn('class="arow"', html)
+
+    def test_no_activity_row_class(self):
+        """`class="activity-row"` 가 없어야 한다 (arow로 교체)."""
+        model = self._make_model_with_history()
+        html = monitor_server._section_live_activity(model)
+        self.assertNotIn('class="activity-row"', html,
+                         'activity-row class should be replaced by arow')
+
+    def test_arow_child_t_class(self):
+        """`class="arow"` 자식에 `.t` (시각) 클래스가 있어야 한다."""
+        model = self._make_model_with_history()
+        html = monitor_server._section_live_activity(model)
+        self.assertIn('class="t"', html)
+
+    def test_arow_child_tid_class(self):
+        """`class="arow"` 자식에 `.tid` (task ID) 클래스가 있어야 한다."""
+        model = self._make_model_with_history()
+        html = monitor_server._section_live_activity(model)
+        self.assertIn('class="tid"', html)
+
+    def test_arow_child_evt_class(self):
+        """`class="arow"` 자식에 `.evt` (이벤트) 클래스가 있어야 한다."""
+        model = self._make_model_with_history()
+        html = monitor_server._section_live_activity(model)
+        self.assertIn('class="evt"', html)
+
+    def test_arow_child_el_class(self):
+        """`class="arow"` 자식에 `.el` (elapsed) 클래스가 있어야 한다."""
+        model = self._make_model_with_history()
+        html = monitor_server._section_live_activity(model)
+        self.assertIn('class="el"', html)
+
+    def test_evt_has_arrow_span(self):
+        """`.evt` 내부에 `<span class="arrow">` 구조가 있어야 한다."""
+        model = self._make_model_with_history()
+        html = monitor_server._section_live_activity(model)
+        self.assertIn('class="arrow"', html)
+
+    def test_evt_has_from_span(self):
+        """`.evt` 내부에 `<span class="from">` 구조가 있어야 한다."""
+        model = self._make_model_with_history()
+        html = monitor_server._section_live_activity(model)
+        self.assertIn('class="from"', html)
+
+    def test_evt_has_to_span(self):
+        """`.evt` 내부에 `<span class="to">` 구조가 있어야 한다."""
+        model = self._make_model_with_history()
+        html = monitor_server._section_live_activity(model)
+        self.assertIn('class="to"', html)
+
+    def test_no_hidden_arow_dummy(self):
+        """hidden 더미 `.arow` div가 없어야 한다."""
+        model = self._make_model_with_history()
+        html = monitor_server._section_live_activity(model)
+        self.assertNotIn(' hidden>', html,
+                         'hidden dummy arow should be removed')
+
+    def test_no_activity_row_css(self):
+        """`.activity-row` CSS 선택자가 DASHBOARD_CSS에 없어야 한다."""
+        css = monitor_server.DASHBOARD_CSS
+        self.assertNotIn('.activity-row{', css,
+                         '.activity-row CSS should be removed in redesign')
+
+    def test_no_a_time_class(self):
+        """구형 `.a-time` span 클래스가 없어야 한다."""
+        model = self._make_model_with_history()
+        html = monitor_server._section_live_activity(model)
+        self.assertNotIn('class="a-time"', html,
+                         'a-time should be replaced by .t')
+
+    def test_no_a_id_class(self):
+        """구형 `.a-id` span 클래스가 없어야 한다."""
+        model = self._make_model_with_history()
+        html = monitor_server._section_live_activity(model)
+        self.assertNotIn('class="a-id"', html,
+                         'a-id should be replaced by .tid')
+
+    def test_no_a_elapsed_class(self):
+        """구형 `.a-elapsed` span 클래스가 없어야 한다."""
+        model = self._make_model_with_history()
+        html = monitor_server._section_live_activity(model)
+        self.assertNotIn('class="a-elapsed"', html,
+                         'a-elapsed should be replaced by .el')
+
+
+class RedesignLangToggleActiveTests(unittest.TestCase):
+    """언어 토글 active 표시 복원: 현재 lang 링크에 .active / aria-current."""
+
+    def _make_model(self):
+        return {
+            "generated_at": "2026-04-22T00:00:00Z",
+            "project_root": "/proj",
+            "docs_dir": "/proj/docs",
+            "refresh_seconds": 3,
+            "wbs_tasks": [],
+            "features": [],
+            "shared_signals": [],
+            "agent_pool_signals": [],
+            "tmux_panes": None,
+        }
+
+    def test_ko_lang_active_on_ko_link(self):
+        """`lang=ko` 접속 시 '한' 링크에 `class="active"` 있어야 한다."""
+        html = monitor_server._section_header(self._make_model(), lang="ko")
+        # The 한 link should have active class
+        self.assertIn('class="active"', html)
+
+    def test_ko_lang_aria_current_on_ko_link(self):
+        """`lang=ko` 접속 시 '한' 링크에 `aria-current="page"` 있어야 한다."""
+        html = monitor_server._section_header(self._make_model(), lang="ko")
+        self.assertIn('aria-current="page"', html)
+
+    def test_en_lang_active_on_en_link(self):
+        """`lang=en` 접속 시 'EN' 링크에 `class="active"` 있어야 한다."""
+        html = monitor_server._section_header(self._make_model(), lang="en")
+        self.assertIn('class="active"', html)
+
+    def test_en_lang_aria_current_on_en_link(self):
+        """`lang=en` 접속 시 'EN' 링크에 `aria-current="page"` 있어야 한다."""
+        html = monitor_server._section_header(self._make_model(), lang="en")
+        self.assertIn('aria-current="page"', html)
+
+    def test_lang_active_css_in_dashboard_css(self):
+        """`.lang-toggle a.active` CSS가 DASHBOARD_CSS에 있어야 한다."""
+        css = monitor_server.DASHBOARD_CSS
+        self.assertIn('.lang-toggle a.active', css)
+
+
+class RedesignDonutViewBoxTests(unittest.TestCase):
+    """WP donut SVG viewBox가 `0 0 36 36` 기준이어야 한다."""
+
+    def test_donut_svg_viewbox_36(self):
+        """_wp_donut_svg 반환값의 viewBox가 '0 0 36 36' 이어야 한다."""
+        counts = {"done": 3, "running": 1, "failed": 0, "bypass": 0, "pending": 1}
+        svg = monitor_server._wp_donut_svg(counts)
+        self.assertIn('viewBox="0 0 36 36"', svg,
+                      'donut SVG viewBox should be 0 0 36 36')
+
+    def test_donut_svg_zero_total_viewbox_36(self):
+        """total=0 때도 viewBox가 '0 0 36 36' 이어야 한다."""
+        counts = {"done": 0, "running": 0, "failed": 0, "bypass": 0, "pending": 0}
+        svg = monitor_server._wp_donut_svg(counts)
+        self.assertIn('viewBox="0 0 36 36"', svg)
 
 
 if __name__ == "__main__":

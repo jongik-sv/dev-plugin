@@ -267,7 +267,7 @@ class TestSectionLiveActivity(unittest.TestCase):
         ])
         model = {"wbs_tasks": [item], "features": []}
         html = self.ms._section_live_activity(model)
-        self.assertIn("activity-row", html)
+        self.assertIn('class="arow"', html)
         self.assertIn("TSK-00-01", html)
 
     def test_hms_format_in_row(self):
@@ -284,7 +284,8 @@ class TestSectionLiveActivity(unittest.TestCase):
         ])
         model = {"wbs_tasks": [item], "features": []}
         html = self.ms._section_live_activity(model)
-        self.assertIn("a-event-fail", html)
+        self.assertIn('data-event="build.fail"', html)
+        self.assertIn('data-to="failed"', html)
         self.assertIn("⚠", html)
 
     def test_bypass_event_class(self):
@@ -293,7 +294,8 @@ class TestSectionLiveActivity(unittest.TestCase):
         ])
         model = {"wbs_tasks": [item], "features": []}
         html = self.ms._section_live_activity(model)
-        self.assertIn("a-event-bypass", html)
+        self.assertIn('data-event="bypass"', html)
+        self.assertIn('data-to="bypass"', html)
 
     def test_invalid_at_entry_skipped_no_crash(self):
         item = _make_work_item(self.ms, "TSK-00-01", [
@@ -634,13 +636,20 @@ class TestSectionPhaseTimeline(unittest.TestCase):
         html = self.ms._section_phase_timeline(items, [])
         self.assertNotIn("timeline-full", html)
 
-    def test_section_contains_svg(self):
+    def test_section_contains_timeline_track(self):
+        """v3 phase-timeline은 SVG 대신 div+seg 기반 그래픽을 사용한다.
+
+        v1 회귀 트랩(`<svg>` 강제) 제거 — _section_phase_timeline 출력이 panel.timeline
+        + tl-track + seg-{state} 셀렉터를 포함하는지 검증한다. SVG 그래픽은 별도
+        ``_timeline_svg()`` 함수가 phase-history 섹션에서 사용한다.
+        """
         item = _make_work_item(self.ms, "TSK-00-01", [
             _make_phase_entry(self.ms, "design.ok", None, "[dd]", "2026-04-21T11:00:00Z"),
         ])
         html = self.ms._section_phase_timeline([item], [])
-        self.assertIn("<svg", html)
-        self.assertIn("</svg>", html)
+        self.assertIn('class="panel timeline"', html)
+        self.assertIn('class="tl-track"', html)
+        self.assertIn('seg-running', html)
 
 
 # ---------------------------------------------------------------------------
