@@ -1,8 +1,10 @@
-"""TDD 단위 테스트: TSK-01-04 — _section_live_activity + _section_phase_timeline.
+"""TDD 단위 테스트: TSK-01-04 — _section_live_activity.
 
-design.md QA 체크리스트 기반. 신규 함수 8개:
+design.md QA 체크리스트 기반. 신규 함수 5개:
   _parse_iso_utc, _fmt_hms, _fmt_elapsed_short, _live_activity_rows,
-  _section_live_activity, _timeline_rows, _timeline_svg, _section_phase_timeline
+  _section_live_activity
+
+TSK-01-01: _timeline_rows / _timeline_svg / _section_phase_timeline 블록 제거됨.
 """
 
 from __future__ import annotations
@@ -341,323 +343,11 @@ class TestSectionLiveActivity(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# _timeline_rows
-# ---------------------------------------------------------------------------
-
-class TestTimelineRows(unittest.TestCase):
-    """_timeline_rows — phase segment 변환."""
-
-    def setUp(self):
-        self.ms = _import_server()
-        if not hasattr(self.ms, "_timeline_rows"):
-            self.skipTest("_timeline_rows 미구현")
-        self.now = datetime(2026, 4, 21, 12, 0, 0, tzinfo=timezone.utc)
-
-    def test_empty_inputs_returns_empty(self):
-        rows = self.ms._timeline_rows([], [], self.now)
-        self.assertEqual(rows, [])
-
-    def test_zero_history_task_skipped(self):
-        item = _make_work_item(self.ms, "TSK-00-01", [])
-        rows = self.ms._timeline_rows([item], [], self.now)
-        self.assertEqual(rows, [])
-
-    def test_single_entry_creates_segment_to_now(self):
-        at = "2026-04-21T11:00:00Z"
-        item = _make_work_item(self.ms, "TSK-00-01", [
-            _make_phase_entry(self.ms, "design.ok", None, "[dd]", at),
-        ])
-        rows = self.ms._timeline_rows([item], [], self.now)
-        self.assertEqual(len(rows), 1)
-        row = rows[0]
-        self.assertEqual(row["id"], "TSK-00-01")
-        segs = row["segments"]
-        self.assertGreater(len(segs), 0)
-        start_dt, end_dt, phase, fail = segs[0]
-        # end_dt는 now까지 연장
-        self.assertEqual(end_dt, self.now)
-        self.assertEqual(phase, "dd")
-        self.assertFalse(fail)
-
-    def test_fail_segment_flagged(self):
-        at1 = "2026-04-21T11:00:00Z"
-        at2 = "2026-04-21T11:30:00Z"
-        item = _make_work_item(self.ms, "TSK-00-01", [
-            _make_phase_entry(self.ms, "design.ok", None, "[dd]", at1),
-            _make_phase_entry(self.ms, "build.fail", "[dd]", "[im]", at2),
-        ])
-        rows = self.ms._timeline_rows([item], [], self.now)
-        self.assertEqual(len(rows), 1)
-        segs = rows[0]["segments"]
-        # 두 번째 segment은 fail=True
-        fail_segs = [s for s in segs if s[3]]
-        self.assertGreater(len(fail_segs), 0)
-
-    def test_invalid_to_status_segment_skipped(self):
-        """to_status가 None이거나 알 수 없는 값이면 segment skip."""
-        at = "2026-04-21T11:00:00Z"
-        item = _make_work_item(self.ms, "TSK-00-01", [
-            _make_phase_entry(self.ms, "bypass", None, None, at),
-        ])
-        rows = self.ms._timeline_rows([item], [], self.now)
-        # segment가 없으면 row도 없거나 segments=[]
-        for row in rows:
-            self.assertEqual(row.get("segments", []), [])
-
-    def test_bypassed_flag_in_row(self):
-        at = "2026-04-21T11:00:00Z"
-        item = _make_work_item(self.ms, "TSK-00-01", [
-            _make_phase_entry(self.ms, "design.ok", None, "[dd]", at),
-        ], bypassed=True)
-        rows = self.ms._timeline_rows([item], [], self.now)
-        if rows:
-            self.assertTrue(rows[0].get("bypassed", False))
-
-    def test_invalid_at_entry_skipped(self):
-        item = _make_work_item(self.ms, "TSK-00-01", [
-            _make_phase_entry(self.ms, "design.ok", None, "[dd]", "bad-at"),
-        ])
-        rows = self.ms._timeline_rows([item], [], self.now)
-        # 파싱 실패 항목 제외 → 유효 segment 없으면 row 없거나 empty segments
-        for row in rows:
-            self.assertEqual(row.get("segments", []), [])
-
-
-# ---------------------------------------------------------------------------
-# _timeline_svg
-# ---------------------------------------------------------------------------
-
-class TestTimelineSvg(unittest.TestCase):
-    """_timeline_svg — 순수 SVG 생성기."""
-
-    def setUp(self):
-        self.ms = _import_server()
-        if not hasattr(self.ms, "_timeline_svg"):
-            self.skipTest("_timeline_svg 미구현")
-        self.now = datetime(2026, 4, 21, 12, 0, 0, tzinfo=timezone.utc)
-
-    def test_empty_rows_returns_empty_state_svg(self):
-        svg = self.ms._timeline_svg([], 60, self.now)
-        self.assertIn("<svg", svg)
-        self.assertIn("no phase history", svg)
-        # 크래시 없음
-        self.assertNotIn("<script", svg)
-
-    def test_empty_rows_no_crash(self):
-        try:
-            svg = self.ms._timeline_svg([], 60, self.now)
-        except Exception as exc:
-            self.fail(f"_timeline_svg([], 60, now) raised: {exc}")
-
-    def test_defs_hatch_pattern_present(self):
-        """SVG <defs> 블록에 <pattern id="hatch"> 정의가 있어야 함."""
-        at = "2026-04-21T11:00:00Z"
-        item = _make_work_item(self.ms, "TSK-00-01", [
-            _make_phase_entry(self.ms, "design.ok", None, "[dd]", at),
-        ])
-        rows = self.ms._timeline_rows([item], [], self.now)
-        svg = self.ms._timeline_svg(rows, 60, self.now)
-        self.assertIn('id="hatch"', svg)
-        self.assertIn("<defs>", svg)
-
-    def test_tl_phase_class_present(self):
-        """dd phase rect에 class="tl-dd" 가 있어야 함."""
-        at = "2026-04-21T11:00:00Z"
-        item = _make_work_item(self.ms, "TSK-00-01", [
-            _make_phase_entry(self.ms, "design.ok", None, "[dd]", at),
-        ])
-        rows = self.ms._timeline_rows([item], [], self.now)
-        svg = self.ms._timeline_svg(rows, 60, self.now)
-        self.assertIn("tl-dd", svg)
-
-    def test_fail_segment_has_tl_fail(self):
-        """fail 구간에 class="tl-fail" rect가 있어야 함."""
-        at1 = "2026-04-21T11:00:00Z"
-        at2 = "2026-04-21T11:30:00Z"
-        item = _make_work_item(self.ms, "TSK-00-01", [
-            _make_phase_entry(self.ms, "design.ok", None, "[dd]", at1),
-            _make_phase_entry(self.ms, "build.fail", "[dd]", "[im]", at2),
-        ])
-        rows = self.ms._timeline_rows([item], [], self.now)
-        svg = self.ms._timeline_svg(rows, 60, self.now)
-        self.assertIn("tl-fail", svg)
-
-    def test_bypass_marker_present(self):
-        """bypass row 우측에 🟡 텍스트가 있어야 함."""
-        at = "2026-04-21T11:00:00Z"
-        item = _make_work_item(self.ms, "TSK-00-01", [
-            _make_phase_entry(self.ms, "design.ok", None, "[dd]", at),
-        ], bypassed=True)
-        rows = self.ms._timeline_rows([item], [], self.now)
-        svg = self.ms._timeline_svg(rows, 60, self.now)
-        self.assertIn("🟡", svg)
-
-    def test_13_ticks_generated(self):
-        """X축 tick이 13개(i=0..12) 생성되어야 함."""
-        at = "2026-04-21T11:00:00Z"
-        item = _make_work_item(self.ms, "TSK-00-01", [
-            _make_phase_entry(self.ms, "design.ok", None, "[dd]", at),
-        ])
-        rows = self.ms._timeline_rows([item], [], self.now)
-        svg = self.ms._timeline_svg(rows, 60, self.now)
-        # tick 라벨 중 -60m (첫 tick) 과 0 (마지막 tick) 존재
-        self.assertIn("-60m", svg)
-        self.assertIn("0m", svg)  # 마지막 tick 라벨
-
-    def test_viewbox_scales_with_rows(self):
-        """viewBox 높이가 row 수 × 20이어야 함."""
-        at = "2026-04-21T11:00:00Z"
-        items = [
-            _make_work_item(self.ms, f"TSK-00-{i:02d}", [
-                _make_phase_entry(self.ms, "design.ok", None, "[dd]", at),
-            ])
-            for i in range(3)
-        ]
-        rows = self.ms._timeline_rows(items, [], self.now)
-        svg = self.ms._timeline_svg(rows, 60, self.now)
-        row_count = len(rows)
-        expected_height = row_count * 20
-        self.assertIn(f"0 0 600 {expected_height}", svg)
-
-    def test_no_external_resources(self):
-        """SVG 내부에 외부 자원 참조 없음."""
-        at = "2026-04-21T11:00:00Z"
-        item = _make_work_item(self.ms, "TSK-00-01", [
-            _make_phase_entry(self.ms, "design.ok", None, "[dd]", at),
-        ])
-        rows = self.ms._timeline_rows([item], [], self.now)
-        svg = self.ms._timeline_svg(rows, 60, self.now)
-        # 외부 자원 참조 패턴 검사
-        import re
-        ext_refs = re.findall(
-            r'<(?:image|script|use)[^>]*\s(?:href|src|xlink:href)=["\']?https?://',
-            svg,
-        )
-        self.assertEqual(ext_refs, [], f"외부 자원 참조 발견: {ext_refs}")
-
-    def test_50_rows_cap(self):
-        """max_rows=50 초과 row는 잘려야 함."""
-        now = self.now
-        items = [
-            _make_work_item(self.ms, f"TSK-00-{i:02d}", [
-                _make_phase_entry(self.ms, "design.ok", None, "[dd]", "2026-04-21T11:00:00Z"),
-            ])
-            for i in range(60)
-        ]
-        rows = self.ms._timeline_rows(items, [], now)
-        svg = self.ms._timeline_svg(rows, 60, now, max_rows=50)
-        # 60개 row 중 50개만 렌더 → TSK-00-49 이후 item id는 없어야 함
-        # (정확한 id가 아니라 row 높이로 검증)
-        row_count_used = min(50, len(rows))
-        expected_height = row_count_used * 20
-        self.assertIn(f"0 0 600 {expected_height}", svg)
-
-    def test_100_entries_no_crash(self):
-        """100건 phase_history 입력에서 크래시 없음."""
-        base = datetime(2026, 4, 21, 11, 0, 0, tzinfo=timezone.utc)
-        entries = [
-            _make_phase_entry(
-                self.ms, "design.ok", None, "[dd]",
-                (base + timedelta(minutes=i)).isoformat().replace("+00:00", "Z")
-            )
-            for i in range(10)  # phase_history_tail은 최대 10건만 유지되므로 10개
-        ]
-        items = [
-            _make_work_item(self.ms, f"TSK-00-{i:02d}", entries)
-            for i in range(10)
-        ]
-        rows = self.ms._timeline_rows(items, [], self.now)
-        try:
-            svg = self.ms._timeline_svg(rows, 60, self.now)
-        except Exception as exc:
-            self.fail(f"100 entries raised: {exc}")
-        self.assertIn("<svg", svg)
-
-    def test_past_event_clamped(self):
-        """60분 창 밖 이벤트는 x=0으로 클램프 (viewBox 이탈 없음)."""
-        at_old = "2026-04-21T09:00:00Z"  # 3시간 전 (60분 창 밖)
-        item = _make_work_item(self.ms, "TSK-00-01", [
-            _make_phase_entry(self.ms, "design.ok", None, "[dd]", at_old),
-        ])
-        rows = self.ms._timeline_rows([item], [], self.now)
-        try:
-            svg = self.ms._timeline_svg(rows, 60, self.now)
-        except Exception as exc:
-            self.fail(f"past event raised: {exc}")
-        # x 속성에 음수가 없어야 함
-        import re
-        x_vals = re.findall(r'\bx="(-?[\d.]+)"', svg)
-        for xv in x_vals:
-            self.assertGreaterEqual(float(xv), 0.0, f"음수 x={xv} 발견")
-
-
-# ---------------------------------------------------------------------------
-# _section_phase_timeline
-# ---------------------------------------------------------------------------
-
-class TestSectionPhaseTimeline(unittest.TestCase):
-    """_section_phase_timeline — HTML 섹션 래퍼."""
-
-    def setUp(self):
-        self.ms = _import_server()
-        if not hasattr(self.ms, "_section_phase_timeline"):
-            self.skipTest("_section_phase_timeline 미구현")
-
-    def test_empty_inputs_returns_empty_state(self):
-        html = self.ms._section_phase_timeline([], [])
-        self.assertIn("<svg", html)
-        self.assertIn("no phase history", html)
-
-    def test_section_id_timeline(self):
-        html = self.ms._section_phase_timeline([], [])
-        self.assertIn('id="timeline"', html)
-
-    def test_over_50_tasks_shows_more_link(self):
-        """51개 이상 task → +N more 링크 표시."""
-        now = datetime(2026, 4, 21, 12, 0, 0, tzinfo=timezone.utc)
-        items = [
-            _make_work_item(self.ms, f"TSK-00-{i:02d}", [
-                _make_phase_entry(self.ms, "design.ok", None, "[dd]", "2026-04-21T11:00:00Z"),
-            ])
-            for i in range(55)
-        ]
-        html = self.ms._section_phase_timeline(items, [])
-        self.assertIn("more", html.lower())
-        self.assertIn("timeline-full", html)
-
-    def test_exactly_50_tasks_no_more_link(self):
-        """정확히 50개 task → +N more 없어야 함."""
-        items = [
-            _make_work_item(self.ms, f"TSK-00-{i:02d}", [
-                _make_phase_entry(self.ms, "design.ok", None, "[dd]", "2026-04-21T11:00:00Z"),
-            ])
-            for i in range(50)
-        ]
-        html = self.ms._section_phase_timeline(items, [])
-        self.assertNotIn("timeline-full", html)
-
-    def test_section_contains_timeline_track(self):
-        """v3 phase-timeline은 SVG 대신 div+seg 기반 그래픽을 사용한다.
-
-        v1 회귀 트랩(`<svg>` 강제) 제거 — _section_phase_timeline 출력이 panel.timeline
-        + tl-track + seg-{state} 셀렉터를 포함하는지 검증한다. SVG 그래픽은 별도
-        ``_timeline_svg()`` 함수가 phase-history 섹션에서 사용한다.
-        """
-        item = _make_work_item(self.ms, "TSK-00-01", [
-            _make_phase_entry(self.ms, "design.ok", None, "[dd]", "2026-04-21T11:00:00Z"),
-        ])
-        html = self.ms._section_phase_timeline([item], [])
-        self.assertIn('class="panel timeline"', html)
-        self.assertIn('class="tl-track"', html)
-        self.assertIn('seg-running', html)
-
-
-# ---------------------------------------------------------------------------
-# _SECTION_ANCHORS 업데이트
+# _SECTION_ANCHORS 업데이트 (TSK-01-01: timeline 제거 후 activity만 확인)
 # ---------------------------------------------------------------------------
 
 class TestSectionAnchors(unittest.TestCase):
-    """_SECTION_ANCHORS에 activity/timeline 앵커가 추가되어야 함."""
+    """_SECTION_ANCHORS에 activity 앵커가 있고, timeline 앵커가 없어야 함 (TSK-01-01)."""
 
     def setUp(self):
         self.ms = _import_server()
@@ -666,9 +356,10 @@ class TestSectionAnchors(unittest.TestCase):
         anchors = getattr(self.ms, "_SECTION_ANCHORS", ())
         self.assertIn("activity", anchors)
 
-    def test_timeline_anchor_in_section_anchors(self):
+    def test_timeline_anchor_removed_from_section_anchors(self):
+        """TSK-01-01: 'timeline'이 _SECTION_ANCHORS에서 제거됐어야 함."""
         anchors = getattr(self.ms, "_SECTION_ANCHORS", ())
-        self.assertIn("timeline", anchors)
+        self.assertNotIn("timeline", anchors)
 
     def test_header_nav_contains_activity_link(self):
         """_section_header 출력에 #activity 링크가 있어야 함."""
@@ -677,12 +368,12 @@ class TestSectionAnchors(unittest.TestCase):
         html = self.ms._section_header({})
         self.assertIn('href="#activity"', html)
 
-    def test_header_nav_contains_timeline_link(self):
-        """_section_header 출력에 #timeline 링크가 있어야 함."""
+    def test_header_nav_no_timeline_link(self):
+        """TSK-01-01: _section_header 출력에 #timeline 링크가 없어야 함."""
         if not hasattr(self.ms, "_section_header"):
             self.skipTest("_section_header 미구현")
         html = self.ms._section_header({})
-        self.assertIn('href="#timeline"', html)
+        self.assertNotIn('href="#timeline"', html)
 
 
 if __name__ == "__main__":

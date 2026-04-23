@@ -531,7 +531,7 @@ class ContentTypeTests(unittest.TestCase):
 # v3 redesign tests (monitor-redesign-v3)
 # Stage 1: CSS tokens + shell/cmdbar/grid/section-head
 # Stage 2: WP cards + donut SVG + .trow task rows + features
-# Stage 3: live-activity + timeline tl-track + team panes + subagents
+# Stage 3: live-activity + team panes + subagents
 # Stage 4: phase-history table + drawer + JS
 # ---------------------------------------------------------------------------
 
@@ -711,7 +711,7 @@ class V3Stage2WpCardsTests(unittest.TestCase):
 
 
 class V3Stage3RightColTests(unittest.TestCase):
-    """단계 3: 우측 컬럼 — live-activity / phase-timeline / team / subagents."""
+    """단계 3: 우측 컬럼 — live-activity / team / subagents."""
 
     def _make_task_with_history(self, tsk_id="TSK-01-01"):
         from datetime import datetime, timezone, timedelta
@@ -753,26 +753,6 @@ class V3Stage3RightColTests(unittest.TestCase):
         # build.ok → to_status=[im] → phase "im" → data-to maps appropriately
         # At least one data-to attribute should be present
         self.assertRegex(html, r'data-to="[a-z]+"')
-
-    def test_phase_timeline_tl_track(self):
-        tasks = [self._make_task_with_history()]
-        html = monitor_server._section_phase_timeline(tasks, [])
-        self.assertIn('class="tl-track"', html)
-
-    def test_phase_timeline_seg_div(self):
-        tasks = [self._make_task_with_history()]
-        html = monitor_server._section_phase_timeline(tasks, [])
-        self.assertIn('class="seg', html)
-
-    def test_phase_timeline_tl_axis(self):
-        tasks = [self._make_task_with_history()]
-        html = monitor_server._section_phase_timeline(tasks, [])
-        self.assertIn('class="tl-axis"', html)
-
-    def test_phase_timeline_tl_now(self):
-        tasks = [self._make_task_with_history()]
-        html = monitor_server._section_phase_timeline(tasks, [])
-        self.assertIn('class="tl-now"', html)
 
     def test_render_pane_row_pane_head(self):
         pane = _make_pane("%1", "dev", 0)
@@ -988,7 +968,6 @@ _HAS_SPARK_BUCKETS = hasattr(monitor_server, "_spark_buckets")
 _HAS_WP_DONUT_STYLE = hasattr(monitor_server, "_wp_donut_style")
 _HAS_SECTION_KPI = hasattr(monitor_server, "_section_kpi")
 _HAS_SECTION_WP_CARDS = hasattr(monitor_server, "_section_wp_cards")
-_HAS_TIMELINE_SVG = hasattr(monitor_server, "_timeline_svg")
 _HAS_SECTION_TEAM_V2 = hasattr(monitor_server, "_section_team") and _HAS_SECTION_KPI
 
 
@@ -1189,37 +1168,6 @@ class SectionWpCardsTests(unittest.TestCase):
         self.assertIn('pathLength="100"', html)
 
 
-@unittest.skipUnless(_HAS_TIMELINE_SVG, "_timeline_svg 미구현 (TSK-04-03 이후)")
-class TimelineSvgTests(unittest.TestCase):
-    """_timeline_svg: 0건 empty state, fail 구간 class='tl-fail'."""
-
-    def test_empty_state_when_no_tasks(self):
-        """태스크 0건이면 예외 없이 empty state 문자열 반환."""
-        from datetime import datetime, timezone
-        now = datetime(2026, 4, 20, 12, 0, 0, tzinfo=timezone.utc)
-        try:
-            result = monitor_server._timeline_svg([], span_minutes=60, now=now)
-        except Exception as e:
-            self.fail(f"_timeline_svg raised {e!r} for empty input")
-        self.assertIsInstance(result, str)
-
-    def test_fail_segment_class(self):
-        """fail 구간에 class='tl-fail' 포함."""
-        from datetime import datetime, timezone, timedelta
-        now = datetime(2026, 4, 20, 12, 0, 0, tzinfo=timezone.utc)
-        # _timeline_svg expects dict rows with segments list (fail=True marks failure)
-        row = {
-            "id": "TSK-TL",
-            "bypassed": False,
-            "segments": [
-                (now - timedelta(minutes=30), now - timedelta(minutes=15), "im", False),
-                (now - timedelta(minutes=15), now - timedelta(minutes=10), "im", True),
-            ],
-        }
-        result = monitor_server._timeline_svg([row], span_minutes=60, now=now)
-        self.assertIn("tl-fail", result)
-
-
 @unittest.skipUnless(
     _HAS_SECTION_TEAM_V2,
     "_section_team v2 미구현 (TSK-04-03 이후 — data-pane-expand 추가 전)"
@@ -1287,14 +1235,6 @@ class I18nHelperTests(unittest.TestCase):
         """_t('en', 'live_activity') → 'Live Activity'."""
         self.assertEqual(monitor_server._t("en", "live_activity"), "Live Activity")
 
-    def test_t_korean_phase_timeline(self):
-        """_t('ko', 'phase_timeline') → '단계 타임라인'."""
-        self.assertEqual(monitor_server._t("ko", "phase_timeline"), "단계 타임라인")
-
-    def test_t_english_phase_timeline(self):
-        """_t('en', 'phase_timeline') → 'Phase Timeline'."""
-        self.assertEqual(monitor_server._t("en", "phase_timeline"), "Phase Timeline")
-
     def test_t_unknown_lang_falls_back_to_ko(self):
         """미지원 lang('fr')은 ko fallback → '작업 패키지'."""
         self.assertEqual(monitor_server._t("fr", "work_packages"), "작업 패키지")
@@ -1337,7 +1277,6 @@ class SectionTitlesI18nTests(unittest.TestCase):
         self.assertIn("<h2>팀 에이전트 (tmux)</h2>", html)
         self.assertIn("<h2>서브 에이전트 (agent-pool)</h2>", html)
         self.assertIn("<h2>실시간 활동</h2>", html)
-        self.assertIn("<h2>단계 타임라인</h2>", html)
 
     def test_section_titles_korean_explicit(self):
         """lang='ko' 명시 — 모든 섹션 heading이 한국어."""
@@ -1355,7 +1294,6 @@ class SectionTitlesI18nTests(unittest.TestCase):
         self.assertIn("<h2>Team Agents (tmux)</h2>", html)
         self.assertIn("<h2>Subagents (agent-pool)</h2>", html)
         self.assertIn("<h2>Live Activity</h2>", html)
-        self.assertIn("<h2>Phase Timeline</h2>", html)
 
     def test_lang_invalid_falls_back_to_ko(self):
         """lang='INVALID' → ko 폴백 — 한국어 heading."""
@@ -2218,6 +2156,133 @@ class RedesignDonutViewBoxTests(unittest.TestCase):
         counts = {"done": 0, "running": 0, "failed": 0, "bypass": 0, "pending": 0}
         svg = monitor_server._wp_donut_svg(counts)
         self.assertIn('viewBox="0 0 36 36"', svg)
+
+
+# ---------------------------------------------------------------------------
+# TSK-01-01: 단계 타임라인 섹션 제거 — 회귀 테스트
+# ---------------------------------------------------------------------------
+
+
+class TSK0101PhaseTimelineRemovalTests(unittest.TestCase):
+    """TSK-01-01: phase-timeline 섹션이 render_dashboard 출력에서 완전히 제거됐음을 검증."""
+
+    def _base_model(self):
+        return {
+            "generated_at": "2026-04-22T00:00:00Z",
+            "project_root": "/proj",
+            "docs_dir": "/proj/docs/monitor-v4",
+            "refresh_seconds": 3,
+            "wbs_tasks": [_make_task()],
+            "features": [_make_feat()],
+            "shared_signals": [],
+            "agent_pool_signals": [],
+            "tmux_panes": None,
+        }
+
+    def test_dashboard_has_no_phase_timeline(self):
+        """AC-1: 렌더 HTML에 data-section="phase-timeline" 요소가 없어야 한다."""
+        html = render_dashboard(self._base_model())
+        self.assertNotIn('data-section="phase-timeline"', html,
+                         'phase-timeline 섹션이 렌더 HTML에서 발견됨 — 완전 제거 필요')
+
+    def test_dashboard_has_no_phase_timeline_en(self):
+        """lang=en에서도 phase-timeline 섹션이 없어야 한다."""
+        html = render_dashboard(self._base_model(), lang="en")
+        self.assertNotIn('data-section="phase-timeline"', html)
+
+    def test_css_no_tl_classes(self):
+        """인라인 DASHBOARD_CSS에 .tl- 접두 셀렉터가 없어야 한다."""
+        css = monitor_server.DASHBOARD_CSS
+        import re
+        tl_matches = re.findall(r'\.tl-\S+', css)
+        self.assertEqual(tl_matches, [],
+                         f'.tl- CSS 클래스가 아직 남아있음: {tl_matches}')
+
+    def test_css_no_timeline_class(self):
+        """DASHBOARD_CSS에 .timeline, .timeline-head, .timeline-svg 등이 없어야 한다."""
+        css = monitor_server.DASHBOARD_CSS
+        for pattern in ('.timeline{', '.timeline-head', '.timeline-svg', '.timeline-more'):
+            self.assertNotIn(pattern, css,
+                             f'CSS 패턴 {pattern!r}이 아직 남아있음')
+
+    def test_no_section_phase_timeline_function(self):
+        """_section_phase_timeline 함수가 monitor_server에 존재하지 않아야 한다."""
+        self.assertFalse(hasattr(monitor_server, '_section_phase_timeline'),
+                         '_section_phase_timeline 함수가 아직 남아있음')
+
+    def test_no_timeline_rows_function(self):
+        """_timeline_rows 함수가 monitor_server에 존재하지 않아야 한다."""
+        self.assertFalse(hasattr(monitor_server, '_timeline_rows'),
+                         '_timeline_rows 함수가 아직 남아있음')
+
+    def test_no_timeline_svg_function(self):
+        """_timeline_svg 함수가 monitor_server에 존재하지 않아야 한다."""
+        self.assertFalse(hasattr(monitor_server, '_timeline_svg'),
+                         '_timeline_svg 함수가 아직 남아있음')
+
+    def test_no_phase_timeline_in_section_anchors(self):
+        """_SECTION_ANCHORS에 'timeline'이 없어야 한다."""
+        self.assertNotIn('timeline', monitor_server._SECTION_ANCHORS,
+                         "'timeline'이 _SECTION_ANCHORS에 아직 남아있음")
+
+    def test_no_timeline_in_section_eyebrows(self):
+        """_SECTION_EYEBROWS에 'timeline' 키가 없어야 한다."""
+        self.assertNotIn('timeline', monitor_server._SECTION_EYEBROWS,
+                         "'timeline' 키가 _SECTION_EYEBROWS에 아직 남아있음")
+
+    def test_no_timeline_in_section_default_headings(self):
+        """_SECTION_DEFAULT_HEADINGS에 'timeline' 키가 없어야 한다."""
+        self.assertNotIn('timeline', monitor_server._SECTION_DEFAULT_HEADINGS,
+                         "'timeline' 키가 _SECTION_DEFAULT_HEADINGS에 아직 남아있음")
+
+    def test_no_timeline_nav_link(self):
+        """sticky-header에 <a href="#timeline"> 앵커가 없어야 한다."""
+        html = render_dashboard(self._base_model())
+        self.assertNotIn('href="#timeline"', html,
+                         'sticky-header에 Timeline 앵커가 아직 남아있음')
+
+    def test_i18n_phase_timeline_key_removed_ko(self):
+        """ko i18n 테이블에서 phase_timeline 키가 제거됐으므로 key-fallback이 발생해야 한다."""
+        result = monitor_server._t("ko", "phase_timeline")
+        self.assertEqual(result, "phase_timeline",
+                         "ko i18n에 phase_timeline 키가 아직 남아있음 — 제거 필요")
+
+    def test_i18n_phase_timeline_key_removed_en(self):
+        """en i18n 테이블에서 phase_timeline 키가 제거됐으므로 key-fallback이 발생해야 한다."""
+        result = monitor_server._t("en", "phase_timeline")
+        self.assertEqual(result, "phase_timeline",
+                         "en i18n에 phase_timeline 키가 아직 남아있음 — 제거 필요")
+
+    def test_other_sections_not_regressed(self):
+        """wp-cards, live-activity, dep-graph, features, team, subagents 섹션이 렌더에 존재해야 한다."""
+        html = render_dashboard(self._base_model())
+        for section in ('wp-cards', 'live-activity', 'dep-graph', 'features', 'team', 'subagents'):
+            self.assertIn(f'data-section="{section}"', html,
+                          f'{section} 섹션이 회귀로 사라짐')
+
+    def test_render_dashboard_empty_tasks_no_error(self):
+        """빈 tasks/features 전달 시에도 AttributeError 없이 HTML 반환해야 한다."""
+        model = self._base_model()
+        model['wbs_tasks'] = []
+        model['features'] = []
+        try:
+            html = render_dashboard(model)
+        except AttributeError as e:
+            self.fail(f"빈 tasks/features에서 AttributeError 발생: {e}")
+        self.assertIsInstance(html, str)
+        self.assertNotIn('data-section="phase-timeline"', html)
+
+    def test_py_compile_monitor_server(self):
+        """python3 -m py_compile scripts/monitor-server.py가 성공해야 한다."""
+        import subprocess
+        import os
+        server_path = os.path.join(os.path.dirname(__file__), "monitor-server.py")
+        result = subprocess.run(
+            ["python3", "-m", "py_compile", server_path],
+            capture_output=True, text=True
+        )
+        self.assertEqual(result.returncode, 0,
+                         f"py_compile 실패:\n{result.stderr}")
 
 
 class TskSpinnerTests(unittest.TestCase):

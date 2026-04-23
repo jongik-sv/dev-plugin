@@ -291,10 +291,11 @@ class TestPageGridLayout(unittest.TestCase):
 
 
 class TestSectionOrder(unittest.TestCase):
-    """v3 섹션 순서: kpi < wp-cards < features < live-activity < phase-timeline
+    """v3 섹션 순서: kpi < wp-cards < features < live-activity
     < team < subagents < phase-history.
 
     v1의 sticky-header 섹션은 cmdbar로 통합되어 제거됨 (monitor-redesign-v3).
+    TSK-01-01: phase-timeline 섹션 제거됨.
     """
 
     def _get_pos(self, html: str, key: str) -> int:
@@ -311,7 +312,6 @@ class TestSectionOrder(unittest.TestCase):
             "wp-cards",
             "features",
             "live-activity",
-            "phase-timeline",
             "team",
             "subagents",
             "phase-history",
@@ -336,9 +336,10 @@ class TestDataSectionAttributes(unittest.TestCase):
     def test_each_data_section_unique(self):
         html = render_dashboard(_valid_model_30tasks())
         # sticky-header는 v3에서 cmdbar로 통합되어 제거됨
+        # TSK-01-01: phase-timeline 섹션 제거됨
         expected_keys = [
             "kpi", "wp-cards", "features",
-            "live-activity", "phase-timeline", "team", "subagents", "phase-history",
+            "live-activity", "team", "subagents", "phase-history",
         ]
         for key in expected_keys:
             count = html.count(f'data-section="{key}"')
