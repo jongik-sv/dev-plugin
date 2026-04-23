@@ -127,6 +127,54 @@ class ScanSignalsSubdirScopeTests(unittest.TestCase):
             self.assertIn("T", entry.mtime)
 
 
+class ScanSignalsArchivePruneTests(unittest.TestCase):
+    """`_`로 시작하는 서브디렉터리는 archive/private으로 간주해 스캔에서 제외한다.
+
+    실제 사고 사례: `claude-signals/{project}/_backup-{ts}/` 안에 남은 stale
+    `.running` 시그널이 현재 scope로 긁혀 올라와 완료된 task들이 "running"으로
+    오집계됐다. `_*` prune은 이런 수동/자동 아카이브를 모두 격리한다.
+    """
+
+    def test_underscore_prefixed_subdir_is_pruned(self):
+        """_backup-* 같은 `_`-prefixed subdir 안의 시그널은 수집되지 않는다."""
+        with _TmpdirPatch() as tmp:
+            project = tmp / "claude-signals" / "proj-a"
+            backup = project / "_backup-1234567890"
+            backup.mkdir(parents=True)
+            (backup / "TSK-OLD.running").write_text("", encoding="utf-8")
+            (backup / "TSK-OLD.done").write_text("", encoding="utf-8")
+            # 라이브 시그널 1건
+            (project / "TSK-LIVE.done").write_text("", encoding="utf-8")
+            result = MS.scan_signals()
+            names = sorted(e.name for e in result)
+            self.assertEqual(names, ["TSK-LIVE.done"])
+
+    def test_underscore_prefixed_subdir_pruned_under_agent_pool(self):
+        """agent-pool 블록에서도 `_`-prefixed subdir은 제외된다."""
+        with _TmpdirPatch() as tmp:
+            pool = tmp / "agent-pool-signals-ts1-1"
+            archive = pool / "_archive"
+            archive.mkdir(parents=True)
+            (archive / "OLD.running").write_text("", encoding="utf-8")
+            (pool / "LIVE.running").write_text("", encoding="utf-8")
+            result = MS.scan_signals()
+            names = sorted(e.name for e in result)
+            self.assertEqual(names, ["LIVE.running"])
+
+    def test_deeply_nested_underscore_dir_is_pruned(self):
+        """중첩 경로의 어느 단계든 `_`-prefixed 이면 그 서브트리 전체가 제외된다."""
+        with _TmpdirPatch() as tmp:
+            project = tmp / "claude-signals" / "proj"
+            wp = project / "wp-01"
+            buried = wp / "_trash" / "inner"
+            buried.mkdir(parents=True)
+            (buried / "A.running").write_text("", encoding="utf-8")
+            (wp / "B.done").write_text("", encoding="utf-8")
+            result = MS.scan_signals()
+            names = sorted(e.name for e in result)
+            self.assertEqual(names, ["B.done"])
+
+
 class ScanSignalsBareFileTests(unittest.TestCase):
     """bare-file 하위 호환: claude-signals/ root 직하 파일 → scope='shared'."""
 
@@ -257,7 +305,7 @@ class SignalEntryShapeTests(unittest.TestCase):
     """SignalEntry dataclass must have TRD §5.2 field names for JSON serialization."""
 
     def test_fields_match_trd(self):
-        expected = {"name", "kind", "task_id", "mtime", "scope"}
+        expected = {"name", "kind", "task_id", "mtime", "scope", "content"}
         actual = {f.name for f in fields(MS.SignalEntry)}
         self.assertEqual(actual, expected)
 
@@ -268,7 +316,7 @@ class SignalEntryShapeTests(unittest.TestCase):
             (tmp / "claude-signals" / "Q.done").write_text("", encoding="utf-8")
             entry = MS.scan_signals()[0]
             d = asdict(entry)
-            self.assertEqual(
+            self.assertGreaterEqual(
                 set(d.keys()), {"name", "kind", "task_id", "mtime", "scope"}
             )
             self.assertEqual(d["scope"], "shared")
@@ -281,7 +329,7 @@ class SignalEntryShapeTests(unittest.TestCase):
             (subdir / "Q.done").write_text("", encoding="utf-8")
             entry = MS.scan_signals()[0]
             d = asdict(entry)
-            self.assertEqual(
+            self.assertGreaterEqual(
                 set(d.keys()), {"name", "kind", "task_id", "mtime", "scope"}
             )
             self.assertEqual(d["scope"], "my-project")

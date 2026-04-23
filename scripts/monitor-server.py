@@ -149,6 +149,7 @@ class SignalEntry:
     task_id: str
     mtime: str
     scope: str
+    content: str = ""
 
 
 @dataclass
@@ -193,12 +194,21 @@ def _signal_entry(path: str, scope: str) -> Optional[SignalEntry]:
         return None
     if ext not in _SIGNAL_KINDS:
         return None
+    content = ""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            raw = fh.read(500)
+        first_line = raw.splitlines()[0].strip() if raw.strip() else ""
+        content = first_line[:200]
+    except OSError:
+        pass
     return SignalEntry(
         name=name,
         kind=ext,
         task_id=stem,
         mtime=_iso_mtime(path),
         scope=scope,
+        content=content,
     )
 
 
@@ -208,11 +218,18 @@ def _walk_signal_entries(root: str, scope: str) -> List[SignalEntry]:
     Returns ``[]`` if *root* is not an existing directory — callers do not need to
     pre-check ``os.path.isdir``. Files with unknown extensions are silently
     skipped by ``_signal_entry``.
+
+    Subdirectories whose name starts with ``_`` are treated as archive/private
+    (Jekyll/pytest convention) and pruned from the walk. This protects live
+    signal state from being polluted by manual backups like ``_backup-{ts}/``
+    left behind after WBS resume cleanup.
     """
     if not os.path.isdir(root):
         return []
     collected: List[SignalEntry] = []
-    for dirpath, _dirnames, filenames in os.walk(root):
+    for dirpath, dirnames, filenames in os.walk(root):
+        # Prune archive/private subdirs in-place so os.walk skips their contents.
+        dirnames[:] = [d for d in dirnames if not d.startswith("_")]
         for fn in filenames:
             full = os.path.join(dirpath, fn)
             entry = _signal_entry(full, scope)
