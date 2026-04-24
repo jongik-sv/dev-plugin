@@ -2865,42 +2865,28 @@ def _pane_last_n_lines(pane_id: str, n: int = _PANE_PREVIEW_LINES) -> str:
     return "\n".join(lines[-n:])
 
 
+# moved to monitor_server.renderers.team [core-renderer-split:C1-2]
 def _render_pane_row(pane, preview_lines: "Optional[str]" = "") -> str:
-    """Render a single ``<div class="pane">`` for a tmux pane (v3 structure).
-
-    v3: .pane > .pane-head (4-col grid) + .pane-preview.
-    Still emits data-pane-expand for JS drawer + pane-row class for backward compat.
-
-    Args:
-        pane: PaneInfo dataclass or its dict form.
-        preview_lines: Last-N-lines text to show in the preview ``<pre>``.
-            - ``str`` (including empty string): renders
-              ``<pre class="pane-preview">{preview_lines}</pre>``
-            - ``None``: renders the "too many panes" placeholder
-              ``<pre class="pane-preview empty">no preview (too many panes)</pre>``
-    """
+    _team_mod = _c2b_load_renderer("team")
+    if _team_mod is not None:
+        return _team_mod._render_pane_row(pane, preview_lines)
+    # fallback: minimal shim (flat-load context before renderers available)
     pane_id_raw = _pane_attr(pane, "pane_id", "")
     pane_id_esc = _esc(pane_id_raw)
-    pane_id_q = quote(pane_id_raw, safe="")
-    pane_idx = _esc(_pane_attr(pane, "pane_index", ""))
     cmd = _esc(_pane_attr(pane, "pane_current_command", ""))
     pid = _esc(_pane_attr(pane, "pane_pid", ""))
     window_name = _esc(_pane_attr(pane, "window_name", ""))
-
-    # data-state: "live" for active panes, "idle" for shell-only
     data_state = "idle" if cmd in ("zsh", "bash", "sh") else "live"
-
     if preview_lines is None:
         preview_html = '<pre class="pane-preview empty">no preview (too many panes)</pre>'
     else:
         preview_html = f'<pre class="pane-preview">{_esc(preview_lines)}</pre>'
-
     return (
         f'<div class="pane" data-state="{data_state}">\n'
         f'  <div class="pane-head">\n'
         f'    <div class="name">{window_name}</div>\n'
         f'    <div class="meta">{pane_id_esc} · <span class="cmd">{cmd}</span> · pid {pid}</div>\n'
-        f'    <a class="mini-btn" href="/pane/{pane_id_esc}" data-pane-url="/pane/{pane_id_q}">show output</a>\n'
+        f'    <a class="mini-btn" href="/pane/{pane_id_esc}">show output</a>\n'
         f'    <button class="mini-btn primary" type="button"'
         f' data-pane-expand="{pane_id_esc}"'
         f' aria-label="Expand pane {pane_id_esc}">expand <span class="kbd">&#x21B5;</span></button>\n'
@@ -2913,68 +2899,12 @@ def _render_pane_row(pane, preview_lines: "Optional[str]" = "") -> str:
 _TOO_MANY_PANES_THRESHOLD = 20
 
 
+# moved to monitor_server.renderers.team [core-renderer-split:C1-2]
 def _section_team(panes, heading: "Optional[str]" = None) -> str:
-    """Team section: tmux panes + inline preview + expand button.
-
-    When ``panes`` contains ≥ ``_TOO_MANY_PANES_THRESHOLD`` entries the
-    preview is suppressed (``preview_lines=None``) to control subprocess cost.
-    ``capture_pane()`` is the v1 implementation and is not called in that case.
-
-    TSK-02-02: heading 파라미터 추가 — i18n 지원.
-    """
-    heading = _resolve_heading("team", heading)
-    if panes is None:
-        return _empty_section(
-            "team",
-            heading,
-            "tmux not available on this host — Team section shows no data,"
-            " other sections work normally.",
-            css="info",
-        )
-
-    all_panes = list(panes)
-    if not all_panes:
-        return _empty_section("team", heading, "no tmux panes running")
-
-    too_many = len(all_panes) >= _TOO_MANY_PANES_THRESHOLD
-
-    groups, order = _group_preserving_order(
-        all_panes, lambda pane: _pane_attr(pane, "window_name", None) or "(unnamed)"
-    )
-
-    # Honour mock.patch.object(flat_entry, "_pane_last_n_lines", ...) from tests.
-    _last_n = _pane_last_n_lines
-    for _entry in _iter_flat_entry_modules():
-        _mock = getattr(_entry, "_pane_last_n_lines", None)
-        if _mock is not None and _mock is not _pane_last_n_lines:
-            _last_n = _mock
-            break
-
-    blocks: List[str] = []
-    for window_name in order:
-        row_parts = [
-            _render_pane_row(
-                pane,
-                preview_lines=(
-                    None if too_many
-                    else _last_n(
-                        _pane_attr(pane, "pane_id", ""),
-                        n=_PANE_PREVIEW_LINES,
-                    )
-                ),
-            )
-            for pane in groups[window_name]
-        ]
-        rows = "\n".join(row_parts)
-        blocks.append(
-            '<details open>\n'
-            f'  <summary>{_esc(window_name)} ({len(groups[window_name])} panes)</summary>\n'
-            f'{rows}\n'
-            '</details>'
-        )
-
-    team_body = '<div class="panel team">\n' + "\n".join(blocks) + '\n</div>'
-    return _section_wrap("team", heading, team_body)
+    _team_mod = _c2b_load_renderer("team")
+    if _team_mod is not None:
+        return _team_mod._section_team(panes, heading)
+    return ""
 
 
 _SUBAGENT_INFO = (
@@ -6341,7 +6271,17 @@ except (ImportError, AttributeError):
             _wp_busy_indicator_html = _c2b_wp._wp_busy_indicator_html  # type: ignore[assignment]
     except (ImportError, AttributeError):
         pass  # flat-load 컨텍스트에서 renderers 로드 불가 — 해당 심볼 미노출(정상)
-# === /renderer facade (추가 re-export는 C1-2 이후 이 블록에 append) ===
+try:
+    from .renderers.team import _section_team, _render_pane_row  # noqa: F401,E402
+except (ImportError, AttributeError):
+    try:
+        _c2b_team = _c2b_load_renderer("team")
+        if _c2b_team is not None:
+            _section_team = _c2b_team._section_team  # type: ignore[assignment]
+            _render_pane_row = _c2b_team._render_pane_row  # type: ignore[assignment]
+    except (ImportError, AttributeError):
+        pass  # flat-load 컨텍스트에서 renderers 로드 불가 — thin wrapper 사용
+# === /renderer facade ===
 
 
 if __name__ == "__main__":

@@ -54,5 +54,7 @@ _MAX_ESCALATION = _mod._MAX_ESCALATION
 _encode_state_summary_attr = _mod._encode_state_summary_attr
 _build_state_summary_json = _mod._build_state_summary_json
 
+_iter_flat_entry_modules = _mod._iter_flat_entry_modules
+
 # taskrow.py 선-shim이 _entry._phase_label 등에 접근할 수 있도록 _mod를 공개 심볼로 노출.
 # taskrow.py의 `from ._util import _mod as _entry` 에서 사용된다.
