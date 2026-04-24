@@ -381,6 +381,29 @@ class WpCardsSectionE2ETests(unittest.TestCase):
         self.assertIn("task-row", section_html,
                       "wp-card 섹션 내부에 task-row 클래스 없음")
 
+    def test_wp_card_no_horizontal_scroll(self) -> None:
+        """AC-FR03-c: WP 카드 영역의 min-width가 380px 이하로 설정되어 가로 스크롤 방지.
+
+        TSK-03-02: .wp-stack의 minmax(380px, 1fr) 패턴을 확인하여
+        축소된 좌측 열(40%)에서도 카드 가로 스크롤이 발생하지 않음을 검증한다.
+
+        검증 방식: 서버 응답 HTML의 인라인 CSS에서 .wp-stack 규칙이
+        minmax(380px, 1fr)을 포함하는지 정규식으로 확인.
+        """
+        html_body = self._dashboard_html()
+        # .wp-stack { grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)) }
+        # 패턴을 인라인 CSS에서 검색.
+        pattern = re.compile(
+            r"\.wp-stack\s*\{[^}]*grid-template-columns\s*:\s*"
+            r"repeat\(\s*auto-fill\s*,\s*minmax\(\s*380px\s*,\s*1fr\s*\)\s*\)",
+            re.DOTALL,
+        )
+        self.assertIsNotNone(
+            pattern.search(html_body),
+            ".wp-stack { grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)) } "
+            "패턴이 대시보드 HTML 인라인 CSS에 없음 — 축소된 열에서 가로 스크롤 발생 위험"
+        )
+
 
 @unittest.skipUnless(_SERVER_UP, f"monitor-server not reachable at {_E2E_URL}")
 class StickyHeaderKpiSectionE2ETests(unittest.TestCase):
