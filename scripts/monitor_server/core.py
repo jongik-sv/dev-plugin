@@ -2347,23 +2347,88 @@ ul#dep-graph-legend { list-style: none; margin: 0; padding: 0; }
   .drawer{ width: 100vw; }
 }
 
-/* ---------- TSK-02-03: trow tooltip ---------- */
-#trow-tooltip{
-  position:fixed;
+/* ---------- TSK-04-02 FR-01: .info-btn click trigger ---------- */
+.info-btn{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  width:18px;
+  height:18px;
+  margin:0 4px;
+  padding:0;
+  background:transparent;
+  border:1px solid var(--border);
+  border-radius:50%;
+  color:var(--ink-3);
+  cursor:pointer;
+  font:11px/1 var(--font-mono);
+  user-select:none;
+}
+.info-btn:hover,
+.info-btn:focus-visible{
+  color:var(--ink);
+  border-color:var(--ink-3);
+  outline:none;
+}
+.info-btn[aria-expanded="true"]{
+  color:var(--accent);
+  border-color:var(--accent);
+}
+
+/* ---------- TSK-04-02 FR-01: singleton info popover ---------- */
+.info-popover{
+  position:absolute;
   z-index:100;
   max-width:420px;
+  min-width:240px;
   background:var(--bg-2);
   border:1px solid var(--border);
   border-radius:6px;
   padding:10px 12px;
   font:12px/1.4 var(--font-mono);
-  pointer-events:none;
-  box-shadow:0 4px 12px rgba(0,0,0,.3);
+  box-shadow:0 8px 24px rgba(0,0,0,0.18);
 }
-#trow-tooltip[hidden]{ display:none; }
-#trow-tooltip dl{ margin:0; }
-#trow-tooltip dt{ color:var(--ink-3); font-size:10px; margin-top:6px; }
-#trow-tooltip dd{ margin:0; color:var(--ink); }
+.info-popover[hidden]{ display:none; }
+.info-popover dl{ margin:0; }
+.info-popover dt{ color:var(--ink-3); font-size:10px; margin-top:6px; }
+.info-popover dd{ margin:0; color:var(--ink); }
+.info-popover dl.phase-models dt{ color:var(--ink-3); font-size:10px; margin-top:4px; }
+.info-popover dl.phase-models dd{ margin:0; color:var(--ink); font-size:11px; }
+/* tail triangle — default placement above row (tail points down) */
+.info-popover::before{
+  content:"";
+  position:absolute;
+  left:16px;
+  bottom:-6px;
+  width:0;
+  height:0;
+  border-left:6px solid transparent;
+  border-right:6px solid transparent;
+  border-top:6px solid var(--border);
+}
+.info-popover::after{
+  content:"";
+  position:absolute;
+  left:17px;
+  bottom:-5px;
+  width:0;
+  height:0;
+  border-left:5px solid transparent;
+  border-right:5px solid transparent;
+  border-top:5px solid var(--bg-2);
+}
+.info-popover[data-placement="below"]::before{
+  top:-6px;
+  bottom:auto;
+  border-top:none;
+  border-bottom:6px solid var(--border);
+}
+.info-popover[data-placement="below"]::after{
+  top:-5px;
+  bottom:auto;
+  border-top:none;
+  border-bottom:5px solid var(--bg-2);
+}
 
 /* ---------- TSK-02-05: model chip + escalation flag ---------- */
 .model-chip{
@@ -2386,10 +2451,7 @@ ul#dep-graph-legend { list-style: none; margin: 0; padding: 0; }
   font-size:11px;
   vertical-align:middle;
 }
-/* phase-models dl in tooltip */
-#trow-tooltip dl.phase-models dt{ color:var(--ink-3); font-size:10px; margin-top:4px; }
-#trow-tooltip dl.phase-models dd{ margin:0; color:var(--ink); font-size:11px; }
-/* TSK-05-01: filter-bar — sticky top, z-index 70 (below slide-panel:90, trow-tooltip:100) */
+/* TSK-05-01: filter-bar — sticky top, z-index 70 (below slide-panel:90, info-popover:100) */
 .filter-bar{
   position:sticky;
   top:0;
@@ -3238,9 +3300,22 @@ def _encode_state_summary_attr(summary: dict) -> str:
     return html.escape(raw, quote=True)
 
 
+def _trow_info_popover_skeleton() -> str:
+    """body 직계에 1회 주입하는 trow info popover DOM 스켈레톤 (TSK-04-02 FR-01).
+
+    ⓘ 버튼 클릭 시 여기에 콘텐츠를 주입하여 보여준다. 기본은 행 위쪽에 배치되고
+    상단 여유 부족 시 아래로 폴백한다 (positionPopover JS가 결정).
+    """
+    return '<div id="trow-info-popover" class="info-popover" role="dialog" hidden></div>'
+
+
 def _trow_tooltip_skeleton() -> str:
-    """body 직계에 1회 주입하는 trow 툴팁 DOM 스켈레톤 (TSK-02-03)."""
-    return '<div id="trow-tooltip" role="tooltip" hidden></div>'
+    """Legacy shim — kept for backward compatibility. Returns the new info popover skeleton.
+
+    TSK-04-02 FR-01에서 `#trow-tooltip` hover 툴팁이 `#trow-info-popover` click 팝오버로 대체되었다.
+    외부 호출부가 남아있을 수 있으므로 함수는 유지하되 새 스켈레톤을 반환한다.
+    """
+    return _trow_info_popover_skeleton()
 
 
 def _render_task_row_v2(item, running_ids: set, failed_ids: set, lang: str = "ko") -> str:
@@ -3297,6 +3372,14 @@ def _render_task_row_v2(item, running_ids: set, failed_ids: set, lang: str = "ko
 
     clean_title = _esc(_clean_title(title))
 
+    # TSK-04-02 FR-01: ⓘ info button — opens singleton #trow-info-popover on click.
+    info_btn = (
+        '<button class="info-btn" type="button"'
+        ' aria-label="상세"'
+        ' aria-expanded="false"'
+        ' aria-controls="trow-info-popover">ⓘ</button>'
+    )
+
     expand_btn = (
         f'<button class="expand-btn" data-task-id="{_esc(item_id or "")}"'
         ' aria-label="Expand" title="Expand">↗</button>'
@@ -3316,6 +3399,7 @@ def _render_task_row_v2(item, running_ids: set, failed_ids: set, lang: str = "ko
         f'  <div class="elapsed">{_esc(elapsed_display)}</div>\n'
         f'  <div class="retry">×{rc}</div>\n'
         f'  <div class="flags">{flags_inner}</div>\n'
+        f'  {info_btn}\n'
         f'  {expand_btn}\n'
         '</div>'
     )
@@ -4613,101 +4697,136 @@ _DASHBOARD_JS = """\
   window.filterBar={currentFilters:currentFilters,matchesRow:matchesRow,applyFilters:applyFilters,syncUrl:syncUrl,loadFiltersFromUrl:loadFiltersFromUrl};
 })();
 
-/* TSK-02-03: Task hover tooltip — setupTaskTooltip IIFE */
-/* TSK-02-05: renderPhaseModels 확장 추가 */
-(function setupTaskTooltip(){
-  var tip=document.getElementById('trow-tooltip');
-  if(!tip)return;
-  var _timer=null;
-  var _current=null;
+/* TSK-04-02 FR-01: Task info popover — setupInfoPopover IIFE (click trigger, above-row placement) */
+/* TSK-02-05: renderPhaseModels 확장 유지 */
+function renderPhaseModels(pm,escalated,retry_count){
+  if(!pm)return null;
+  var dl=document.createElement('dl');
+  dl.className='phase-models';
+  function pmrow(label,value){
+    var dt=document.createElement('dt');dt.textContent=label;
+    var dd=document.createElement('dd');dd.textContent=value||'—';
+    dl.appendChild(dt);dl.appendChild(dd);
+  }
+  pmrow('Design',pm.design);
+  pmrow('Build',pm.build);
+  var testLine=escalated
+    ?'haiku → '+pm.test+' (retry #'+retry_count+') ⚡'
+    :pm.test;
+  pmrow('Test',testLine);
+  pmrow('Refactor',pm.refactor);
+  return dl;
+}
 
-  /* TSK-02-05: phase model 4행 <dl> 렌더러 */
-  function renderPhaseModels(pm,escalated,retry_count){
-    if(!pm)return null;
-    var dl=document.createElement('dl');
-    dl.className='phase-models';
-    function pmrow(label,value){
-      var dt=document.createElement('dt');dt.textContent=label;
-      var dd=document.createElement('dd');dd.textContent=value||'—';
-      dl.appendChild(dt);dl.appendChild(dd);
+function renderInfoPopoverHtml(data){
+  var dl=document.createElement('dl');
+  function row(label,value){
+    var dt=document.createElement('dt');dt.textContent=label;
+    var dd=document.createElement('dd');dd.textContent=(value===null||value===undefined)?'—':String(value);
+    dl.appendChild(dt);dl.appendChild(dd);
+  }
+  row('status',data.status);
+  row('last event',data.last_event);
+  row('at',data.last_event_at);
+  row('elapsed',data.elapsed!=null?data.elapsed+'s':null);
+  if(data.phase_tail&&data.phase_tail.length){
+    var dt2=document.createElement('dt');dt2.textContent='recent phases';
+    dl.appendChild(dt2);
+    data.phase_tail.forEach(function(p){
+      var dd2=document.createElement('dd');
+      dd2.textContent=(p.event||'')+(p.from?' '+p.from+' → ':'')+( p.to||'');
+      dl.appendChild(dd2);
+    });
+  }
+  var pmDl=renderPhaseModels(data.phase_models,data.escalated,data.retry_count);
+  var frag=document.createDocumentFragment();
+  frag.appendChild(dl);
+  if(pmDl){frag.appendChild(pmDl);}
+  return frag;
+}
+
+function positionPopover(btn,pop){
+  /* Position above row by default; flip below on insufficient top space. Uses scrollY/scrollX. */
+  var sy=window.scrollY,sx=window.scrollX;
+  var row=btn.closest?btn.closest('.trow'):null;
+  var anchor=row||btn;
+  var r=anchor.getBoundingClientRect();
+  var prevHidden=pop.hidden;
+  pop.hidden=false;
+  pop.style.visibility='hidden';
+  var ph=pop.offsetHeight,pw=pop.offsetWidth;
+  pop.style.visibility='';
+  if(prevHidden){pop.hidden=true;}
+  var margin=8;
+  var placement=(r.top>=ph+margin)?'above':'below';
+  var top=(placement==='above')?(r.top+sy-ph-margin):(r.bottom+sy+margin);
+  var left=r.left+sx;
+  if(left+pw>sx+window.innerWidth-8){left=sx+window.innerWidth-pw-8;}
+  if(left<sx+8){left=sx+8;}
+  pop.style.top=top+'px';
+  pop.style.left=left+'px';
+  pop.setAttribute('data-placement',placement);
+}
+
+(function setupInfoPopover(){
+  var pop=document.getElementById('trow-info-popover');
+  if(!pop)return;
+  var openBtn=null;
+
+  function close(){
+    if(openBtn){
+      try{openBtn.setAttribute('aria-expanded','false');}catch(err){}
     }
-    pmrow('Design',pm.design);
-    pmrow('Build',pm.build);
-    var testLine=escalated
-      ?'haiku → '+pm.test+' (retry #'+retry_count+') ⚡'
-      :pm.test;
-    pmrow('Test',testLine);
-    pmrow('Refactor',pm.refactor);
-    return dl;
+    pop.hidden=true;
+    openBtn=null;
   }
 
-  function renderTooltipHtml(data){
-    var dl=document.createElement('dl');
-    function row(label,value){
-      var dt=document.createElement('dt');dt.textContent=label;
-      var dd=document.createElement('dd');dd.textContent=(value===null||value===undefined)?'—':String(value);
-      dl.appendChild(dt);dl.appendChild(dd);
+  function openFor(btn){
+    var row=btn.closest?btn.closest('.trow[data-state-summary]'):null;
+    if(!row){return;}
+    var raw=row.getAttribute('data-state-summary');
+    if(!raw){return;}
+    var data;
+    try{data=JSON.parse(raw);}catch(err){
+      if(window.console&&console.warn){console.warn('trow-info-popover: JSON parse failed',err);}
+      return;
     }
-    row('status',data.status);
-    row('last event',data.last_event);
-    row('at',data.last_event_at);
-    row('elapsed',data.elapsed!=null?data.elapsed+'s':null);
-    if(data.phase_tail&&data.phase_tail.length){
-      var dt2=document.createElement('dt');dt2.textContent='recent phases';
-      dl.appendChild(dt2);
-      data.phase_tail.forEach(function(p){
-        var dd2=document.createElement('dd');
-        dd2.textContent=(p.event||'')+(p.from?' '+p.from+' → ':'')+( p.to||'');
-        dl.appendChild(dd2);
-      });
+    pop.innerHTML='';
+    pop.appendChild(renderInfoPopoverHtml(data));
+    openBtn=btn;
+    btn.setAttribute('aria-expanded','true');
+    positionPopover(btn,pop);
+    pop.hidden=false;
+  }
+
+  document.addEventListener('click',function(e){
+    var btn=e.target&&e.target.closest?e.target.closest('.info-btn'):null;
+    if(btn){
+      e.stopPropagation();
+      if(openBtn===btn){close();return;}
+      if(openBtn){close();}
+      openFor(btn);
+      return;
     }
-    /* TSK-02-05: phase models section */
-    var pmDl=renderPhaseModels(data.phase_models,data.escalated,data.retry_count);
-    var frag=document.createDocumentFragment();
-    frag.appendChild(dl);
-    if(pmDl){frag.appendChild(pmDl);}
-    return frag;
-  }
+    /* Outside click — close if open and click not inside popover */
+    if(openBtn){
+      var inside=e.target&&e.target.closest?e.target.closest('#trow-info-popover'):null;
+      if(!inside){close();}
+    }
+  },false);
 
-  function show(el,data){
-    tip.innerHTML='';
-    tip.appendChild(renderTooltipHtml(data));
-    var r=el.getBoundingClientRect();
-    var left=r.right+8;
-    if(left+420>window.innerWidth){left=r.left-428;}
-    tip.style.top=(r.top+window.scrollY)+'px';
-    tip.style.left=left+'px';
-    tip.hidden=false;
-  }
+  document.addEventListener('keydown',function(e){
+    if(e.key==='Escape'||e.keyCode===27){
+      if(openBtn){
+        var btn=openBtn;
+        close();
+        if(btn&&btn.focus){try{btn.focus();}catch(err){}}
+      }
+    }
+  },false);
 
-  function hide(){
-    clearTimeout(_timer);
-    _timer=null;
-    _current=null;
-    tip.hidden=true;
-  }
-
-  document.addEventListener('mouseenter',function(e){
-    var el=e.target&&e.target.closest?e.target.closest('.trow[data-state-summary]'):null;
-    if(!el){return;}
-    if(el===_current){return;}
-    clearTimeout(_timer);
-    _current=el;
-    _timer=setTimeout(function(){
-      var raw=el.getAttribute('data-state-summary');
-      if(!raw){return;}
-      try{var data=JSON.parse(raw);}catch(err){return;}
-      show(el,data);
-    },300);
-  },true);
-
-  document.addEventListener('mouseleave',function(e){
-    var el=e.target&&e.target.closest?e.target.closest('.trow[data-state-summary]'):null;
-    if(!el){return;}
-    hide();
-  },true);
-
-  window.addEventListener('scroll',function(){hide();},true);
+  window.addEventListener('scroll',function(){if(openBtn){close();}},true);
+  window.addEventListener('resize',function(){if(openBtn){close();}},false);
 })();"""
 
 
@@ -5070,7 +5189,7 @@ def render_dashboard(model: dict, lang: str = "ko", subproject: str = "all") -> 
         '<body>\n',
         body, "\n",
         _drawer_skeleton(), "\n",
-        _trow_tooltip_skeleton(), "\n",
+        _trow_info_popover_skeleton(), "\n",
         _task_panel_dom(), "\n",
         '</body>\n',
         '</html>\n',
