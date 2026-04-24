@@ -520,7 +520,7 @@ monitor-server, monitor-launcher
 - category: development
 - domain: frontend
 - model: sonnet
-- status: [ ]
+- status: [dd]
 - priority: critical
 - assignee: -
 - schedule: 2026-05-12 ~ 2026-05-12
