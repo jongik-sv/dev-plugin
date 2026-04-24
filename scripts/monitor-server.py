@@ -6623,13 +6623,16 @@ class MonitorHandler(BaseHTTPRequestHandler):
         elif _is_static_path(path):
             _handle_static(self, path)
         elif _is_api_graph_path(self.path):
-            _handle_graph_api(self)
+            from monitor_server import api as _api  # TSK-02-02
+            _api.handle_graph(self, {}, None)
         elif _is_api_state_path(self.path):
             self._route_api_state()
         elif _is_api_task_detail_path(self.path):
-            _handle_api_task_detail(self)
+            from monitor_server import api as _api  # TSK-02-02
+            _api.handle_task_detail(self, {}, None)
         elif _is_api_merge_status_path(self.path):
-            _handle_api_merge_status(self)
+            from monitor_server import api as _api  # TSK-02-02
+            _api.handle_merge_status(self, {}, None)
         elif _is_pane_api_path(path):
             pane_id = _extract_pane_id(path, _API_PANE_PATH_PREFIX)
             _handle_pane_api(self, pane_id)
@@ -6766,11 +6769,12 @@ class MonitorHandler(BaseHTTPRequestHandler):
         _send_html_response(self, 200, html_body)
 
     def _route_api_state(self) -> None:
-        """GET /api/state — delegate to _handle_api_state."""
+        """GET /api/state — delegate to api.handle_state (TSK-02-02)."""
         server = getattr(self, "server", None)
         no_tmux = bool(getattr(server, "no_tmux", False))
         _tmux_fn = (lambda: None) if no_tmux else list_tmux_panes
-        _handle_api_state(self, list_tmux_panes=_tmux_fn)
+        from monitor_server import api as _api  # TSK-02-02
+        _api.handle_state(self, {}, None, list_tmux_panes=_tmux_fn)
 
     def _route_not_found(self) -> None:
         """Unmatched GET path → 404."""

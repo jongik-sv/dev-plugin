@@ -40,6 +40,43 @@ def _ensure_package_in_sys_modules() -> None:
             del sys.modules[k]
 
 
+class ApiModuleImportTests(unittest.TestCase):
+    """TSK-02-02: monitor_server.api 모듈 import 검증."""
+
+    _API_PATH = _SCRIPTS_DIR / "monitor_server" / "api.py"
+
+    def setUp(self):
+        if not self._API_PATH.exists():
+            self.skipTest("api.py not yet created")
+        _ensure_package_in_sys_modules()
+        # 이전 캐시 제거
+        for key in list(sys.modules.keys()):
+            if key == "monitor_server.api" or key.startswith("monitor_server.api."):
+                del sys.modules[key]
+
+    def test_import_api(self):
+        """from monitor_server.api import 4개 public 핸들러 함수."""
+        from monitor_server.api import (  # noqa: F401
+            handle_state,
+            handle_graph,
+            handle_task_detail,
+            handle_merge_status,
+        )
+        self.assertTrue(callable(handle_state))
+        self.assertTrue(callable(handle_graph))
+        self.assertTrue(callable(handle_task_detail))
+        self.assertTrue(callable(handle_merge_status))
+
+    def test_api_under_800_lines(self):
+        """AC-FR07-c: api.py ≤ 800줄."""
+        with self._API_PATH.open(encoding="utf-8") as f:
+            n = sum(1 for _ in f)
+        self.assertLessEqual(
+            n, 800,
+            f"api.py is {n} lines — must be ≤ 800 (AC-FR07-c)",
+        )
+
+
 class ModuleImportTests(unittest.TestCase):
     """8개 렌더러 모듈 import 가능성 검증."""
 
