@@ -1,9 +1,9 @@
 {
   "name": "core-decomposition",
-  "status": "[ts]",
+  "status": "[xx]",
   "last": {
-    "event": "test.ok",
-    "at": "2026-04-24T14:42:30Z"
+    "event": "refactor.ok",
+    "at": "2026-04-24T14:54:15Z"
   },
   "phase_history": [
     {
@@ -26,8 +26,17 @@
       "to": "[ts]",
       "at": "2026-04-24T14:42:30Z",
       "elapsed_seconds": 621
+    },
+    {
+      "event": "refactor.ok",
+      "from": "[ts]",
+      "to": "[xx]",
+      "at": "2026-04-24T14:54:15Z",
+      "elapsed_seconds": 705
     }
   ],
-  "updated": "2026-04-24T14:42:30Z",
-  "started_at": "2026-04-24T13:47:45Z"
+  "updated": "2026-04-24T14:54:15Z",
+  "started_at": "2026-04-24T13:47:45Z",
+  "completed_at": "2026-04-24T14:54:15Z",
+  "elapsed_seconds": 3990
 }
