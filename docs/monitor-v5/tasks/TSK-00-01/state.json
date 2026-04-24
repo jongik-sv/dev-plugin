@@ -3,7 +3,7 @@
   "started_at": "2026-04-24T02:02:19Z",
   "last": {
     "event": "build.fail",
-    "at": "2026-04-24T02:11:33Z"
+    "at": "2026-04-24T02:23:42Z"
   },
   "phase_history": [
     {
@@ -19,7 +19,14 @@
       "to": "[dd]",
       "at": "2026-04-24T02:11:33Z",
       "elapsed_seconds": 554
+    },
+    {
+      "event": "build.fail",
+      "from": "[dd]",
+      "to": "[dd]",
+      "at": "2026-04-24T02:23:42Z",
+      "elapsed_seconds": 729
     }
   ],
-  "updated": "2026-04-24T02:11:33Z"
+  "updated": "2026-04-24T02:23:42Z"
 }

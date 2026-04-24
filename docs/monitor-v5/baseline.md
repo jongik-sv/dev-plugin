@@ -12,34 +12,53 @@ TSK-00-01 결과 기록. v5 S1~S8 각 단계의 독립 rollback 기준점.
 | 태그 방식 | lightweight tag |
 | 태깅 일시 | 2026-04-24 |
 
-## pytest 결과 (`pytest -q scripts/`)
+## pytest 전체 결과 (`pytest -q scripts/`) — 2026-04-24 기준
 
 | 항목 | 값 |
 |------|-----|
-| 실행 결과 | **exit 1 (3 failed)** |
-| passed | 1689 |
-| failed | 3 |
-| skipped | 169 |
-| 소요 시간 | 50.68s |
+| 실행 결과 | **exit 1 (41 failed)** |
+| passed | 1739 |
+| failed | 41 |
+| skipped | 31 |
+| 소요 시간 | ~30s |
 
-### 실패 목록 (v4 기존 미해결 회귀)
+### 실패 분류
 
-| # | 테스트 파일 | 테스트명 | 실패 원인 |
-|---|-------------|----------|-----------|
-| 1 | `test_monitor_dep_graph_html.py` | `TestDepGraphCanvasHeight640::test_dep_graph_canvas_height_640` | `height:640px` 문자열 단순 검색 — 실제 구현은 `height:clamp(640px, 78vh, 1400px)` (TSK-04-03 responsive 구현) |
-| 2 | `test_monitor_render.py` | `KpiCountsTests::test_done_excludes_bypass_failed_running` | `.running` 시그널이 있는 task가 done 카운트에서 제외되어야 하나 미제외 (1 != 0) |
-| 3 | `test_monitor_render.py` | `DepGraphSectionEmbeddedTests::test_canvas_height_640px` | 동일 원인 — `height:640px` 단순 문자열 검색 실패 |
+| 분류 | 파일 | 개수 | 원인 |
+|------|------|------|------|
+| v5 새 기능 TDD Red | `test_monitor_filter_bar_e2e.py` | 25 | TSK-05-01 필터바 구현 전 Red 상태 (build TDD 정상) |
+| v5 새 기능 TDD Red | `test_monitor_graph_filter_e2e.py` | 3 | TSK-05-02 graph domain/model 필드 미구현 (build TDD 정상) |
+| v4 디자인 회귀 | `test_monitor_e2e.py` | 10 | v3 디자인 클래스 변경 (`sticky-hdr`→cmdbar, `page` div 제거) + Google Fonts preconnect 외부링크 |
+| v4 기존 회귀 | `test_monitor_dep_graph_html.py` | 1 | `height:640px` 단순 검색 — 실제 구현 `clamp(640px, 78vh, 1400px)` (TSK-04-03) |
+| v4 기존 회귀 | `test_monitor_render.py` | 2 | `height:640px` 단순 검색 + `running` 시그널 done 제외 버그 |
 
-> **판단**: 위 3개 실패는 v5 작업 이전부터 존재하던 v4 코드의 기존 회귀 테스트 오불일치. TSK-00-01 코드 변경 0 제약으로 수정 불가. v5 S1 시작 시 해결 대상으로 분류.
+#### v4 기존 회귀 상세 (3개 — 코드 변경 0 제약으로 수정 불가)
 
-## E2E 테스트 (`scripts/test_monitor_e2e.py`)
+| # | 테스트 | 실패 원인 |
+|---|--------|-----------|
+| 1 | `test_monitor_dep_graph_html.py::TestDepGraphCanvasHeight640::test_dep_graph_canvas_height_640` | `height:640px` 단순 검색 실패 — 실제 구현 `clamp(640px, 78vh, 1400px)` (TSK-04-03 responsive 구현 후 테스트 미갱신) |
+| 2 | `test_monitor_render.py::KpiCountsTests::test_done_excludes_bypass_failed_running` | `.running` 시그널 task가 done 카운트에서 미제외 (1 != 0) |
+| 3 | `test_monitor_render.py::DepGraphSectionEmbeddedTests::test_canvas_height_640px` | 동일 — `height:640px` 단순 검색 실패 |
+
+## unit 테스트만 (`pytest -q scripts/` `--ignore` E2E 파일들) — v4 기준선
+
+`test_monitor_e2e.py`, `test_monitor_filter_bar_e2e.py`, `test_monitor_graph_filter_e2e.py` 제외 시:
 
 | 항목 | 값 |
 |------|-----|
-| 실행 여부 | 미실행 |
-| 사유 | unit pytest 3개 실패로 인해 E2E 실행 선행 조건 미충족 |
+| passed | 1663 |
+| failed | **3** (위 v4 기존 회귀 3개) |
+| skipped | 25 |
+| exit code | 1 |
 
-> design.md 리스크 섹션: "E2E 실패 시 원인을 baseline.md에 명시하고 pytest가 통과했다면 태그 생성 진행" — 본 경우 unit test 실패이므로 E2E 생략.
+> **판단**: v4 코드 자체의 단위 테스트 실패는 3개이며, 모두 TSK-04-03 구현 후 테스트 미갱신과 `.running` 시그널 done 계산 버그다. v5 S1에서 수정 대상으로 분류.
+
+## E2E 테스트 (`python3 scripts/test_monitor_e2e.py`)
+
+| 항목 | 값 |
+|------|-----|
+| 직접 실행 결과 | 10 failed, 69 passed, 2 skipped |
+| 실패 원인 | v3 디자인 리팩터링 후 옛 클래스 단언 미갱신 (`sticky-hdr`, `page` div 등) + Google Fonts preconnect 외부링크 단언 |
 
 ## 플러그인 캐시 확인
 
