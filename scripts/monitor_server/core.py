@@ -2655,85 +2655,20 @@ def _section_subagents(signals, heading: "Optional[str]" = None) -> str:
     return ""
 
 
+# moved to monitor_server.renderers.history [core-renderer-split:C2-4]
 def _status_class_for_phase(status_str: str) -> str:
-    """Map '[xx]'/'[im]' etc. to CSS class name for the history table."""
-    _map = {
-        "[ ]": "init",
-        "[dd]": "dd",
-        "[im]": "im",
-        "[ts]": "ts",
-        "[xx]": "done",
-    }
-    if not status_str:
-        return ""
-    return _map.get(status_str.strip(), "")
+    _hist_mod = _c2b_load_renderer("history")
+    if _hist_mod is not None:
+        return _hist_mod._status_class_for_phase(status_str)
+    return ""
 
 
+# moved to monitor_server.renderers.history [core-renderer-split:C2-4]
 def _section_phase_history(tasks, features) -> str:
-    """Phase-history section: most recent events as v3 <table> (cap 10).
-
-    v3: <div class="history" data-section="phases"> wraps a <table> with
-    columns: #, time, task-id, event, from→to, elapsed.
-    Empty → old-style empty section (no table).
-    """
-    collected: list = []
-    for item in list(tasks or []) + list(features or []):
-        tail = getattr(item, "phase_history_tail", None) or []
-        for entry in tail:
-            collected.append((getattr(item, "id", "?"), entry))
-
-    collected.sort(key=lambda pair: getattr(pair[1], "at", "") or "", reverse=True)
-    top = collected[:_PHASES_SECTION_LIMIT]
-
-    if not top:
-        return _empty_section("phases", "Recent Phase History", "no phase history yet")
-
-    rows = []
-    for idx, (item_id, entry) in enumerate(top, 1):
-        at = _esc(getattr(entry, "at", ""))
-        event = _esc(getattr(entry, "event", ""))
-        from_s_raw = getattr(entry, "from_status", "") or ""
-        to_s_raw = getattr(entry, "to_status", "") or ""
-        from_s = _esc(from_s_raw)
-        to_s = _esc(to_s_raw)
-        elapsed = getattr(entry, "elapsed_seconds", None)
-        elapsed_str = _esc(str(elapsed) + "s" if elapsed is not None else "-")
-        to_cls = _status_class_for_phase(to_s_raw)
-        to_cell = f'<span class="to {to_cls}">{to_s}</span>' if to_cls else f'<span class="to">{to_s}</span>'
-
-        rows.append(
-            f'<tr>'
-            f'<td class="idx">{idx}</td>'
-            f'<td class="t">{at}</td>'
-            f'<td class="tid">{_esc(item_id)}</td>'
-            f'<td class="ev">{event}</td>'
-            f'<td class="arr">{from_s} → {to_cell}</td>'
-            f'<td class="el">{elapsed_str}</td>'
-            f'</tr>'
-        )
-
-    table_html = (
-        '<table>\n'
-        '  <thead><tr>'
-        '<th class="idx">#</th>'
-        '<th class="t">time</th>'
-        '<th class="tid">id</th>'
-        '<th class="ev">event</th>'
-        '<th class="arr">transition</th>'
-        '<th class="el">elapsed</th>'
-        '</tr></thead>\n'
-        '  <tbody>\n'
-        + "\n".join(f'  {r}' for r in rows)
-        + '\n  </tbody>\n'
-        '</table>'
-    )
-
-    return (
-        '<div class="history" data-section="phases" id="phases">\n'
-        '  <h2>Recent Phase History</h2>\n'
-        + table_html
-        + '\n</div>'
-    )
+    _hist_mod = _c2b_load_renderer("history")
+    if _hist_mod is not None:
+        return _hist_mod._section_phase_history(tasks, features)
+    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -5834,6 +5769,16 @@ except (ImportError, AttributeError):
         _c2b_feat = _c2b_load_renderer("features")
         if _c2b_feat is not None:
             _section_features = _c2b_feat._section_features  # type: ignore[assignment]
+    except (ImportError, AttributeError):
+        pass
+try:
+    from .renderers.history import _section_phase_history, _status_class_for_phase  # noqa: F401,E402
+except (ImportError, AttributeError):
+    try:
+        _c2b_hist = _c2b_load_renderer("history")
+        if _c2b_hist is not None:
+            _section_phase_history = _c2b_hist._section_phase_history  # type: ignore[assignment]
+            _status_class_for_phase = _c2b_hist._status_class_for_phase  # type: ignore[assignment]
     except (ImportError, AttributeError):
         pass
 # === /renderer facade ===
