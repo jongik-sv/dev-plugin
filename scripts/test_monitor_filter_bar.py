@@ -493,10 +493,17 @@ class TestFilterBarEdgeCases(unittest.TestCase):
         self.assertIn("filter-bar", html_out)
 
     def test_trow_data_task_id_present_for_filter_scope(self):
-        """applyFilters()의 범위 제한을 위해 .trow에 data-task-id가 있어야 한다."""
+        """applyFilters()의 범위 제한을 위해 .trow 자체에 data-task-id가 있어야 한다.
+
+        JS 셀렉터 `.trow[data-task-id]` 가 task row를 찾으려면 outer div에 속성이 있어야
+        한다. 내부 expand-btn에만 있으면 필터가 조용히 0개 요소를 순회하며 무반응이 된다.
+        """
         task = _make_task(tsk_id="TSK-01-01")
         row_html = _render_task_row_v2(task, set(), set(), lang="ko")
-        self.assertIn('data-task-id="TSK-01-01"', row_html)
+        # outer .trow opening tag만 추출해서 해당 속성이 붙었는지 확인
+        m = re.search(r'<div class="trow"[^>]*>', row_html)
+        self.assertIsNotNone(m, "outer .trow div not found")
+        self.assertIn('data-task-id="TSK-01-01"', m.group(0))
 
 
 # ---------------------------------------------------------------------------

@@ -1,9 +1,9 @@
 {
-  "status": "[im]",
+  "status": "[xx]",
   "started_at": "2026-04-24T02:02:19Z",
   "last": {
-    "event": "bypass",
-    "at": "2026-04-24T02:32:54Z"
+    "event": "refactor.ok",
+    "at": "2026-04-24T10:26:59Z"
   },
   "phase_history": [
     {
@@ -47,9 +47,23 @@
       "to": "[im]",
       "at": "2026-04-24T02:32:54Z",
       "elapsed_seconds": 69
+    },
+    {
+      "event": "test.ok",
+      "from": "[im]",
+      "to": "[ts]",
+      "at": "2026-04-24T10:26:56Z",
+      "elapsed_seconds": 28442
+    },
+    {
+      "event": "refactor.ok",
+      "from": "[ts]",
+      "to": "[xx]",
+      "at": "2026-04-24T10:26:59Z",
+      "elapsed_seconds": 3
     }
   ],
-  "updated": "2026-04-24T02:32:54Z",
-  "bypassed": true,
-  "bypassed_reason": "v4 baseline 이미 git tag로 확보되어 명시적 재확인 생략"
+  "updated": "2026-04-24T10:26:59Z",
+  "completed_at": "2026-04-24T10:26:59Z",
+  "elapsed_seconds": 30280
 }

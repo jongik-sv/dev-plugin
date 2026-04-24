@@ -45,24 +45,7 @@ Bash 도구로 실행:
 
 `{CLAUDE_PLUGIN_ROOT}`는 플러그인 루트 경로로 치환한다.
 
-### 플로우 상세 (ACTION=start)
-
-launcher가 내부적으로 다음 순서로 실행한다:
-
-1. **프로젝트 PID 파일 존재 + 프로세스 생존** → URL 재출력 후 종료 (중복 기동 방지, idempotent). PID 파일 키는 `sha256(realpath(project_root))[:12]` 해시 기반
-2. **포트 결정**: `--port N` 명시 시 해당 포트 사용; 미지정 시 7321~7399 범위에서 자동 탐색
-3. **socket bind 테스트** → 포트 점유 시 안내 메시지 + `--port` 옵션 힌트 출력
-4. **`subprocess.Popen` detach 기동**
-   - macOS/Linux: `start_new_session=True`
-   - Windows psmux: `DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP`
-5. **JSON PID 파일 기록**: `${TMPDIR}/dev-monitor-{project_hash}.pid` → `{"pid": N, "port": N}`
-6. **URL 출력**: `http://localhost:{port}`
-
-로그는 `${TMPDIR}/dev-monitor-{project_hash}.log`에 append된다.
-
-#### 프로젝트별 독립 실행
-
-같은 포트 범위(7321~7399)를 여러 프로젝트가 공유한다. 각 프로젝트는 고유한 해시 기반 PID 파일(`dev-monitor-{hash}.pid`)을 가지므로 서로 다른 프로젝트의 서버가 동시에 실행될 수 있다. `--stop` / `--status`를 포트 없이 실행하면 현재 프로젝트(`$PWD`)의 서버만 조작한다.
+> **포트/문서/액션 인자는 §0 인자 파싱 결과를 그대로 사용한다.**
 
 ## 2. 완료 보고
 
@@ -76,11 +59,4 @@ launcher 출력을 그대로 사용자에게 전달한다.
 
 ### 서버 응답 확인 (선택)
 
-기동 성공 후 서버가 실제로 응답하는지 확인할 때는 `http-probe.py`를 사용한다.
-> curl은 일부 CLI 프록시가 출력을 요약해 파이프 파서가 오작동할 수 있어 http-probe.py 사용 권장.
-
-```bash
-"$(python3 -c 'import sys; print(sys.executable)')" "${CLAUDE_PLUGIN_ROOT}/scripts/http-probe.py" \
-  http://localhost:{PORT}/ --status
-# 200 이면 정상 기동
-```
+기동 성공 후 `scripts/http-probe.py`로 응답을 확인한다.

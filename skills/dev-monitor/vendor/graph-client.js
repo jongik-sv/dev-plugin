@@ -4,7 +4,10 @@
   "use strict";
 
   // -- 상수 --
-  const POLL_MS = 2000;
+  // monitor-perf (2026-04-24): 2000 → 5000 — 대시보드 메인 폴링(5s)과 주기 일치.
+  // 서버의 /api/graph는 generated_at signature가 바뀔 때만 applyDelta하므로
+  // 2s 폴링의 체감 이득이 거의 없고 네트워크/서버 부하만 발생했음.
+  const POLL_MS = 5000;
   const HOVER_DWELL_MS = 2000;
   const COLOR = {
     done:          "#22c55e",
@@ -29,6 +32,12 @@
   let cy = null;
   let SP = "all";
   let lastSignature = "";
+  // monitor-perf (2026-04-24): ETag 기반 변화 감지. 서버의 generated_at은 매 요청
+  // 변하므로 신뢰 불가 — 서버가 주는 ETag로 의미 있는 변경만 감지한다.
+  let lastEtag = "";
+  // monitor-perf (2026-04-24): dep-graph가 뷰포트에 있는지. IntersectionObserver로 갱신.
+  // 기본 true(관측자 미설치 시에도 안전측). tick()에서 false면 요청 자체 스킵.
+  let _inViewport = true;
   let popoverNodeId = null;
   let _popoverEl = null;
   let _initialFitDone = false;
@@ -216,6 +225,11 @@
   function applyFilter(predicate) {
     _filterPredicate = predicate;
 
+    // monitor-perf (2026-04-24): cy가 아직 init 전(window.load 대기 중)이거나,
+    // dep-graph-canvas가 없는 페이지면 no-op. predicate는 _filterPredicate에 저장되어
+    // init 이후 layoutstop 훅에서 재적용됨(line 187). 기존엔 TypeError로 initFilterBar 전체가 중단됐음.
+    if (!cy) return;
+
     if (!predicate) {
       // null → 전체 노드/엣지 opacity 1.0 복원
       cy.nodes().forEach(node => node.style("opacity", FILTER_OPACITY_ON));
@@ -315,13 +329,24 @@
   }
 
   // -- 폴링 --
+  // monitor-perf (2026-04-24):
+  //   (1) hidden 탭에서는 요청 자체를 스킵
+  //   (2) If-None-Match로 서버 ETag 전송 → 304면 JSON 파싱·applyDelta 모두 스킵
+  //       (기존 generated_at 기반 비교는 서버 now() 때문에 매번 달라 작동 불가)
   async function tick() {
+    if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+    // monitor-perf: 뷰포트 밖이면 요청 자체 스킵. 돌아오면 IntersectionObserver가 즉시 1회 tick.
+    if (!_inViewport) return;
     try {
-      const res = await fetch(`/api/graph?subproject=${encodeURIComponent(SP)}`, { cache: "no-store" });
+      const headers = lastEtag ? { "If-None-Match": lastEtag } : {};
+      const res = await fetch(`/api/graph?subproject=${encodeURIComponent(SP)}`, { cache: "no-store", headers });
+      // 304 Not Modified — 서버가 "의미 있는 변경 없음"이라 판정 → 재렌더 0
+      if (res.status === 304) return;
       if (!res.ok) return;
+      const etag = res.headers.get("ETag");
+      if (etag) lastEtag = etag;
       const data = await res.json();
       const sig = data.generated_at || "";
-      if (sig && sig === lastSignature) return;
       lastSignature = sig;
       applyDelta(data);
       updateSummary(data.stats);
@@ -447,6 +472,23 @@
 
     tick();
     setInterval(tick, POLL_MS);
+    // monitor-perf (2026-04-24): hidden→visible 전환 시 stale 방지를 위해 즉시 1회 tick.
+    // setInterval은 Chrome에서 hidden 탭에서도 1초 clamp로 계속 돌지만 tick 내부에서 no-op 처리됨.
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState !== "hidden") tick();
+    });
+    // monitor-perf (2026-04-24): dep-graph 섹션이 뷰포트 밖이면 폴링도 완전 정지.
+    // content-visibility:auto가 렌더/페인트를 스킵해도 네트워크·JSON 파싱은 계속되므로 별도 가드.
+    // IntersectionObserver API가 없는 환경에서는 기존 동작 유지(silent no-op).
+    if (typeof IntersectionObserver !== "undefined") {
+      try {
+        const io = new IntersectionObserver((entries) => {
+          entries.forEach(e => { _inViewport = !!e.isIntersecting; });
+          if (_inViewport) tick();
+        }, { rootMargin: "200px" });
+        io.observe(container);
+      } catch (_) { /* 브라우저 버그 대비 — 무시 */ }
+    }
   }
 
   // -- DOM 준비 후 기동 --

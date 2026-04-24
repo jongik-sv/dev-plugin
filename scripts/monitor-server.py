@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util as _ilu
+import json
 import os
 import signal
 import sys
@@ -107,10 +108,7 @@ def __getattr__(name: str):
         import sys as _sys
         _self = _sys.modules.get(__name__)
         if _self is not None:
-            try:
-                setattr(_self, name, val)
-            except (AttributeError, TypeError):
-                pass
+            setattr(_self, name, val)
         return val
     raise AttributeError(f"module 'monitor_server' has no attribute {name!r}")
 
@@ -186,10 +184,7 @@ def pid_file_path(port: int) -> Path:
 
 
 def cleanup_pid_file(pid_path: Path) -> None:
-    try:
-        pid_path.unlink(missing_ok=True)
-    except OSError:
-        pass
+    pid_path.unlink(missing_ok=True)
 
 
 def _setup_signal_handler(server, pid_path: Path) -> None:
@@ -202,8 +197,8 @@ def _setup_signal_handler(server, pid_path: Path) -> None:
 
     try:
         signal.signal(signal.SIGTERM, _handler)
-    except (ValueError, OSError):
-        pass
+    except (ValueError, OSError) as exc:
+        print(f"[dev-monitor] SIGTERM 핸들러 등록 실패 (무시됨): {exc}", file=sys.stderr)
 
 
 def parse_args(argv=None):
@@ -222,7 +217,7 @@ def main(argv: Optional[List[str]] = None) -> None:
     port = args.port
     pid_path = pid_file_path(port)
     with open(str(pid_path), "w", encoding="utf-8", newline="\n") as _f:
-        _f.write(str(os.getpid()))
+        json.dump({"pid": os.getpid(), "port": port, "project_root": args.project_root}, _f)
 
     from monitor_server.handlers import Handler, _resolve_plugin_root  # type: ignore[import]
 

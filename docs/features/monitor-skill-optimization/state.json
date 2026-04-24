@@ -1,0 +1,42 @@
+{
+  "name": "monitor-skill-optimization",
+  "status": "[xx]",
+  "last": {
+    "event": "refactor.ok",
+    "at": "2026-04-24T11:01:18Z"
+  },
+  "phase_history": [
+    {
+      "event": "design.ok",
+      "from": "[ ]",
+      "to": "[dd]",
+      "at": "2026-04-24T10:47:57Z",
+      "elapsed_seconds": 0
+    },
+    {
+      "event": "build.ok",
+      "from": "[dd]",
+      "to": "[im]",
+      "at": "2026-04-24T10:55:18Z",
+      "elapsed_seconds": 441
+    },
+    {
+      "event": "test.ok",
+      "from": "[im]",
+      "to": "[ts]",
+      "at": "2026-04-24T10:58:03Z",
+      "elapsed_seconds": 165
+    },
+    {
+      "event": "refactor.ok",
+      "from": "[ts]",
+      "to": "[xx]",
+      "at": "2026-04-24T11:01:18Z",
+      "elapsed_seconds": 195
+    }
+  ],
+  "updated": "2026-04-24T11:01:18Z",
+  "started_at": "2026-04-24T10:47:57Z",
+  "completed_at": "2026-04-24T11:01:18Z",
+  "elapsed_seconds": 801
+}

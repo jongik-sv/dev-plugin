@@ -128,6 +128,10 @@
   /* monitor-perf: visibility 변경 핸들러 */
   function onVisibilityChange(){
     state.visible=(document.visibilityState!=='hidden');
+    /* monitor-perf (2026-04-24): 무한 CSS 애니메이션을 visibility 전환 시 일괄 on/off.
+       hidden 탭은 브라우저가 rAF만 throttle할 뿐 CSS 애니메이션 compositor 작업은 계속 —
+       data-anim="off"로 명시 정지해 GPU/compositor 완전 idle. */
+    try{document.documentElement.setAttribute('data-anim',state.visible?'on':'off');}catch(_){}
     if(!state.visible){
       /* 탭 hidden → 폴링 즉시 정지 */
       stopMainPoll();
@@ -138,6 +142,8 @@
     }
   }
   document.addEventListener('visibilitychange',onVisibilityChange);
+  /* 초기 로드 직후에도 visibility 상태를 즉시 반영 */
+  try{document.documentElement.setAttribute('data-anim',(document.visibilityState!=='hidden')?'on':'off');}catch(_){}
   function patchSection(name,newHtml){
     var current=document.querySelector('[data-section="'+name+'"]');
     if(!current)return;
@@ -334,7 +340,7 @@
   }
   function applyFilters(){
     var f=currentFilters();
-    /* .trow[data-task-id] — Task rows only. Live-activity rows have no data-task-id. */
+    /* .trow[data-task-id] — task rows carry data-task-id on the outer div. */
     document.querySelectorAll('.trow[data-task-id]').forEach(function(trow){
       trow.style.display=matchesRow(trow,f)?'':'none';
     });
@@ -546,9 +552,10 @@ function escapeHtml(s){
   if(s==null)return '';
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
-function renderWbsSection(md){
+function renderWbsSection(md,source){
   if(!md)return '';
-  var lines=md.split('\n'),html='<h4>&sect; WBS</h4>',inCode=false,lang='';
+  var heading=(source==='feat')?'&sect; 사양':'&sect; WBS';
+  var lines=md.split('\n'),html='<h4>'+heading+'</h4>',inCode=false,lang='';
   for(var i=0;i<lines.length;i++){
     var line=lines[i];
     if(!inCode&&line.match(/^```/)){inCode=true;lang=line.slice(3).trim();html+='<pre><code'+(lang?' class="lang-'+escapeHtml(lang)+'"':'')+'>';continue;}
@@ -566,7 +573,64 @@ function renderWbsSection(md){
   if(inCode)html+='</code></pre>\n';
   return html;
 }
-function renderStateJson(state){return '<h4>&sect; state.json</h4><pre>'+escapeHtml(JSON.stringify(state,null,2))+'</pre>';}
+function _fmtElapsedSec(sec){
+  if(sec==null||sec==='')return '—';
+  var n=Number(sec);
+  if(!isFinite(n))return String(sec);
+  if(n<60)return n+'s';
+  var m=Math.floor(n/60),s=n%60;
+  return m+'m '+s+'s';
+}
+function _fmtStateVal(v){
+  if(v==null||v==='')return '—';
+  if(typeof v==='boolean')return v?'true':'false';
+  return String(v);
+}
+function renderStateJson(state){
+  var html='<h4>&sect; state.json</h4>';
+  if(!state||typeof state!=='object'||Object.keys(state).length===0){
+    return html+'<p class="state-empty">데이터 없음</p>';
+  }
+  var rows=[];
+  var last=(state.last&&typeof state.last==='object')?state.last:null;
+  if('name' in state)rows.push(['name',_fmtStateVal(state.name)]);
+  rows.push(['status',_fmtStateVal(state.status)]);
+  if('started_at' in state)rows.push(['started_at',_fmtStateVal(state.started_at)]);
+  if(last){
+    rows.push(['last.event',_fmtStateVal(last.event)]);
+    rows.push(['last.at',_fmtStateVal(last.at)]);
+  }
+  if('updated' in state)rows.push(['updated',_fmtStateVal(state.updated)]);
+  if('completed_at' in state)rows.push(['completed_at',_fmtStateVal(state.completed_at)]);
+  if('elapsed_seconds' in state)rows.push(['elapsed',_fmtElapsedSec(state.elapsed_seconds)]);
+  if(state.bypassed)rows.push(['bypassed','true']);
+  if(state.bypassed_reason)rows.push(['bypassed_reason',_fmtStateVal(state.bypassed_reason)]);
+  html+='<table class="state-table"><tbody>';
+  for(var i=0;i<rows.length;i++){
+    html+='<tr><th>'+escapeHtml(rows[i][0])+'</th><td>'+escapeHtml(rows[i][1])+'</td></tr>';
+  }
+  html+='</tbody></table>';
+  var history=(state.phase_history&&state.phase_history.length)?state.phase_history:null;
+  if(history){
+    html+='<h5 class="state-subhead">phase_history ('+history.length+')</h5>';
+    html+='<table class="state-history-table"><thead><tr>'
+      +'<th>#</th><th>event</th><th>from</th><th>to</th><th>at</th><th>elapsed</th>'
+      +'</tr></thead><tbody>';
+    for(var j=0;j<history.length;j++){
+      var h=history[j]||{};
+      html+='<tr>'
+        +'<td class="state-idx">'+(j+1)+'</td>'
+        +'<td>'+escapeHtml(_fmtStateVal(h.event))+'</td>'
+        +'<td>'+escapeHtml(_fmtStateVal(h.from))+'</td>'
+        +'<td>'+escapeHtml(_fmtStateVal(h.to))+'</td>'
+        +'<td>'+escapeHtml(_fmtStateVal(h.at))+'</td>'
+        +'<td>'+escapeHtml(_fmtElapsedSec(h.elapsed_seconds))+'</td>'
+        +'</tr>';
+    }
+    html+='</tbody></table>';
+  }
+  return html;
+}
 function renderArtifacts(arts){
   var html='<h4>&sect; 아티팩트</h4>';
   if(!arts||!arts.length)return html+'<p>-</p>';
@@ -600,7 +664,7 @@ function openTaskPanel(taskId){
     .then(function(r){return r.json();}).then(function(data){
       var t=document.getElementById('task-panel-title');if(t)t.textContent=data.title||taskId;
       var b=document.getElementById('task-panel-body');
-      if(b)b.innerHTML=renderWbsSection(data.wbs_section_md||'')+renderStateJson(data.state||{})+renderArtifacts(data.artifacts||[])+renderLogs(data.logs||[]);
+      if(b)b.innerHTML=renderWbsSection(data.wbs_section_md||'',data.source||'')+renderStateJson(data.state||{})+renderArtifacts(data.artifacts||[])+renderLogs(data.logs||[]);
       var p=document.getElementById('task-panel'),o=document.getElementById('task-panel-overlay');
       if(p){p.classList.add('open');p.dataset.panelMode='task';}if(o)o.removeAttribute('hidden');
     }).catch(function(e){console.error('task-panel error',e);});

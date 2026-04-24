@@ -26,8 +26,13 @@ import subprocess
 import sys
 import tempfile
 
-# 플랫폼 공통 TEMP_DIR
+# 플랫폼 공통 상수 (_platform.py에서 IS_WINDOWS 가져오기)
 _TEMP_DIR = pathlib.Path(tempfile.gettempdir())
+
+try:
+    from _platform import IS_WINDOWS  # type: ignore[import]
+except ImportError:
+    IS_WINDOWS = sys.platform == "win32"
 
 
 def project_key(project_root: str) -> str:
@@ -89,16 +94,6 @@ def read_pid_record(pid_path: pathlib.Path):
         return None
 
 
-def read_pid(pid_path: pathlib.Path):
-    """PID 파일에서 정수 PID를 읽어 반환. 없거나 파싱 불가면 None.
-
-    레거시 호환용 — read_pid_record()를 내부 사용.
-    """
-    record = read_pid_record(pid_path)
-    if record is None:
-        return None
-    return record["pid"]
-
 
 def test_port(port: int) -> bool:
     """127.0.0.1:{port}에 bind 테스트. 사용 가능하면 True, 점유 중이면 False.
@@ -158,7 +153,7 @@ def start_server(port: int, docs: str, project_root: str, no_tmux: bool = False)
         cmd.append("--no-tmux")
 
     with open(str(log_path), "a", encoding="utf-8") as log_fh:
-        if sys.platform == "win32":
+        if IS_WINDOWS:
             DETACHED_PROCESS = getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
             CREATE_NEW_PROCESS_GROUP = getattr(
                 subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200
@@ -192,7 +187,7 @@ def _send_sigterm(pid: int, port_label: str) -> None:
     is_alive() 확인은 호출자 책임. OSError는 메시지 출력 후 반환.
     """
     try:
-        if sys.platform == "win32":
+        if IS_WINDOWS:
             subprocess.run(
                 ["taskkill", "/PID", str(pid), "/F"],
                 check=False, timeout=3, shell=False,
@@ -205,47 +200,58 @@ def _send_sigterm(pid: int, port_label: str) -> None:
 
 
 def stop_server_by_project(project_root: str) -> None:
-    """프로젝트 기준으로 실행 중인 서버를 SIGTERM으로 종료하고 PID 파일을 삭제."""
-    pid_path = pid_file_path(project_root)
-    record = read_pid_record(pid_path)
-    if record is None:
-        print(f"  dev-monitor: PID 파일 없음 — 실행 중이지 않습니다.")
-        return
-
-    pid = record["pid"]
-    port = record.get("port")
-    port_label = f"port {port}" if port else "unknown port"
-
-    if is_alive(pid):
-        _send_sigterm(pid, port_label)
-    else:
-        print(f"  dev-monitor ({port_label}): PID {pid} 프로세스가 이미 종료되어 있습니다.")
-
-    if pid_path.exists():
-        pid_path.unlink()
+    """프로젝트 기준으로 실행 중인 서버를 종료. stop_server(project=...) 의 별칭."""
+    stop_server(project=project_root)
 
 
-def stop_server(port: int) -> None:
-    """레거시: 포트 기준으로 실행 중인 서버를 SIGTERM으로 종료.
+def stop_server(*, project: "str | None" = None, port: "int | None" = None) -> None:
+    """실행 중인 dev-monitor 서버를 SIGTERM으로 종료하고 PID 파일을 삭제.
 
-    --stop --port N 명시 시 사용. 레거시 dev-monitor-{port}.pid 파일을 탐색한다.
-    포트 미지정 시에는 stop_server_by_project()가 호출된다.
+    Args:
+        project: 프로젝트 루트 경로 (프로젝트 기반 PID 파일 탐색)
+        port: 포트 번호 (레거시 dev-monitor-{port}.pid 탐색)
+        두 인자 모두 None이면 ValueError 발생.
     """
-    legacy_pid_path = _TEMP_DIR / f"dev-monitor-{port}.pid"
-    if not legacy_pid_path.exists():
-        print(f"  dev-monitor (port {port}): PID 파일 없음 — 실행 중이지 않습니다.")
-        return
+    if project is None and port is None:
+        raise ValueError("stop_server: project 또는 port 중 하나를 지정해야 합니다.")
 
-    pid = read_pid(legacy_pid_path)
-    if pid is None:
-        print(f"  dev-monitor (port {port}): PID 파일 파싱 실패.")
-        return
+    if project is not None:
+        # 프로젝트 기반 PID 파일 경로
+        pid_path = pid_file_path(project)
+        record = read_pid_record(pid_path)
+        if record is None:
+            print(f"  dev-monitor: PID 파일 없음 — 실행 중이지 않습니다.")
+            return
 
-    if is_alive(pid):
-        _send_sigterm(pid, f"port {port}")
+        pid = record["pid"]
+        _port = record.get("port")
+        port_label = f"port {_port}" if _port else "unknown port"
+
+        if is_alive(pid):
+            _send_sigterm(pid, port_label)
+        else:
+            print(f"  dev-monitor ({port_label}): PID {pid} 프로세스가 이미 종료되어 있습니다.")
+
+        if pid_path.exists():
+            pid_path.unlink()
     else:
-        print(f"  dev-monitor (port {port}): PID {pid} 프로세스가 이미 종료되어 있습니다.")
-    legacy_pid_path.unlink(missing_ok=True)
+        # 레거시 포트 기반 PID 파일 경로 (하위호환)
+        legacy_pid_path = _TEMP_DIR / f"dev-monitor-{port}.pid"
+        if not legacy_pid_path.exists():
+            print(f"  dev-monitor (port {port}): PID 파일 없음 — 실행 중이지 않습니다.")
+            return
+
+        record = read_pid_record(legacy_pid_path)
+        pid = record["pid"] if record else None
+        if pid is None:
+            print(f"  dev-monitor (port {port}): PID 파일 파싱 실패.")
+            return
+
+        if is_alive(pid):
+            _send_sigterm(pid, f"port {port}")
+        else:
+            print(f"  dev-monitor (port {port}): PID {pid} 프로세스가 이미 종료되어 있습니다.")
+        legacy_pid_path.unlink(missing_ok=True)
 
 
 def status_by_project(project_root: str) -> None:
@@ -306,10 +312,10 @@ def main(argv=None):
     if args.stop:
         if args.port is not None:
             # 포트 명시 → 레거시 stop_server (포트 기준)
-            stop_server(args.port)
+            stop_server(port=args.port)
         else:
             # 포트 미지정 → 프로젝트 기준
-            stop_server_by_project(project_root)
+            stop_server(project=project_root)
         return
 
     # --status 서브커맨드
@@ -318,7 +324,8 @@ def main(argv=None):
             # 포트 명시 → 레거시 방식 (포트 기준 PID 파일 우선 탐색 후 프로젝트 PID 파일)
             legacy_pid_path = _TEMP_DIR / f"dev-monitor-{args.port}.pid"
             if legacy_pid_path.exists():
-                pid = read_pid(legacy_pid_path)
+                _rec = read_pid_record(legacy_pid_path)
+                pid = _rec["pid"] if _rec else None
                 if pid and is_alive(pid):
                     print(f"  dev-monitor: running at http://localhost:{args.port} (PID {pid})")
                 else:

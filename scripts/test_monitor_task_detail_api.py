@@ -352,6 +352,111 @@ class TestBuildTaskDetailPayload(unittest.TestCase):
             )
         self.assertIn("error", payload)
 
+    # -----------------------------------------------------------------
+    # Feature mode — kebab-case ID routes to docs/features/{name}/
+    # -----------------------------------------------------------------
+
+    def _make_feature(self, docs_dir: Path, name: str,
+                      state: Optional[dict] = None,
+                      spec: Optional[str] = None,
+                      extras: Optional[dict] = None) -> Path:
+        feat_dir = docs_dir / "features" / name
+        feat_dir.mkdir(parents=True)
+        if state is not None:
+            (feat_dir / "state.json").write_text(
+                json.dumps(state), encoding="utf-8"
+            )
+        if spec is not None:
+            (feat_dir / "spec.md").write_text(spec, encoding="utf-8")
+        for fname, body in (extras or {}).items():
+            (feat_dir / fname).write_text(body, encoding="utf-8")
+        return feat_dir
+
+    def test_feature_returns_200_with_source_feat(self):
+        """kebab-case feature ID + docs/features/{name}/ 존재 → 200, source='feat'."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            docs_dir = Path(tmpdir)
+            self._make_feature(
+                docs_dir, "dep-graph-arrowheads",
+                state={"name": "dep-graph-arrowheads", "status": "[xx]"},
+                spec="# Feature: dep-graph-arrowheads\n\nSome spec body.",
+            )
+            status, payload = self._call(
+                "dep-graph-arrowheads", "all", docs_dir, ""
+            )
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["source"], "feat")
+        self.assertEqual(payload["task_id"], "dep-graph-arrowheads")
+
+    def test_feature_state_loaded_from_state_json(self):
+        """Feature의 state.json 내용이 그대로 응답에 실림."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            docs_dir = Path(tmpdir)
+            self._make_feature(
+                docs_dir, "wp-progress-spinner",
+                state={"name": "wp-progress-spinner", "status": "[im]"},
+            )
+            _, payload = self._call(
+                "wp-progress-spinner", "all", docs_dir, ""
+            )
+        self.assertEqual(payload["state"]["status"], "[im]")
+
+    def test_feature_title_from_state_name(self):
+        """Feature title은 state.json의 name 필드 사용."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            docs_dir = Path(tmpdir)
+            self._make_feature(
+                docs_dir, "monitor-perf",
+                state={"name": "monitor-perf", "status": "[xx]"},
+            )
+            _, payload = self._call("monitor-perf", "all", docs_dir, "")
+        self.assertEqual(payload["title"], "monitor-perf")
+
+    def test_feature_artifacts_includes_spec(self):
+        """Feature artifacts는 spec.md 포함 4개 항목."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            docs_dir = Path(tmpdir)
+            self._make_feature(
+                docs_dir, "monitor-perf",
+                state={"name": "monitor-perf", "status": "[xx]"},
+                spec="# spec",
+            )
+            _, payload = self._call("monitor-perf", "all", docs_dir, "")
+        names = [a["name"] for a in payload["artifacts"]]
+        self.assertEqual(
+            names, ["spec.md", "design.md", "test-report.md", "refactor.md"]
+        )
+
+    def test_feature_wbs_section_md_is_spec_content(self):
+        """Feature의 wbs_section_md는 spec.md 원문."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            docs_dir = Path(tmpdir)
+            self._make_feature(
+                docs_dir, "log-mistake",
+                state={"name": "log-mistake", "status": "[dd]"},
+                spec="# Feature: log-mistake\n\nBody.",
+            )
+            _, payload = self._call("log-mistake", "all", docs_dir, "")
+        self.assertIn("Feature: log-mistake", payload["wbs_section_md"])
+
+    def test_unknown_feature_returns_404(self):
+        """kebab-case는 맞지만 디렉토리 미존재 → 404."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            docs_dir = Path(tmpdir)
+            status, _ = self._call("no-such-feature", "all", docs_dir, "")
+        self.assertEqual(status, 404)
+
+    def test_feature_wp_id_empty(self):
+        """Feature는 WP 소속이 아니므로 wp_id 빈 문자열."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            docs_dir = Path(tmpdir)
+            self._make_feature(
+                docs_dir, "monitor-perf",
+                state={"name": "monitor-perf", "status": "[xx]"},
+            )
+            _, payload = self._call("monitor-perf", "all", docs_dir, "")
+        self.assertEqual(payload["wp_id"], "")
+
 
 # ---------------------------------------------------------------------------
 # 4. _is_api_task_detail_path tests
@@ -679,11 +784,11 @@ class TestHandleApiTaskDetail(unittest.TestCase):
         self.assertIn("application/json", ct)
 
     def test_400_for_invalid_task_id_format(self):
-        """TSK-ID 형식 오류 → 400."""
+        """TSK-ID 형식 오류 → 400. ``invalid_id``(underscore)는 TSK/Feature 둘 다 매칭되지 않음."""
         with tempfile.TemporaryDirectory() as tmpdir:
             docs_dir = self._make_docs(tmpdir, _WBS_WITH_TSK_02_04)
             handler = _FakeHandler(
-                path="/api/task-detail?task=invalid-id&subproject=monitor-v4",
+                path="/api/task-detail?task=invalid_id&subproject=monitor-v4",
                 docs_dir=os.path.dirname(docs_dir),
             )
             monitor_server._handle_api_task_detail(handler)

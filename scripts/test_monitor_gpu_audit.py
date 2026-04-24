@@ -28,6 +28,7 @@ _GPU_PATTERNS = [
     r"\bwill-change\b",
     r"\btranslateZ\b",
     r"\btranslate3d\b",
+    r"\bbackdrop-filter\b",
 ]
 
 
@@ -69,6 +70,41 @@ class TestGpuAuditStyleCss(unittest.TestCase):
         self.assertEqual(
             len(matches), 0,
             f"style.css에 translate3d {len(matches)}건 발견"
+        )
+
+    def test_no_backdrop_filter(self):
+        """backdrop-filter는 will-change보다 비싼 합성 작업 — Chrome에서 프레임당
+        뒷면 픽셀 샘플링+가우시안 블러+합성을 수행해 단독으로 GPU 20~40% 점유.
+        monitor-perf 원인 분석(2026-04-24)에서 .cmdbar·.drawer-backdrop의 blur()가
+        브라우저 탭 열림만으로 GPU 부하를 유발한 사실 확인 — 재도입 금지."""
+        text = _STYLE_CSS.read_text(encoding="utf-8")
+        matches = re.findall(r"\bbackdrop-filter\b", text, re.IGNORECASE)
+        self.assertEqual(
+            len(matches), 0,
+            f"style.css에 backdrop-filter {len(matches)}건 발견 — GPU 부하 회귀"
+        )
+
+    def test_no_mix_blend_mode(self):
+        """mix-blend-mode는 아래 레이어 전체를 버퍼로 렌더 후 픽셀 단위 블렌드 합성 —
+        특히 position:fixed inset:0 요소에 적용되면 매 프레임 전체 뷰포트 재합성.
+        monitor-perf 원인 분석(2026-04-24)에서 body::before의 overlay 블렌드가
+        브라우저 탭 열림만으로 GPU 30~50% 소모한 사실 확인 — 재도입 금지."""
+        text = _STYLE_CSS.read_text(encoding="utf-8")
+        matches = re.findall(r"\bmix-blend-mode\b", text, re.IGNORECASE)
+        self.assertEqual(
+            len(matches), 0,
+            f"style.css에 mix-blend-mode {len(matches)}건 발견 — GPU 부하 회귀"
+        )
+
+    def test_no_background_attachment_fixed(self):
+        """background-attachment:fixed는 스크롤/리페인트마다 fixed 배경 레이어를
+        뷰포트 전체 기준으로 재계산. 대형 gradient와 결합하면 GPU 10~20%p 추가 소모.
+        monitor-perf 원인 분석(2026-04-24)에서 확인. 재도입 금지."""
+        text = _STYLE_CSS.read_text(encoding="utf-8")
+        matches = re.findall(r"background-attachment\s*:\s*fixed", text, re.IGNORECASE)
+        self.assertEqual(
+            len(matches), 0,
+            f"style.css에 background-attachment:fixed {len(matches)}건 발견 — GPU 부하 회귀"
         )
 
 

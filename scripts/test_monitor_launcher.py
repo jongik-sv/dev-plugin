@@ -87,6 +87,8 @@ class TestIsAlive(unittest.TestCase):
 
 
 class TestReadPid(unittest.TestCase):
+    """read_pid_record를 통해 PID 파일을 읽는 동작 검증"""
+
     def setUp(self):
         self.tmp = tempfile.NamedTemporaryFile(
             suffix=".pid", delete=False, mode="w"
@@ -97,31 +99,35 @@ class TestReadPid(unittest.TestCase):
         if self.tmp_path.exists():
             self.tmp_path.unlink()
 
-    def test_reads_valid_pid(self):
+    def test_read_pid_wrapper_removed(self):
+        """read_pid 래퍼 없이 read_pid_record를 직접 사용"""
+        ml = _import_launcher()
+        self.tmp.close()
+        self.assertFalse(hasattr(ml, "read_pid"), "read_pid 래퍼가 삭제되지 않았습니다")
+
+    def test_inline_replacement_reads_valid_pid_via_record(self):
+        """정상 PID 파일에서 pid 값 반환"""
         ml = _import_launcher()
         self.tmp.write("12345\n")
         self.tmp.close()
-        result = ml.read_pid(self.tmp_path)
+        record = ml.read_pid_record(self.tmp_path)
+        result = record["pid"] if record else None
         self.assertEqual(result, 12345)
 
-    def test_returns_none_for_nonexistent_file(self):
+    def test_inline_replacement_returns_none_for_nonexistent_file(self):
         ml = _import_launcher()
         self.tmp.close()
         nonexistent = pathlib.Path(tempfile.gettempdir()) / "no_such_file_xyz.pid"
-        result = ml.read_pid(nonexistent)
+        record = ml.read_pid_record(nonexistent)
+        result = record["pid"] if record else None
         self.assertIsNone(result)
 
-    def test_returns_none_for_invalid_content(self):
+    def test_inline_replacement_returns_none_for_invalid_content(self):
         ml = _import_launcher()
         self.tmp.write("not_a_number\n")
         self.tmp.close()
-        result = ml.read_pid(self.tmp_path)
-        self.assertIsNone(result)
-
-    def test_returns_none_for_empty_file(self):
-        ml = _import_launcher()
-        self.tmp.close()
-        result = ml.read_pid(self.tmp_path)
+        record = ml.read_pid_record(self.tmp_path)
+        result = record["pid"] if record else None
         self.assertIsNone(result)
 
 
@@ -217,12 +223,13 @@ class TestStartServer(unittest.TestCase):
 class TestPlatformBranch(unittest.TestCase):
     """플랫폼 분기 코드가 존재하는지 확인"""
 
-    def test_win32_branch_exists(self):
+    def test_is_windows_used_for_branch(self):
+        """_platform.IS_WINDOWS 기반 분기를 사용해야 함 (sys.platform 인라인 대신)"""
         launcher_path = _SCRIPT_DIR / "monitor-launcher.py"
         if not launcher_path.exists():
             self.skipTest("monitor-launcher.py 미존재 (구현 전)")
         source = launcher_path.read_text()
-        self.assertIn('sys.platform == "win32"', source)
+        self.assertIn("IS_WINDOWS", source)
 
     def test_detached_process_flag_exists(self):
         launcher_path = _SCRIPT_DIR / "monitor-launcher.py"
@@ -291,10 +298,10 @@ class TestSkillMdContent(unittest.TestCase):
 
 
 class TestStopServer(unittest.TestCase):
-    """stop_server_by_project / stop_server: SIGTERM + PID 파일 삭제 테스트"""
+    """stop_server(project=...) / stop_server(port=...): SIGTERM + PID 파일 삭제 테스트"""
 
     def test_stop_by_project_removes_pid_file(self):
-        """stop_server_by_project: 프로젝트 PID 파일 삭제 확인"""
+        """stop_server(project=...): 프로젝트 PID 파일 삭제 확인"""
         import json as _json
         ml = _import_launcher()
         tmp_pid = pathlib.Path(tempfile.gettempdir()) / f"test-stop-{os.getpid()}.pid"
@@ -302,7 +309,7 @@ class TestStopServer(unittest.TestCase):
 
         with mock.patch("os.kill"), \
              mock.patch.object(ml, "pid_file_path", return_value=tmp_pid):
-            ml.stop_server_by_project("/tmp/my-proj")
+            ml.stop_server(project="/tmp/my-proj")
 
         self.assertFalse(tmp_pid.exists())
 
@@ -312,23 +319,42 @@ class TestStopServer(unittest.TestCase):
 
         with mock.patch.object(ml, "pid_file_path", return_value=nonexistent):
             try:
-                ml.stop_server_by_project("/tmp/no-proj")
+                ml.stop_server(project="/tmp/no-proj")
             except Exception as e:
-                self.fail(f"stop_server_by_project raised {e} unexpectedly")
+                self.fail(f"stop_server raised {e} unexpectedly")
 
     def test_stop_legacy_port_based_removes_pid_file(self):
-        """stop_server(port): 레거시 dev-monitor-{port}.pid 삭제 확인"""
+        """stop_server(port=N): 레거시 dev-monitor-{port}.pid 삭제 확인"""
         ml = _import_launcher()
         port = 7391
         legacy_pid = ml._TEMP_DIR / f"dev-monitor-{port}.pid"
         legacy_pid.write_text(str(os.getpid()), encoding="utf-8")
         try:
             with mock.patch("os.kill"):
-                ml.stop_server(port)
+                ml.stop_server(port=port)
             self.assertFalse(legacy_pid.exists())
         finally:
             if legacy_pid.exists():
                 legacy_pid.unlink()
+
+    def test_stop_both_none_raises_value_error(self):
+        """project와 port 모두 None이면 ValueError"""
+        ml = _import_launcher()
+        with self.assertRaises(ValueError):
+            ml.stop_server()
+
+    def test_stop_server_by_project_alias_works(self):
+        """stop_server_by_project 별칭이 여전히 동작함을 확인"""
+        import json as _json
+        ml = _import_launcher()
+        tmp_pid = pathlib.Path(tempfile.gettempdir()) / f"test-alias-{os.getpid()}.pid"
+        tmp_pid.write_text(_json.dumps({"pid": os.getpid(), "port": 7321}), encoding="utf-8")
+
+        with mock.patch("os.kill"), \
+             mock.patch.object(ml, "pid_file_path", return_value=tmp_pid):
+            ml.stop_server_by_project("/tmp/my-proj")
+
+        self.assertFalse(tmp_pid.exists())
 
 
 class TestParseArgs(unittest.TestCase):

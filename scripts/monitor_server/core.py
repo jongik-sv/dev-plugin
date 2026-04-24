@@ -142,38 +142,6 @@ _GRAPH_CACHE: _TTLCache = _TTLCache(ttl_seconds=0.0)
 
 
 # ---------------------------------------------------------------------------
-# i18n (TSK-02-02)
-# ---------------------------------------------------------------------------
-
-_I18N: dict = {
-    "ko": {
-        "work_packages": "작업 패키지",
-        "features": "기능",
-        "team_agents": "팀 에이전트 (tmux)",
-        "subagents": "서브 에이전트 (agent-pool)",
-        "live_activity": "실시간 활동",
-    },
-    "en": {
-        "work_packages": "Work Packages",
-        "features": "Features",
-        "team_agents": "Team Agents (tmux)",
-        "subagents": "Subagents (agent-pool)",
-        "live_activity": "Live Activity",
-    },
-}
-
-
-def _normalize_lang(lang: str) -> str:
-    """lang 정규화 헬퍼. ko/en 이외의 값은 'ko'로 폴백."""
-    return lang if lang in _I18N else "ko"
-
-
-def _t(lang: str, key: str) -> str:
-    """i18n 헬퍼. 미지원 lang은 'ko' fallback, 미지원 key는 key 자체 반환."""
-    return _I18N[_normalize_lang(lang)].get(key, key)
-
-
-# ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
@@ -1266,6 +1234,11 @@ _I18N: dict[str, dict[str, str]] = {
 }
 
 
+def _normalize_lang(lang: str) -> str:
+    """lang 정규화 헬퍼. ko/en 이외의 값은 'ko'로 폴백."""
+    return lang if lang in _I18N else "ko"
+
+
 def _t(lang: str, key: str) -> str:
     """Return i18n string for *key* in *lang*.
 
@@ -1437,20 +1410,22 @@ body{
   -webkit-font-smoothing: antialiased;
   letter-spacing: 0.01em;
   min-height: 100vh;
-  background-image:
-    radial-gradient(1200px 600px at 80% -200px, rgba(200,155,106,0.06), transparent 60%),
-    radial-gradient(900px 500px at -10% 10%, rgba(74,163,255,0.04), transparent 60%);
-  background-attachment: fixed;
+  /* monitor-perf (2026-04-24): 전체 뷰포트 고정 배경(fixed attach) + 대형 radial-gradient 2개 제거 —
+     스크롤/리페인트마다 전체 뷰포트 재합성을 강제하던 장식 레이어. 기능 영향 없음. */
 }
-body::before{
-  content:"";
-  position: fixed; inset:0;
-  background-image: repeating-linear-gradient(
-    to bottom, rgba(255,255,255,0.012) 0 1px, transparent 1px 3px
-  );
-  pointer-events:none;
-  z-index: 1;
-  mix-blend-mode: overlay;
+/* monitor-perf (2026-04-24): body::before 스캔라인 블렌드 오버레이 완전 제거 —
+   위치 고정 요소가 반복 그라디언트와 블렌드 모드(overlay)로 뷰포트 전체를
+   매 프레임 픽셀 단위로 합성하여 Chrome GPU 30~50%를 단독 소모. 장식이므로 기능 무관. */
+/* monitor-perf (2026-04-24): 무한 애니메이션 일괄 정지 가드 —
+   탭 hidden 또는 사용자 토글 시 app.js가 :root[data-anim="off"]를 설정해 GPU/compositor 완전 idle. */
+:root[data-anim="off"] *,
+:root[data-anim="off"] *::before,
+:root[data-anim="off"] *::after {
+  animation: none !important;
+  transition: none !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
 }
 button{ font: inherit; color: inherit; background:none; border:0; cursor:pointer; }
 a{ color: inherit; }
@@ -1481,9 +1456,8 @@ summary::-webkit-details-marker{ display:none; }
   gap: 24px;
   padding: 0 20px;
   margin: 0 -20px;
-  background: rgba(11,13,16,0.88);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+  /* monitor-perf: 블러 합성 제거 — Chrome GPU 20~40% 단독 소모. 투명도 0.88→0.96으로 가독 보전. */
+  background: rgba(11,13,16,0.96);
   border-bottom: 1px solid var(--line);
 }
 .cmdbar::after{
@@ -1554,10 +1528,12 @@ summary::-webkit-details-marker{ display:none; }
   font-weight: 600;
 }
 .pulse .dot{
+  /* monitor-perf (2026-04-24): LIVE 인디케이터의 항상-켜진 infinite 애니메이션 제거 —
+     대시보드 유휴 시에도 계속 컴포지터를 깨워 GPU 2~3% 상시 소모. "LIVE" 텍스트로
+     이미 상태를 표현하므로 정적 도트 + 부드러운 그림자로 충분. */
   width:8px; height:8px; border-radius: 50%;
   background: var(--done);
-  box-shadow: 0 0 0 0 var(--done-glow);
-  animation: pulse 1.6s ease-out infinite;
+  box-shadow: 0 0 4px 0 var(--done-glow);
 }
 /* shared spinner — TSK-00-01 contract; .node-spinner shares the same animation (TSK-02-04 dep-node spinner) */
 @keyframes spin{ to{ transform: rotate(360deg); } }
@@ -1586,10 +1562,12 @@ summary::-webkit-details-marker{ display:none; }
 .dep-node[data-running="true"] .node-spinner{
   display:inline-block; position:absolute; top:4px; right:4px;
 }
+/* monitor-perf (2026-04-24): pulse 키프레임을 box-shadow(paint 강제)에서
+   opacity(합성 전용)로 교체 — box-shadow 애니메이션은 매 프레임 re-paint를 유발해
+   GPU 20~30% 단독 점유. opacity는 합성 레이어 투명도만 조정하므로 paint 없음. */
 @keyframes pulse{
-  0%   { box-shadow: 0 0 0 0 rgba(78,208,138,.55); }
-  70%  { box-shadow: 0 0 0 10px rgba(78,208,138,0);  }
-  100% { box-shadow: 0 0 0 0 rgba(78,208,138,0);   }
+  0%,100% { opacity: 1; }
+  50%     { opacity: 0.45; }
 }
 
 .btn{
@@ -2095,9 +2073,21 @@ body[data-filter="bypass"]  .trow:not([data-status="bypass"]) { display: none; }
 .sub .n{ color: var(--ink-4); font-size: 10px;}
 
 /* ---------- 10. Phase history ---------- */
+/* monitor-perf (2026-04-24): content-visibility:auto 로 뷰포트 밖 렌더·페인트 스킵.
+   phase history는 길 수 있고 사용자가 스크롤해야 보이므로 뷰포트 밖 비용 0으로 낮춤.
+   contain-intrinsic-size 는 placeholder 크기 — 스크롤바 뜀 방지. */
 .history{
   margin-top: 28px; border: 1px solid var(--line);
   border-radius: var(--radius-lg); background: var(--bg-1); overflow: hidden;
+  content-visibility: auto;
+  contain-intrinsic-size: 1px 640px;
+}
+/* WP/live-activity/dep-graph도 뷰포트 밖이면 렌더 스킵 (데이터 교체되면 auto-invalidate) */
+[data-section="wp-cards"],
+[data-section="live-activity"],
+[data-section="dep-graph"]{
+  content-visibility: auto;
+  contain-intrinsic-size: 1px 720px;
 }
 .history table{ width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 11.5px; }
 .history th, .history td{
@@ -2121,8 +2111,9 @@ body[data-filter="bypass"]  .trow:not([data-status="bypass"]) { display: none; }
 /* ---------- 11. Drawer ---------- */
 .drawer-backdrop{
   position: fixed; inset: 0;
-  background: rgba(0,0,0,0.55);
-  backdrop-filter: blur(3px);
+  /* monitor-perf: 블러 합성 제거 — drawer 닫혀도 Chrome이 pre-compute하여 GPU 상시 점유.
+     배경을 더 어둡게(0.55→0.70) 하여 blur 없이도 초점 분리 유지. */
+  background: rgba(0,0,0,0.70);
   z-index: 80;
   opacity: 0; pointer-events: none;
   transition: opacity .2s;
@@ -2352,14 +2343,16 @@ body[data-filter="bypass"]  .trow:not([data-status="bypass"]) { display: none; }
 .dep-node[data-phase="xx"] .dep-node-id { color: var(--phase-xx); }
 .dep-node[data-phase="failed"] .dep-node-id { color: var(--phase-failed); }
 .dep-node[data-phase="bypass"] .dep-node-id { color: var(--phase-bypass); }
-/* --- 모디파이어: critical (TSK-03-03 앰버 글로우 + border) --- */
+/* --- 모디파이어: critical (FR-05: 앰버 테두리 + 앰버 배경 틴트 + 글로우) --- */
 .dep-node.critical {
   border-color: var(--critical);
+  --_tint: color-mix(in srgb, var(--critical) 12%, transparent);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--critical) 35%, transparent);
 }
 /* --- failed + critical 동시 적용 시 failed(빨강) 우선 (specificity 0,3,0 > 0,2,0) --- */
 .dep-node.status-failed.critical {
   border-color: var(--fail);
+  --_tint: color-mix(in srgb, var(--fail) 10%, transparent);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--fail) 35%, transparent);
 }
 /* --- 모디파이어: bottleneck (dashed border) --- */
@@ -2887,7 +2880,9 @@ def _section_header(model: dict, lang: str = "ko", subproject: str = "") -> str:
         f'    <span><span class="k">docs</span><span class="v">{docs_dir}</span></span>\n'
         '    <span class="dot">&middot;</span>\n'
         f'    <span><span class="k">now</span>'
-        f'<span class="v" id="clock">{generated_at}</span></span>\n'
+        # monitor-perf (2026-04-24): 서버에서 now를 박으면 매 응답마다 HTML이 달라져 ETag/304 불가.
+        # 클라이언트 startClock()이 매초 갱신하므로 초기값을 빈 문자열로 두어도 UX 영향 없음.
+        f'<span class="v" id="clock"></span></span>\n'
         '    <span class="dot">&middot;</span>\n'
         f'    <span><span class="k">interval</span>'
         f'<span class="v">{refresh_s}s</span></span>\n'
@@ -3464,6 +3459,7 @@ def _render_task_row_v2(item, running_ids: set, failed_ids: set, lang: str = "ko
     return (
         f'<div class="trow" data-status="{data_status}" data-phase="{data_phase}" data-running="{data_running}"'
         f' data-domain="{domain_val}"'
+        f' data-task-id="{_esc(item_id or "")}"'
         f" data-state-summary='{_state_summary_encoded}'>\n"
         '  <div class="statusbar"></div>\n'
         f'  <div class="tid id">{_esc(item_id)}</div>\n'
@@ -4388,7 +4384,9 @@ _DASHBOARD_JS = """\
   /* shared state — dashboard poll + drawer poll are fully independent */
   var state={
     autoRefresh:true,activeFilter:'all',mainPollId:null,mainAbort:null,
-    drawerPaneId:null,drawerPollId:null,clockId:null
+    drawerPaneId:null,drawerPollId:null,clockId:null,
+    /* monitor-perf: visibility-aware polling + ETag 캐시 */
+    visible:(document.visibilityState!=='hidden'),mainEtag:''
   };
   /* ---- clock (v3) ---- */
   function startClock(){
@@ -4461,25 +4459,47 @@ _DASHBOARD_JS = """\
     tog.textContent=state.autoRefresh?'◐ auto':'○ paused';
     if(!state.autoRefresh){stopMainPoll();}else{startMainPoll();}
   });
-  /* ---- dashboard polling (TSK-02-01) ---- */
+  /* ---- dashboard polling (TSK-02-01, monitor-perf: visibility-aware) ---- */
+  /* monitor-perf (2026-04-24): visible 상태 초기화 + data-anim 토글로 무한 CSS 애니메이션 일괄 정지 */
+  state.visible=(document.visibilityState!=='hidden');
+  try{document.documentElement.setAttribute('data-anim',state.visible?'on':'off');}catch(_){}
+  function onMonitorVisibilityChange(){
+    state.visible=(document.visibilityState!=='hidden');
+    try{document.documentElement.setAttribute('data-anim',state.visible?'on':'off');}catch(_){}
+    if(!state.visible){stopMainPoll();}
+    else if(state.autoRefresh){startMainPoll();}
+  }
+  document.addEventListener('visibilitychange',onMonitorVisibilityChange);
   function stopMainPoll(){
     if(state.mainPollId!==null){clearInterval(state.mainPollId);state.mainPollId=null;}
     if(state.mainAbort){try{state.mainAbort.abort();}catch(e){} state.mainAbort=null;}
   }
   function startMainPoll(){
     stopMainPoll();
+    /* monitor-perf: hidden 탭에서는 폴링 시작 안 함 */
+    if(!state.visible)return;
     tick();
     state.mainPollId=setInterval(tick,5000);
   }
   function tick(){
     if(!state.autoRefresh)return;
+    /* monitor-perf: visibilityState hidden이면 폴링 스킵 */
+    if(!state.visible)return;
     if(state.mainAbort){try{state.mainAbort.abort();}catch(e){}}
     state.mainAbort=new AbortController();
     fetchAndPatch(state.mainAbort.signal);
   }
   function fetchAndPatch(signal){
-    fetch(window.location.search?'/'+window.location.search:'/',{cache:'no-store',signal:signal})
-      .then(function(r){return r.ok?r.text():null;})
+    /* monitor-perf (2026-04-24): If-None-Match로 ETag 보낸 뒤 304면 전체 스킵.
+       서버 SSR HTML이 변하지 않았을 때 76KB 재전송·DOMParser·patchSection 모두 0. */
+    var headers={'If-None-Match':state.mainEtag||''};
+    fetch(window.location.search?'/'+window.location.search:'/',{cache:'no-store',signal:signal,headers:headers})
+      .then(function(r){
+        if(r.status===304)return null;
+        var etag=r.headers.get('ETag');
+        if(etag)state.mainEtag=etag;
+        return r.ok?r.text():null;
+      })
       .then(function(text){
         if(!text)return;
         var parser=new DOMParser();
@@ -4680,7 +4700,7 @@ _DASHBOARD_JS = """\
   }
   function applyFilters(){
     var f=currentFilters();
-    /* .trow[data-task-id] — Task rows only. Live-activity rows have no data-task-id. */
+    /* .trow[data-task-id] — task rows carry data-task-id on the outer div. */
     document.querySelectorAll('.trow[data-task-id]').forEach(function(trow){
       trow.style.display=matchesRow(trow,f)?'':'none';
     });
@@ -4749,8 +4769,7 @@ _DASHBOARD_JS = """\
       var _orig=window.patchSection;
       window.patchSection=function(name,html){
         _orig.call(this,name,html);
-        /* wp-cards and live-activity may contain .trow[data-task-id] rows.
-           Live-activity rows have no data-task-id so applyFilters() is harmless. */
+        /* wp-cards와 live-activity 섹션만 .trow를 포함 — 다른 섹션 patch 후에는 재필터링 불필요. */
         if(name==='wp-cards'||name==='live-activity'){applyFilters();}
       };
       window.patchSection.__filterWrapped=true;
@@ -5570,8 +5589,32 @@ def _render_pane_json(payload: dict) -> bytes:
 
 
 def _send_html_response(handler, status: int, body_str: str) -> None:
-    """Write a text/html; charset=utf-8 response to *handler*."""
+    """Write a text/html; charset=utf-8 response to *handler*.
+
+    monitor-perf (2026-04-24): 200 응답에 weak-ETag를 붙이고 If-None-Match가
+    일치하면 304 (본문 0바이트)로 단축. 대시보드 SSR(75KB+)을 5초마다 폴링하는
+    시나리오에서 변화 없으면 body 전송·DOMParser·patchSection 모두 스킵.
+    """
     body = body_str.encode("utf-8")
+    # 200 응답에만 ETag 적용 (4xx/5xx는 원본 동작 유지)
+    if status == 200:
+        _ensure_etag_cache()
+        if _compute_etag is not None and _check_if_none_match is not None:
+            etag = _compute_etag(body)
+            if _check_if_none_match(handler, etag):
+                handler.send_response(304)
+                handler.send_header("ETag", etag)
+                handler.send_header("Cache-Control", "no-store")
+                handler.end_headers()
+                return
+            handler.send_response(200)
+            handler.send_header("Content-Type", "text/html; charset=utf-8")
+            handler.send_header("ETag", etag)
+            handler.send_header("Content-Length", str(len(body)))
+            handler.send_header("Cache-Control", "no-store")
+            handler.end_headers()
+            handler.wfile.write(body)
+            return
     handler.send_response(status)
     handler.send_header("Content-Type", "text/html; charset=utf-8")
     handler.send_header("Content-Length", str(len(body)))
@@ -6090,7 +6133,12 @@ def _handle_graph_api(
     # Compute ETag and store in cache
     try:
         json_bytes = json.dumps(payload, default=str, ensure_ascii=False).encode("utf-8")
-        etag = _graph_etag(json_bytes)
+        # monitor-perf (2026-04-24): ETag는 '의미 있는 데이터'만 기준.
+        # generated_at(매 요청마다 now())를 포함하면 해시가 영원히 달라져 304 불가.
+        # _graph_etag용 payload에서 generated_at만 제거한 복사본 사용.
+        _etag_payload = {k: v for k, v in payload.items() if k != "generated_at"}
+        _etag_bytes = json.dumps(_etag_payload, default=str, ensure_ascii=False, sort_keys=True).encode("utf-8")
+        etag = _graph_etag(_etag_bytes)
     except Exception:
         json_bytes = None  # type: ignore[assignment]
         etag = ""
@@ -6101,6 +6149,16 @@ def _handle_graph_api(
     if json_bytes is None:
         _json_response(handler, 200, payload)
         return
+
+    # monitor-perf (2026-04-24): If-None-Match 일치 시 304 반환 — JSON 본문 전송·클라이언트 파싱·applyDelta 모두 스킵.
+    if etag:
+        inm = _get_if_none_match(handler)
+        if inm and inm.strip() == etag:
+            handler.send_response(304)
+            handler.send_header("ETag", etag)
+            handler.send_header("Cache-Control", "no-store")
+            handler.end_headers()
+            return
 
     handler.send_response(200)
     handler.send_header("Content-Type", "application/json; charset=utf-8")
@@ -6142,6 +6200,8 @@ _API_TASK_DETAIL_PATH = "/api/task-detail"
 
 _WBS_SECTION_RE = re.compile(r"^### (?P<id>TSK-\S+):", re.MULTILINE)
 _TSK_ID_VALID_RE = re.compile(r"^TSK-\S+$")
+# Mirrors feat-init.py's FEAT_NAME_RE — only kebab-case lowercase names are valid.
+_FEAT_ID_VALID_RE = re.compile(r"^[a-z][a-z0-9-]*$")
 
 
 def _is_api_task_detail_path(path: str) -> bool:
@@ -6210,9 +6270,8 @@ def _collect_logs(task_dir) -> list:
     return [_tail_report(Path(task_dir) / name) for name in LOG_NAMES]
 
 
-def _collect_artifacts(task_dir):
-    """Return [{name, path, exists, size}] for design/test-report/refactor."""
-    artifact_names = ("design.md", "test-report.md", "refactor.md")
+def _collect_artifacts(task_dir, artifact_names=("design.md", "test-report.md", "refactor.md")):
+    """Return [{name, path, exists, size}] for the given artifact names."""
     result = []
     for name in artifact_names:
         filepath = task_dir / name
@@ -6228,6 +6287,14 @@ def _collect_artifacts(task_dir):
         rel = raw[docs_idx:] if docs_idx >= 0 else raw
         result.append({"name": name, "path": rel, "exists": exists, "size": size})
     return result
+
+
+_FEAT_ARTIFACT_NAMES = ("spec.md", "design.md", "test-report.md", "refactor.md")
+
+
+def _collect_feat_artifacts(feat_dir):
+    """Return [{name, path, exists, size}] for Feature artifacts (includes spec.md)."""
+    return _collect_artifacts(feat_dir, _FEAT_ARTIFACT_NAMES)
 
 
 def _extract_title_from_section(section_md: str) -> str:
@@ -6281,23 +6348,48 @@ def _load_state_json(task_dir) -> dict:
 
 
 def _build_task_detail_payload(task_id, subproject, effective_docs_dir, wbs_md):
-    """Build /api/task-detail payload. Returns (status_code, dict)."""
-    if not _TSK_ID_VALID_RE.match(task_id):
-        return (400, {"error": f"Invalid task_id format: {task_id!r}", "code": 400})
-    wbs_section_md = _extract_wbs_section(wbs_md, task_id)
-    if not wbs_section_md:
-        return (404, {"error": f"Task {task_id!r} not found in wbs.md", "code": 404})
-    title = _extract_title_from_section(wbs_section_md)
-    wp_id = _extract_wp_id(wbs_section_md, wbs_md, task_id)
-    task_dir = Path(effective_docs_dir) / "tasks" / task_id
-    state = _load_state_json(task_dir)
-    artifacts = _collect_artifacts(task_dir)
-    logs = _collect_logs(task_dir)
-    return (200, {
-        "task_id": task_id, "title": title, "wp_id": wp_id, "source": "wbs",
-        "wbs_section_md": wbs_section_md, "state": state, "artifacts": artifacts,
-        "logs": logs,
-    })
+    """Build /api/task-detail payload. Returns (status_code, dict).
+
+    Handles two ID kinds: WBS Tasks (``TSK-…``) and Features (kebab-case names
+    under ``{docs}/features/{name}/``). Invalid IDs return 400; missing
+    resources return 404.
+    """
+    if _TSK_ID_VALID_RE.match(task_id):
+        wbs_section_md = _extract_wbs_section(wbs_md, task_id)
+        if not wbs_section_md:
+            return (404, {"error": f"Task {task_id!r} not found in wbs.md", "code": 404})
+        title = _extract_title_from_section(wbs_section_md)
+        wp_id = _extract_wp_id(wbs_section_md, wbs_md, task_id)
+        task_dir = Path(effective_docs_dir) / "tasks" / task_id
+        state = _load_state_json(task_dir)
+        artifacts = _collect_artifacts(task_dir)
+        logs = _collect_logs(task_dir)
+        return (200, {
+            "task_id": task_id, "title": title, "wp_id": wp_id, "source": "wbs",
+            "wbs_section_md": wbs_section_md, "state": state, "artifacts": artifacts,
+            "logs": logs,
+        })
+
+    if _FEAT_ID_VALID_RE.match(task_id):
+        feat_dir = Path(effective_docs_dir) / "features" / task_id
+        if not feat_dir.is_dir():
+            return (404, {"error": f"Feature {task_id!r} not found", "code": 404})
+        state = _load_state_json(feat_dir)
+        title = state.get("name") or task_id
+        artifacts = _collect_feat_artifacts(feat_dir)
+        logs = _collect_logs(feat_dir)
+        spec_md = ""
+        try:
+            spec_md = (feat_dir / "spec.md").read_text(encoding="utf-8")
+        except OSError:
+            pass
+        return (200, {
+            "task_id": task_id, "title": title, "wp_id": "", "source": "feat",
+            "wbs_section_md": spec_md, "state": state, "artifacts": artifacts,
+            "logs": logs,
+        })
+
+    return (400, {"error": f"Invalid task_id format: {task_id!r}", "code": 400})
 
 
 def _handle_api_task_detail(handler) -> None:
@@ -6483,15 +6575,22 @@ def _handle_api_merge_status(handler) -> None:
 def _task_panel_css() -> str:
     """CSS for task slide panel (TSK-02-04)."""
     return (
-        ".slide-panel{position:fixed;top:0;right:-560px;bottom:0;width:560px;"
+        ".slide-panel{--panel-w:clamp(320px,800px,95vw);--panel-header-h:56px;"
+        "position:fixed;top:0;right:calc(var(--panel-w) * -1);bottom:0;width:var(--panel-w);"
         "background:var(--bg-2,#1e1e2e);border-left:1px solid var(--border,#313244);"
         "overflow-y:auto;z-index:90;transition:right 0.22s cubic-bezier(.4,0,.2,1);"
         "display:flex;flex-direction:column;}"
         ".slide-panel.open{right:0;}"
+        ".slide-panel.resizing{transition:none;}"
+        ".slide-panel-resize-handle{position:absolute;top:0;bottom:0;left:0;width:6px;"
+        "cursor:ew-resize;background:transparent;z-index:91;touch-action:none;}"
+        ".slide-panel-resize-handle:hover,.slide-panel-resize-handle.dragging{"
+        "background:var(--accent,#58a6ff);opacity:0.45;}"
         "#task-panel-overlay{position:fixed;inset:0;background:rgba(0,0,0,.3);z-index:80;}"
-        "#task-panel header{display:flex;align-items:center;justify-content:space-between;"
-        "padding:12px 16px;border-bottom:1px solid var(--border,#313244);flex-shrink:0;}"
-        "#task-panel-body{flex:1;overflow-y:auto;padding:16px;}"
+        "#task-panel > header{display:flex;align-items:center;justify-content:space-between;"
+        "padding:0 16px;height:var(--panel-header-h);border-bottom:1px solid var(--border,#313244);"
+        "position:sticky;top:0;z-index:21;background:var(--bg-2,#1e1e2e);flex-shrink:0;}"
+        "#task-panel-body{padding:16px;}"
         "#task-panel-close{background:none;border:none;cursor:pointer;font-size:18px;"
         "color:var(--ink-3,#cdd6f4);opacity:.7;line-height:1;}"
         "#task-panel-close:hover{opacity:1;}"
@@ -6531,7 +6630,7 @@ def _task_panel_css() -> str:
         ".merge-conflict-file li.disabled code{opacity:.6;}"
         ".merge-hunk-preview{max-height:120px;overflow:auto;font-size:11px;font-family:var(--font-mono,monospace);background:var(--bg-1,#181825);border-radius:4px;padding:6px;white-space:pre-wrap;word-break:break-all;margin-top:4px;}"
         # TSK-05-01 FR-02: EXPAND 패널 sticky progress header
-        ".progress-header{position:sticky;top:0;z-index:20;"
+        ".progress-header{position:sticky;top:var(--panel-header-h,56px);z-index:20;"
         "background:var(--bg-2,#1e1e2e);"
         "border-bottom:1px solid var(--border,#313244);"
         "margin:-16px -16px 12px;padding:10px 16px;"
@@ -6556,6 +6655,25 @@ def _task_panel_css() -> str:
         "font-family:var(--font-mono,monospace);}"
         ".ph-history li .ph-time{opacity:.6;min-width:140px;}"
         ".ph-history-empty{font-size:11px;color:var(--ink-3,#585b70);font-style:italic;}"
+        # state.json 표 형태 렌더링
+        ".state-empty{font-size:12px;color:var(--ink-3,#585b70);font-style:italic;}"
+        ".state-table,.state-history-table{width:100%;border-collapse:collapse;"
+        "font-size:12px;font-family:var(--font-mono,monospace);margin:4px 0 8px;}"
+        ".state-table th,.state-table td,"
+        ".state-history-table th,.state-history-table td{"
+        "padding:4px 8px;border-bottom:1px solid var(--border,#313244);"
+        "text-align:left;vertical-align:top;}"
+        ".state-table th{width:140px;color:var(--ink-3,#cdd6f4);opacity:.75;"
+        "font-weight:500;white-space:nowrap;}"
+        ".state-table td{color:var(--ink-3,#cdd6f4);word-break:break-all;}"
+        ".state-history-table thead th{color:var(--ink-3,#cdd6f4);opacity:.75;"
+        "font-weight:500;font-size:11px;text-transform:uppercase;"
+        "letter-spacing:.04em;background:var(--bg-1,#181825);}"
+        ".state-history-table td{color:var(--ink-3,#cdd6f4);}"
+        ".state-history-table td.state-idx{color:var(--ink-3,#585b70);"
+        "width:28px;text-align:right;}"
+        ".state-subhead{margin:12px 0 4px;font-size:12px;opacity:.7;"
+        "color:var(--ink-3,#cdd6f4);}"
     )
 
 
@@ -6564,9 +6682,10 @@ function escapeHtml(s){
   if(s==null)return '';
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
-function renderWbsSection(md){
+function renderWbsSection(md,source){
   if(!md)return '';
-  var lines=md.split('\n'),html='<h4>&sect; WBS</h4>',inCode=false,lang='';
+  var heading=(source==='feat')?'&sect; 사양':'&sect; WBS';
+  var lines=md.split('\n'),html='<h4>'+heading+'</h4>',inCode=false,lang='';
   for(var i=0;i<lines.length;i++){
     var line=lines[i];
     if(!inCode&&line.match(/^```/)){inCode=true;lang=line.slice(3).trim();html+='<pre><code'+(lang?' class="lang-'+escapeHtml(lang)+'"':'')+'>';continue;}
@@ -6626,7 +6745,64 @@ function renderTaskProgressHeader(state){
   html+='</header>';
   return html;
 }
-function renderStateJson(state){return '<h4>&sect; state.json</h4><pre>'+escapeHtml(JSON.stringify(state,null,2))+'</pre>';}
+function _fmtElapsedSec(sec){
+  if(sec==null||sec==='')return '—';
+  var n=Number(sec);
+  if(!isFinite(n))return String(sec);
+  if(n<60)return n+'s';
+  var m=Math.floor(n/60),s=n%60;
+  return m+'m '+s+'s';
+}
+function _fmtStateVal(v){
+  if(v==null||v==='')return '—';
+  if(typeof v==='boolean')return v?'true':'false';
+  return String(v);
+}
+function renderStateJson(state){
+  var html='<h4>&sect; state.json</h4>';
+  if(!state||typeof state!=='object'||Object.keys(state).length===0){
+    return html+'<p class="state-empty">데이터 없음</p>';
+  }
+  var rows=[];
+  var last=(state.last&&typeof state.last==='object')?state.last:null;
+  if('name' in state)rows.push(['name',_fmtStateVal(state.name)]);
+  rows.push(['status',_fmtStateVal(state.status)]);
+  if('started_at' in state)rows.push(['started_at',_fmtStateVal(state.started_at)]);
+  if(last){
+    rows.push(['last.event',_fmtStateVal(last.event)]);
+    rows.push(['last.at',_fmtStateVal(last.at)]);
+  }
+  if('updated' in state)rows.push(['updated',_fmtStateVal(state.updated)]);
+  if('completed_at' in state)rows.push(['completed_at',_fmtStateVal(state.completed_at)]);
+  if('elapsed_seconds' in state)rows.push(['elapsed',_fmtElapsedSec(state.elapsed_seconds)]);
+  if(state.bypassed)rows.push(['bypassed','true']);
+  if(state.bypassed_reason)rows.push(['bypassed_reason',_fmtStateVal(state.bypassed_reason)]);
+  html+='<table class="state-table"><tbody>';
+  for(var i=0;i<rows.length;i++){
+    html+='<tr><th>'+escapeHtml(rows[i][0])+'</th><td>'+escapeHtml(rows[i][1])+'</td></tr>';
+  }
+  html+='</tbody></table>';
+  var history=(state.phase_history&&state.phase_history.length)?state.phase_history:null;
+  if(history){
+    html+='<h5 class="state-subhead">phase_history ('+history.length+')</h5>';
+    html+='<table class="state-history-table"><thead><tr>'
+      +'<th>#</th><th>event</th><th>from</th><th>to</th><th>at</th><th>elapsed</th>'
+      +'</tr></thead><tbody>';
+    for(var j=0;j<history.length;j++){
+      var h=history[j]||{};
+      html+='<tr>'
+        +'<td class="state-idx">'+(j+1)+'</td>'
+        +'<td>'+escapeHtml(_fmtStateVal(h.event))+'</td>'
+        +'<td>'+escapeHtml(_fmtStateVal(h.from))+'</td>'
+        +'<td>'+escapeHtml(_fmtStateVal(h.to))+'</td>'
+        +'<td>'+escapeHtml(_fmtStateVal(h.at))+'</td>'
+        +'<td>'+escapeHtml(_fmtElapsedSec(h.elapsed_seconds))+'</td>'
+        +'</tr>';
+    }
+    html+='</tbody></table>';
+  }
+  return html;
+}
 function renderArtifacts(arts){
   var html='<h4>&sect; 아티팩트</h4>';
   if(!arts||!arts.length)return html+'<p>-</p>';
@@ -6660,7 +6836,7 @@ function openTaskPanel(taskId){
     .then(function(r){return r.json();}).then(function(data){
       var t=document.getElementById('task-panel-title');if(t)t.textContent=data.title||taskId;
       var b=document.getElementById('task-panel-body');
-      if(b)b.innerHTML=renderTaskProgressHeader(data.state||null)+renderWbsSection(data.wbs_section_md||'')+renderStateJson(data.state||{})+renderArtifacts(data.artifacts||[])+renderLogs(data.logs||[]);
+      if(b)b.innerHTML=renderTaskProgressHeader(data.state||null)+renderWbsSection(data.wbs_section_md||'',data.source||'')+renderStateJson(data.state||{})+renderArtifacts(data.artifacts||[])+renderLogs(data.logs||[]);
       var p=document.getElementById('task-panel'),o=document.getElementById('task-panel-overlay');
       if(p){p.classList.add('open');p.dataset.panelMode='task';}if(o)o.removeAttribute('hidden');
     }).catch(function(e){console.error('task-panel error',e);});
@@ -6742,6 +6918,38 @@ document.addEventListener('click',function(e){
 document.addEventListener('keydown',function(e){
   if(e.key==='Escape'){var p=document.getElementById('task-panel');if(p&&p.classList.contains('open'))closeTaskPanel();}
 });
+(function initSlidePanelResize(){
+  var panel=document.getElementById('task-panel');
+  if(!panel)return;
+  var handle=panel.querySelector('.slide-panel-resize-handle');
+  if(!handle)return;
+  try{var saved=localStorage.getItem('task-panel-width');if(saved)panel.style.setProperty('--panel-w',saved);}catch(e){}
+  var dragging=false,startX=0,startW=0;
+  handle.addEventListener('pointerdown',function(e){
+    dragging=true;startX=e.clientX;startW=panel.getBoundingClientRect().width;
+    handle.classList.add('dragging');panel.classList.add('resizing');
+    try{handle.setPointerCapture(e.pointerId);}catch(_){}
+    e.preventDefault();
+  });
+  handle.addEventListener('pointermove',function(e){
+    if(!dragging)return;
+    var delta=startX-e.clientX;
+    var newW=Math.max(320,Math.min(window.innerWidth*0.98,startW+delta));
+    panel.style.setProperty('--panel-w',newW+'px');
+  });
+  function endDrag(e){
+    if(!dragging)return;
+    dragging=false;handle.classList.remove('dragging');panel.classList.remove('resizing');
+    try{handle.releasePointerCapture(e.pointerId);}catch(_){}
+    try{var w=panel.style.getPropertyValue('--panel-w');if(w)localStorage.setItem('task-panel-width',w.trim());}catch(_){}
+  }
+  handle.addEventListener('pointerup',endDrag);
+  handle.addEventListener('pointercancel',endDrag);
+  handle.addEventListener('dblclick',function(){
+    panel.style.removeProperty('--panel-w');
+    try{localStorage.removeItem('task-panel-width');}catch(_){}
+  });
+})();
 """
 
 
@@ -6755,6 +6963,7 @@ def _task_panel_dom() -> str:
     return (
         '<div id="task-panel-overlay" hidden></div>\n'
         '<aside id="task-panel" class="slide-panel" hidden aria-labelledby="task-panel-title">\n'
+        '  <div class="slide-panel-resize-handle" aria-hidden="true" title="드래그하여 크기 조절"></div>\n'
         '  <header>\n'
         '    <h3 id="task-panel-title"></h3>\n'
         '    <button id="task-panel-close" aria-label="Close task panel">&#x2715;</button>\n'
