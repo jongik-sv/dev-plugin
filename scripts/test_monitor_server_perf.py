@@ -38,13 +38,24 @@ sys.path.insert(0, str(SCRIPTS_DIR))
 # ---------------------------------------------------------------------------
 
 def _import_core():
-    """Import monitor_server.core, force-reload to pick up any disk changes."""
+    """Import monitor_server.core, force-reload to pick up any disk changes.
+
+    Robust against earlier tests that loaded scripts/monitor-server.py as a
+    flat module under ``sys.modules["monitor_server"]`` via
+    ``spec_from_file_location``. That flat module lacks ``__path__`` so
+    ``import monitor_server.core`` / ``importlib.reload`` both fail with
+    ``AttributeError: module has no attribute '__path__'``. We purge every
+    ``monitor_server[.*]`` entry before re-importing the package from disk so
+    test order no longer matters.
+    """
     import importlib
-    # Remove stale cached modules so we load from disk
-    for key in list(sys.modules.keys()):
-        if key == "monitor_server.core" or key == "monitor_server":
-            pass  # keep package init but reload core below
+    # Remove the flat-loaded module (if any) and every sub-attribute so the
+    # next import resolves monitor_server/ as a proper package.
+    for key in [k for k in sys.modules.keys()
+                if k == "monitor_server" or k.startswith("monitor_server.")]:
+        del sys.modules[key]
     import monitor_server.core as core
+    # Reload to pick up any on-disk edits made between test runs.
     importlib.reload(core)
     return core
 
@@ -385,10 +396,13 @@ class TestHandleGraphApiETag(unittest.TestCase):
 
         handler = self._make_mock_handler(if_none_match=expected_etag.strip('"'))
 
-        # Prime the graph cache with this payload + etag
+        # Prime the graph cache with this payload + etag.
+        # Cache key format matches monitor_server.core._handle_graph_api:
+        # f"{base_docs_dir}::{subproject}" (see core.py ``_cache_key`` assignment).
         original_gcache = self.core._GRAPH_CACHE
         fresh_cache = self.core._TTLCache(ttl_seconds=60.0)
-        fresh_cache.set("all", {"payload": fake_payload, "etag": expected_etag})
+        cache_key = f"{handler.server.docs_dir}::all"
+        fresh_cache.set(cache_key, {"payload": fake_payload, "etag": expected_etag})
         self.core._GRAPH_CACHE = fresh_cache
 
         # Patch handler.headers to return the ETag
@@ -706,10 +720,14 @@ class TestGraphApiP95ResponseTime(unittest.TestCase):
         fake_bytes = _json.dumps(fake_payload, default=str, ensure_ascii=False).encode("utf-8")
         etag = '"' + hashlib.sha256(fake_bytes).hexdigest()[:12] + '"'
 
-        # Prime the graph cache
+        # Prime the graph cache. Cache key format matches
+        # monitor_server.core._handle_graph_api: f"{base_docs_dir}::{subproject}".
         original_gcache = core._GRAPH_CACHE
         fresh_cache = core._TTLCache(ttl_seconds=60.0)
-        fresh_cache.set("all", {"payload": fake_payload, "etag": etag})
+        # Use the same docs_dir as _make_handler returns below.
+        sample_handler = self._make_handler()
+        cache_key = f"{sample_handler.server.docs_dir}::all"
+        fresh_cache.set(cache_key, {"payload": fake_payload, "etag": etag})
         core._GRAPH_CACHE = fresh_cache
 
         N = 50
