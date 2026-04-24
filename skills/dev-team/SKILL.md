@@ -217,6 +217,35 @@ python3 ${CLAUDE_PLUGIN_ROOT}/scripts/wbs-parse.py {DOCS_DIR}/wbs.md {WP-ID} --t
 ```
 JSON 출력에서 미완료 Task 목록을 확인한다.
 
+### 1-b. category: feat Task 감지 및 별도 dispatch
+
+각 WP에 대해 `--tasks-pending` 실행 **전에** feat Task 목록을 추출한다:
+
+```bash
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/wbs-parse.py {DOCS_DIR}/wbs.md {WP-ID} --feat-tasks
+```
+
+출력 예시:
+```json
+[{"tsk_id": "TSK-01-02", "feat_name": "independent-feature-task", "title": "Independent Feature Task"}]
+```
+
+feat Task가 있으면 팀리더는 각 feat Task에 대해 **별도 tmux window를 spawn**한다 (worktree 없음, main 브랜치 기준):
+
+```bash
+# feat Task 1개당 1개 window — 현재 디렉토리(main 브랜치)에서 /feat 실행
+tmux new-window -t {SESSION} -n "feat-{feat_name}"
+tmux send-keys -t "{SESSION}:feat-{feat_name}" "claude --project-dir '{PROJECT_DIR}' '/feat {feat_name}'" Enter
+```
+
+**feat window 관리 규칙**:
+- feat window는 WP window와 **별개**로 관리한다. WP DDTR 시그널 감시 루프(`signal-helper.py wait`)에 포함하지 않는다.
+- feat window는 `/feat` 스킬 자체가 완료를 관리하므로 팀리더가 별도로 시그널을 감시할 필요가 없다.
+- feat Task가 없는 WP에서는 이 단계를 건너뛴다.
+- feat Task가 포함된 WP에서 `--tasks-pending`은 해당 feat Task를 자동 제외하므로 DDTR 할당 시 별도 필터링 불필요.
+
+> `dep-analysis.py`는 `category: feat` Task를 completed 집합으로 처리하므로 다른 Task가 feat Task에 depends를 걸더라도 스케줄링이 차단되지 않는다. 단, feat Task 결과가 실제로 필요한 경우 실행 타이밍은 보장되지 않으므로 feat Task에 depends를 거는 설계는 피한다.
+
 ### 2. 의존성 분석 및 실행 계획
 
 wbs-parse.py의 출력을 dep-analysis.py로 파이프:

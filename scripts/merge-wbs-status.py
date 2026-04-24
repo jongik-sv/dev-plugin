@@ -345,6 +345,20 @@ def _diff3_hunks(
         # trailing inserts at position i (before the first changed base line)
         ours_lines.extend(ours_inserts.get(i, []))
         theirs_lines.extend(theirs_inserts.get(i, []))
+        # Trailing inserts past base end (i >= n): the inserts above are
+        # the entire changed region. Without this guard the inner `while
+        # i < n` body never advances `i`, and the outer `while i <= n`
+        # loops forever appending the same hunk — observed when base is
+        # 0-byte and ours/theirs both have content (ours_inserts ==
+        # theirs_inserts == {0:[0..k]}), exhausting memory.
+        if i >= n:
+            hunks.append({
+                "type": "changed",
+                "base_start": base_start, "base_end": i,
+                "ours_lines": ours_lines,
+                "theirs_lines": theirs_lines,
+            })
+            break
         while i < n:
             om = ours_by_base.get(i)
             tm = theirs_by_base.get(i)

@@ -1,0 +1,42 @@
+{
+  "name": "log-mistake",
+  "status": "[xx]",
+  "last": {
+    "event": "refactor.ok",
+    "at": "2026-04-24T01:03:43Z"
+  },
+  "phase_history": [
+    {
+      "event": "design.ok",
+      "from": "[ ]",
+      "to": "[dd]",
+      "at": "2026-04-24T00:54:31Z",
+      "elapsed_seconds": 0
+    },
+    {
+      "event": "build.ok",
+      "from": "[dd]",
+      "to": "[im]",
+      "at": "2026-04-24T01:00:10Z",
+      "elapsed_seconds": 339
+    },
+    {
+      "event": "test.ok",
+      "from": "[im]",
+      "to": "[ts]",
+      "at": "2026-04-24T01:01:45Z",
+      "elapsed_seconds": 95
+    },
+    {
+      "event": "refactor.ok",
+      "from": "[ts]",
+      "to": "[xx]",
+      "at": "2026-04-24T01:03:43Z",
+      "elapsed_seconds": 118
+    }
+  ],
+  "updated": "2026-04-24T01:03:43Z",
+  "started_at": "2026-04-24T00:54:31Z",
+  "completed_at": "2026-04-24T01:03:43Z",
+  "elapsed_seconds": 552
+}

@@ -17,8 +17,9 @@ Modes:
   --block                Task block raw text
   --field <name>         Single field value
   --tasks                WP child Task list (JSON array)
-  --tasks-pending        WP child incomplete Tasks only (status != [xx])
-  --tasks-all            All Tasks across every WP (flat array, no target_id)
+  --tasks-pending        WP child incomplete Tasks only (status != [xx], category != feat)
+  --tasks-all            All Tasks across every WP (flat array, no target_id, includes category field)
+  --feat-tasks           WP child Tasks with category=feat only → [{"tsk_id","feat_name","title"}]
   --resumable-wps        Executable WP list (WPs with incomplete Tasks)
   --phase-start          Start phase based on Task's current status
   --dev-config           Extract ## Dev Config section as JSON
@@ -169,22 +170,45 @@ def parse_list_field(block: str, field_name: str) -> list:
     return items
 
 
+def _slugify(title: str) -> str:
+    """Convert a task title to a kebab-case slug (max 40 chars).
+
+    Returns "" if no valid slug can be produced (caller should use TSK-ID fallback).
+    """
+    # Lowercase
+    slug = title.lower()
+    # Replace non-alphanumeric chars with hyphen
+    slug = re.sub(r'[^a-z0-9]+', '-', slug)
+    # Collapse multiple hyphens
+    slug = re.sub(r'-+', '-', slug)
+    # Strip leading/trailing hyphens
+    slug = slug.strip('-')
+    # Truncate to 40 chars, avoiding a trailing hyphen
+    if len(slug) > 40:
+        slug = slug[:40].rstrip('-')
+    return slug
+
+
 def parse_tasks_from_wp(wp_block: str, pending_only: bool = False) -> list:
     """Parse task entries from a WP block."""
     tasks = []
     current = None
 
     for line in wp_block.splitlines():
-        m = re.match(r'^#{3,4}\s+(TSK-\d+(?:-\d+)+):', line)
+        m = re.match(r'^#{3,4}\s+(TSK-\d+(?:-\d+)+):\s*(.*)', line)
         if m:
             if current is not None:
-                if not pending_only or "[xx]" not in current.get("status", ""):
+                status = current.get("status", "")
+                category = current.get("category", "")
+                if not pending_only or ("[xx]" not in status and category != "feat"):
                     tasks.append(current)
             current = {
                 "tsk_id": m.group(1),
+                "title": m.group(2).strip(),
                 "status": "",
                 "depends": "",
                 "domain": "",
+                "category": "",
             }
             continue
         if current is not None:
@@ -194,9 +218,13 @@ def parse_tasks_from_wp(wp_block: str, pending_only: bool = False) -> list:
                 current["depends"] = line[len("- depends:"):].strip()
             elif line.startswith("- domain:"):
                 current["domain"] = line[len("- domain:"):].strip()
+            elif line.startswith("- category:"):
+                current["category"] = line[len("- category:"):].strip()
 
     if current is not None:
-        if not pending_only or "[xx]" not in current.get("status", ""):
+        status = current.get("status", "")
+        category = current.get("category", "")
+        if not pending_only or ("[xx]" not in status and category != "feat"):
             tasks.append(current)
 
     return tasks
@@ -857,6 +885,32 @@ def main():
         # Exclude bypassed tasks (effectively done for scheduling)
         tasks = [t for t in tasks if not t.get("bypassed")]
         print(json.dumps(tasks, ensure_ascii=False, indent=2))
+
+    # -- feat tasks in a WP (category: feat only) --
+    elif mode == "--feat-tasks":
+        wp_block = extract_wp_block(wbs_text, target_id)
+        if not wp_block:
+            print(f"ERROR: {target_id} not found in {wbs_path}", file=sys.stderr)
+            sys.exit(1)
+        all_tasks = parse_tasks_from_wp(wp_block, pending_only=False)
+        feat_tasks = []
+        for t in all_tasks:
+            if t.get("category") != "feat":
+                continue
+            tsk_id = t["tsk_id"]
+            title = t.get("title", "")
+            slug = _slugify(title)
+            if slug:
+                feat_name = slug
+            else:
+                # Fallback: lowercase TSK-ID (e.g. TSK-01-02 → tsk-01-02)
+                feat_name = tsk_id.lower()
+            feat_tasks.append({
+                "tsk_id": tsk_id,
+                "feat_name": feat_name,
+                "title": title,
+            })
+        print(json.dumps(feat_tasks, ensure_ascii=False, indent=2))
 
     # -- Resumable WPs --
     elif mode == "--resumable-wps":

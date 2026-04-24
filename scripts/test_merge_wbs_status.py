@@ -200,6 +200,67 @@ class MergeWbsStatusTests(unittest.TestCase):
             self.assertIn("- status: [dd]", merged)
             self.assertIn("- status: [im]", merged)
 
+    def test_merge_wbs_status_empty_base_trailing_inserts(self) -> None:
+        """Regression: base 파일이 0-byte 이고 ours/theirs 양쪽이 같은 본문일 때
+        `_diff3_hunks` 외곽 루프가 무한 append 되지 않고 정상 종료해야 한다.
+
+        시나리오: 새 파일이 ours/theirs 양 브랜치에서 동시에 추가 (merge base
+        에는 없음). git 은 BASE 로 0-byte 파일을 넘기고 ours/theirs 모두 같은
+        980 줄 본문. 이전에는 driver 가 29 GB 까지 메모리 폭증 + 8 분간 hang
+        후 OOM 이었음 (`.git/index.lock` 점유로 시스템 전체 멈춤)."""
+        with tempfile.TemporaryDirectory() as td:
+            td_p = pathlib.Path(td)
+            base = td_p / "base.md"
+            ours = td_p / "ours.md"
+            theirs = td_p / "theirs.md"
+
+            # 0-byte BASE — git 이 새 파일 머지 시 실제로 넘기는 형태
+            base.write_text("", encoding="utf-8")
+            # ours/theirs 는 동일한 980 줄 wbs.md
+            big_body = "# WBS\n\n" + "\n".join(
+                f"### TSK-99-{i:02d}: line {i}\n- category: x\n- status: [ ]\n"
+                for i in range(1, 100)
+            )
+            ours.write_text(big_body, encoding="utf-8")
+            theirs.write_text(big_body, encoding="utf-8")
+
+            # 5초 hard timeout — 무한 루프면 5초 안에 끝나지 않음
+            res = subprocess.run(
+                [sys.executable, str(SCRIPT),
+                 str(base), str(ours), str(theirs), "7"],
+                capture_output=True, text=True, timeout=5,
+            )
+            self.assertEqual(res.returncode, 0, res.stderr)
+            merged = ours.read_text(encoding="utf-8")
+            # 양쪽이 같으므로 결과도 같아야 함
+            self.assertEqual(merged, big_body)
+
+    def test_merge_wbs_status_empty_base_diverging_inserts(self) -> None:
+        """base=0byte + ours/theirs 다른 본문 — 양쪽 trailing-insert 차이.
+
+        같은 trailing-insert 가드 경로지만 ours_inserts ≠ theirs_inserts 케이스.
+        이전 버그 경로에서 메모리 폭증 + 무한 루프가 더 빠르게 트리거됨."""
+        with tempfile.TemporaryDirectory() as td:
+            td_p = pathlib.Path(td)
+            base = td_p / "base.md"
+            ours = td_p / "ours.md"
+            theirs = td_p / "theirs.md"
+            base.write_text("", encoding="utf-8")
+            ours.write_text(
+                "# WBS\n\n### TSK-01-01: t\n- status: [dd]\n", encoding="utf-8")
+            theirs.write_text(
+                "# WBS\n\n### TSK-01-01: t\n- status: [im]\n", encoding="utf-8")
+
+            res = subprocess.run(
+                [sys.executable, str(SCRIPT),
+                 str(base), str(ours), str(theirs), "7"],
+                capture_output=True, text=True, timeout=5,
+            )
+            # 진정한 충돌 (ours_region != theirs_region, 추가 분리 불가)
+            # → driver 는 exit 1 로 git 에 fallback. 핵심은 무한 루프 미발생.
+            self.assertIn(res.returncode, (0, 1),
+                          f"driver hung or crashed: rc={res.returncode}")
+
 
 class GitTodoUnionTest(unittest.TestCase):
     """git 내장 union 드라이버가 docs/todo.md 에 대해 동작하는지 smoke test."""

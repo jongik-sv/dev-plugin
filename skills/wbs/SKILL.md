@@ -79,7 +79,19 @@ Project
 
 ### Task category
 
-`development` / `defect` / `infrastructure` 세 가지 모두 동일 DDTR 워크플로우(`[ ]`→`[dd]`→`[im]`→`[ts]`→`[xx]`)를 따른다. 상태 전이와 실패 처리 규칙은 `${CLAUDE_PLUGIN_ROOT}/references/state-machine.json`에 정의되어 있다.
+`development` / `defect` / `infrastructure` / `feat` 네 가지 category가 있다. `development` / `defect` / `infrastructure`는 모두 동일 DDTR 워크플로우(`[ ]`→`[dd]`→`[im]`→`[ts]`→`[xx]`)를 따른다. `feat`는 별도 `/feat` 스킬로 실행되며 WP DDTR 의존 그래프에서 제외된다. 상태 전이와 실패 처리 규칙은 `${CLAUDE_PLUGIN_ROOT}/references/state-machine.json`에 정의되어 있다.
+
+**독립 Feature 자동 분류 (4단계 Task 분해 후 수행)**:
+
+WBS Task 분해가 끝나면, 아래 조건을 **모두** 충족하는 Task에 `category: feat`를 자동으로 적용하고 사용자에게 알린다 (WBS 검수 단계에서 수동 수정 가능):
+
+1. `- depends: -` (또는 `(none)`) — 어떤 Task에도 의존하지 않음
+2. 다른 어떤 Task의 `depends` 필드에도 이 Task ID가 등장하지 않음 (fan-in = 0) — 다른 Task가 이 Task를 기다리지 않음
+3. 완전히 독립된 기능으로, WP 내 다른 Task와 코드·계약을 공유하지 않음
+
+이 조건을 만족하는 Task는 "독립 feature"이다. `/dev-team` 실행 시 WP DDTR 루프 대신 `/feat {feat_name}` tmux window로 별도 dispatch된다. `category: feat` Task에 `depends`를 거는 것은 허용되지 않는다 — 다른 Task가 feat Task의 완료를 기다리면 `/feat` 병렬 실행의 이점이 사라진다.
+
+> **주의**: `dep-analysis.py`는 `category: feat` Task를 "의존성 충족 완료" 상태로 처리한다. 따라서 feat Task에 잘못 의존을 걸더라도 스케줄링 차단은 발생하지 않지만, feat 실행 결과가 실제로 필요한 경우 타이밍 보장이 없다.
 
 **부가 Task(seed data / test fixture / API 키 설정 등) 분류 규칙 — 공유 범위 기반**:
 

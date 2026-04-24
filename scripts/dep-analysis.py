@@ -384,7 +384,8 @@ def main():
         status = item.get("status", "")
         dep_str = item.get("depends", "")
 
-        if "[xx]" in status or item.get("bypassed"):
+        category = item.get("category", "")
+        if "[xx]" in status or item.get("bypassed") or category == "feat":
             completed.append(tsk_id)
             is_completed.add(tsk_id)
             continue

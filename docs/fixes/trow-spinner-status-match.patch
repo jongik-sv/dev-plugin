@@ -1,0 +1,55 @@
+# trow 스피너 조건 수정 — status [dd]/[im]/[ts] 도 포함
+#
+# ## 증상
+# 대시보드 task row의 스피너가 `.running` 신호가 남아있는 task에서만 돌고,
+# status가 [dd]/[im]/[ts] (디자인/빌드/테스트 완료 후 다음 단계 대기) 상태의
+# task는 스피너가 멈춰 보임. 그래프 뷰에서는 정상적으로 돌고 있음.
+#
+# ## 원인
+# `scripts/monitor-server.py`의 `_render_task_row_v2()`에서 `data-running`을
+# `.running` 신호 유무로만 판정. 반면 그래프 노드용 `_derive_node_status()`
+# (같은 파일)는 `.running` 신호 OR `task.status in _RUNNING_STATUSES` 둘 중
+# 하나만 만족하면 "running"으로 판정해서 두 뷰가 어긋남.
+#
+# `_RUNNING_STATUSES = {"[dd]", "[im]", "[ts]"}` 는 이미 module-level 상수로
+# 선언되어 있음 (~line 5128).
+#
+# ## 수정 방법
+# `_render_task_row_v2()` 함수 본문에서 `data_running` 변수를 계산하는 한 줄을
+# 3줄로 교체. signal 기반 판정과 status 기반 판정을 OR로 결합.
+#
+# ## 적용
+#   git apply docs/fixes/trow-spinner-status-match.patch
+#
+# ## 패치 실패 시 수동 수정
+# 1. `scripts/monitor-server.py` 열기 (renderers/ 분해 머지 후에는 다른 파일일 수 있음 — `_render_task_row_v2` 함수를 grep으로 찾기)
+# 2. 함수 내 `data_status = _trow_data_status(...)` 바로 다음 줄 찾기:
+#      data_running = "true" if (item_id and item_id in running_ids) else "false"
+# 3. 위 한 줄을 아래 3줄로 교체:
+#      running_by_signal = bool(item_id and item_id in running_ids)
+#      running_by_status = status_code in _RUNNING_STATUSES
+#      data_running = "true" if (running_by_signal or running_by_status) else "false"
+# 4. `_RUNNING_STATUSES` 상수가 동일 모듈/함수 스코프에서 접근 가능한지 확인
+#    (현재 monitor-server.py에서는 module-level 상수 — 접근 문제 없음)
+# 5. 회귀 확인: 대시보드에서 status `[dd]`인 task row 스피너가 도는지 확인
+#
+# ## 참고 위치
+# - 수정 대상: `_render_task_row_v2()` (monitor-server.py ~line 3008-)
+# - 대칭 로직 (참고): `_derive_node_status()` (monitor-server.py ~line 5185-)
+# - 상수: `_RUNNING_STATUSES = {"[dd]", "[im]", "[ts]"}` (~line 5128)
+
+--- a/scripts/monitor-server.py
++++ b/scripts/monitor-server.py
+@@ -3025,7 +3025,11 @@ def _render_task_row_v2(item, running_ids: set, failed_ids: set, lang: str = "ko
+     title = getattr(item, "title", None)
+     status_code = getattr(item, "status", None)
+     data_status = _trow_data_status(item, running_ids, failed_ids)
+-    data_running = "true" if (item_id and item_id in running_ids) else "false"
++    # Spinner triggers on .running signal OR intermediate DDTR status ([dd]/[im]/[ts])
++    # to match graph node behaviour (_derive_node_status).
++    running_by_signal = bool(item_id and item_id in running_ids)
++    running_by_status = status_code in _RUNNING_STATUSES
++    data_running = "true" if (running_by_signal or running_by_status) else "false"
+
+     # badge text: error counts as failed (same bucket as .failed signal).
+     is_failed = bool(error) or (item_id is not None and item_id in failed_ids)
