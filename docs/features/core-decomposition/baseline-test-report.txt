@@ -1,0 +1,37 @@
+core-decomposition Build Phase baseline (갱신본)
+최초 측정: 2026-04-24 (commit 602aade, Build Phase 시작 직전)
+최종 측정: 2026-04-24 (commit 05a8baa 이후, C1-5 완료 + C1-6 cleanup 직후)
+
+Command: rtk proxy python3 -m pytest -q scripts/ --tb=no
+
+## 최종 결과
+- 1997 passed, 2 failed, 176 skipped in 27.81s
+
+## 사전 존재 실패 (2건, core-decomposition 무관)
+
+### 1. scripts/test_monitor_task_expand_ui.py::TestTaskPanelCss::test_initial_right_negative
+  - 증상: 테스트가 CSS에 리터럴 "-560px" 포함을 단언하지만, CSS가
+    `calc(var(--panel-w) * -1)` 패턴으로 리팩토링됨.
+  - 분류: pre-existing (feature 시작 전부터 실패). monitor-v5 UI 회귀 테스트가
+    layout-skeleton 대신 px 값을 하드코딩한 케이스.
+  - Memory ref: feedback_design_regression_test_lock.md
+  - 본 feature에서 건드리지 않음.
+
+### 2. scripts/test_platform_smoke.py::SmokeTestBase::test_pane_polling_interval
+  - 증상: 대시보드 HTML에 meta refresh / setInterval(..., 2000) 패턴 검색 실패.
+  - 분류: 환경-의존 flaky. pre-decomposition commit(602aade) 상태에서도
+    재현됨 — Build agent 검증. skip/fail이 run에 따라 요동.
+  - 본 feature에서 건드리지 않음.
+
+## Build Phase 수용 기준 (달성)
+- 10개 모든 커밋(C0-1..C1-5)에서 "1 failed + 1 flaky = 최대 2 failed" 유지
+- 새 실패(위 2개 외) 0건 — 통과
+- Phase 0 + Phase 1 완료, core.py 7940 → 6874 LOC (-1066)
+
+## Pylance 잔존 진단 (의도된 facade 비용)
+- "형식 식에는 변수를 사용할 수 없습니다" (~28건): try/except 재바인딩이
+  except branch에서 `Any`로 narrow되어 union 발생. TYPE_CHECKING 블록으로
+  부분 완화. 완전 제거는 try/except 에 `# type: ignore` 대량 추가 또는
+  런타임 fallback 포기가 필요 — 런타임 안정성이 우선이므로 수용.
+- "X에 액세스하지 않았습니다" (~40건): 재-export 심볼. facade 의도.
+  `__all__` 미선언 정책(design.md §4.2)의 수용 가능한 비용.

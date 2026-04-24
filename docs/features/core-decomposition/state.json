@@ -1,9 +1,9 @@
 {
   "name": "core-decomposition",
-  "status": "[dd]",
+  "status": "[im]",
   "last": {
-    "event": "design.ok",
-    "at": "2026-04-24T13:47:45Z"
+    "event": "build.ok",
+    "at": "2026-04-24T14:32:09Z"
   },
   "phase_history": [
     {
@@ -12,8 +12,15 @@
       "to": "[dd]",
       "at": "2026-04-24T13:47:45Z",
       "elapsed_seconds": 0
+    },
+    {
+      "event": "build.ok",
+      "from": "[dd]",
+      "to": "[im]",
+      "at": "2026-04-24T14:32:09Z",
+      "elapsed_seconds": 2664
     }
   ],
-  "updated": "2026-04-24T13:47:45Z",
+  "updated": "2026-04-24T14:32:09Z",
   "started_at": "2026-04-24T13:47:45Z"
 }

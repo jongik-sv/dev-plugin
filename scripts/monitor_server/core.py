@@ -43,25 +43,34 @@ facade 계약:
 from __future__ import annotations
 
 import argparse
-import glob
 import hashlib
 import html
 import json
 import os
 import re
-import shutil
+import shutil  # noqa: F401 — tests patch via `MS.shutil.which` (see test_monitor_tmux.py). 제거 시 AttributeError.
 import signal
 import subprocess
 import sys
 import tempfile
 import threading
 import time
-from dataclasses import asdict, dataclass, field, is_dataclass
+from dataclasses import asdict, is_dataclass
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Callable, Dict, Iterable, List, Optional, Tuple
 from urllib.parse import parse_qs, quote, unquote, urlsplit
+
+# [core-decomposition:C1-6] 정적 타입 체커용 import.
+# signals/panes/workitems 의 심볼은 아래 try/except 패턴으로 런타임 재-export 되지만,
+# Pylance 는 except 분기(`X = _cXX_mod.X`)를 Any 로 좁혀 "형식 식에는 변수를 사용할 수
+# 없습니다" 경고를 낸다. TYPE_CHECKING 블록은 런타임에 평가되지 않고 타입 체커에게만
+# 정적 클래스 참조를 제공하여 타입 힌트에서 안전하게 쓰이게 한다.
+if TYPE_CHECKING:
+    from monitor_server.panes import PaneInfo
+    from monitor_server.signals import SignalEntry
+    from monitor_server.workitems import PhaseEntry, WorkItem
 
 if not sys.pycache_prefix:
     sys.pycache_prefix = "/tmp/codex-pycache"
