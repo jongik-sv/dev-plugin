@@ -470,35 +470,7 @@ _PHASE_CODE_TO_ATTR: "dict[str, str]" = {
 
 
 # moved to monitor_server.renderers.taskrow [core-renderer-split:C2-6]
-def _phase_label(status_code: "Optional[str]", lang: str, *, failed: bool, bypassed: bool) -> str:  # type: ignore[override]  # noqa: F811
-    _tr_mod = _c2b_load_renderer("taskrow")
-    if _tr_mod is not None:
-        return _tr_mod._phase_label(status_code, lang, failed=failed, bypassed=bypassed)
-    # inline fallback
-    normalised = _normalize_lang(lang)
-    if bypassed:
-        return _PHASE_LABELS["bypass"].get(normalised) or _PHASE_LABELS["bypass"]["ko"]
-    if failed:
-        return _PHASE_LABELS["failed"].get(normalised) or _PHASE_LABELS["failed"]["ko"]
-    code = str(status_code).strip() if status_code else ""
-    entry = _PHASE_LABELS.get(code)
-    if entry:
-        return entry.get(normalised) or entry["ko"]
-    return _PHASE_LABELS["pending"].get(normalised) or _PHASE_LABELS["pending"]["ko"]
-
-
 # moved to monitor_server.renderers.taskrow [core-renderer-split:C2-6]
-def _phase_data_attr(status_code: "Optional[str]", *, failed: bool = False, bypassed: bool = False) -> str:
-    _tr_mod = _c2b_load_renderer("taskrow")
-    if _tr_mod is not None:
-        return _tr_mod._phase_data_attr(status_code, failed=failed, bypassed=bypassed)
-    # inline fallback
-    if bypassed:
-        return "bypass"
-    if failed:
-        return "failed"
-    code = str(status_code).strip() if status_code else ""
-    return _PHASE_CODE_TO_ATTR.get(code, "pending")
 
 
 # Status → (emoji, label, css_class) for the non-override branch of
@@ -1992,11 +1964,6 @@ def _empty_section(anchor: str, heading: str, message: str, css: str = "empty") 
 
 
 # moved to monitor_server.renderers.header [core-renderer-split:C2-1]
-def _section_header(model: dict, lang: str = "ko", subproject: str = "") -> str:
-    _hdr_mod = _c2b_load_renderer("header")
-    if _hdr_mod is not None:
-        return _hdr_mod._section_header(model, lang, subproject)
-    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -2021,33 +1988,8 @@ _KPI_LABELS = {
 _KPI_ORDER = ["running", "failed", "bypass", "done", "pending"]
 
 
-def _kpi_counts(tasks, features, signals) -> dict:
-    _kpi_mod = _c2b_load_renderer("kpi")
-    if _kpi_mod is not None:
-        return _kpi_mod._kpi_counts(tasks, features, signals)
-    return {"running": 0, "failed": 0, "bypass": 0, "done": 0, "pending": 0}
-
-
-def _spark_buckets(items, kind: str, now, span_min: int = 10):
-    _kpi_mod = _c2b_load_renderer("kpi")
-    if _kpi_mod is not None:
-        return _kpi_mod._spark_buckets(items, kind, now, span_min)
-    return [0] * span_min
-
-
-def _kpi_spark_svg(buckets, color: str) -> str:
-    _kpi_mod = _c2b_load_renderer("kpi")
-    if _kpi_mod is not None:
-        return _kpi_mod._kpi_spark_svg(buckets, color)
-    return ""
-
-
+# moved to monitor_server.renderers.kpi [core-renderer-split:C2-2]
 # moved to monitor_server.renderers.header [core-renderer-split:C2-1]
-def _section_sticky_header(model: dict) -> str:
-    _hdr_mod = _c2b_load_renderer("header")
-    if _hdr_mod is not None:
-        return _hdr_mod._section_sticky_header(model)
-    return ""
 
 
 # v3 CSS-suffix for each KPI kind (matches reference stylesheet .kpi--run etc.)
@@ -2061,11 +2003,6 @@ _KPI_V3_SUFFIX = {
 
 
 # moved to monitor_server.renderers.kpi [core-renderer-split:C2-2]
-def _section_kpi(model: dict) -> str:
-    _kpi_mod = _c2b_load_renderer("kpi")
-    if _kpi_mod is not None:
-        return _kpi_mod._section_kpi(model)
-    return ""
 
 
 def _wp_donut_style(counts: dict) -> str:
@@ -2152,9 +2089,6 @@ def _wp_donut_svg(counts: dict) -> str:
 
 
 # moved to monitor_server.renderers.taskrow [core-renderer-split:C2-6]
-def _trow_data_status(item, running_ids: set, failed_ids: set) -> str:
-    """Return the data-status attribute value for a .trow element."""
-    return _row_state_class(item, running_ids, failed_ids)
 
 
 def _wp_card_counts(items, running_ids: set, failed_ids: set) -> dict:
@@ -2280,11 +2214,6 @@ def _trow_tooltip_skeleton() -> str:
 
 
 # moved to monitor_server.renderers.taskrow [core-renderer-split:C2-6]
-def _render_task_row_v2(item, running_ids: set, failed_ids: set, lang: str = "ko") -> str:
-    _tr_mod = _c2b_load_renderer("taskrow")
-    if _tr_mod is not None:
-        return _tr_mod._render_task_row_v2(item, running_ids, failed_ids, lang)
-    return ""
 
 
 def _merge_badge(ws: dict, lang: str = "ko") -> str:
@@ -2382,11 +2311,6 @@ def _section_wp_cards(*args, **kwargs) -> str:  # type: ignore[misc]
 
 
 # moved to monitor_server.renderers.features [core-renderer-split:C2-3]
-def _section_features(features, running_ids: set, failed_ids: set, heading: "Optional[str]" = None, lang: str = "ko") -> str:
-    _feat_mod = _c2b_load_renderer("features")
-    if _feat_mod is not None:
-        return _feat_mod._section_features(features, running_ids, failed_ids, heading, lang)
-    return ""
 
 
 def _pane_attr(pane, key: str, default=""):
@@ -2492,93 +2416,14 @@ def _pane_last_n_lines(pane_id: str, n: int = _PANE_PREVIEW_LINES) -> str:
 
 
 # moved to monitor_server.renderers.team [core-renderer-split:C1-2]
-def _render_pane_row(pane, preview_lines: "Optional[str]" = "") -> str:
-    _team_mod = _c2b_load_renderer("team")
-    if _team_mod is not None:
-        return _team_mod._render_pane_row(pane, preview_lines)
-    # fallback: minimal shim (flat-load context before renderers available)
-    pane_id_raw = _pane_attr(pane, "pane_id", "")
-    pane_id_esc = _esc(pane_id_raw)
-    cmd = _esc(_pane_attr(pane, "pane_current_command", ""))
-    pid = _esc(_pane_attr(pane, "pane_pid", ""))
-    window_name = _esc(_pane_attr(pane, "window_name", ""))
-    data_state = "idle" if cmd in ("zsh", "bash", "sh") else "live"
-    if preview_lines is None:
-        preview_html = '<pre class="pane-preview empty">no preview (too many panes)</pre>'
-    else:
-        preview_html = f'<pre class="pane-preview">{_esc(preview_lines)}</pre>'
-    return (
-        f'<div class="pane" data-state="{data_state}">\n'
-        f'  <div class="pane-head">\n'
-        f'    <div class="name">{window_name}</div>\n'
-        f'    <div class="meta">{pane_id_esc} · <span class="cmd">{cmd}</span> · pid {pid}</div>\n'
-        f'    <a class="mini-btn" href="/pane/{pane_id_esc}">show output</a>\n'
-        f'    <button class="mini-btn primary" type="button"'
-        f' data-pane-expand="{pane_id_esc}"'
-        f' aria-label="Expand pane {pane_id_esc}">expand <span class="kbd">&#x21B5;</span></button>\n'
-        f'  </div>\n'
-        f'{preview_html}\n'
-        '</div>'
-    )
 
 
 _TOO_MANY_PANES_THRESHOLD = 20
 
 
 # moved to monitor_server.renderers.team [core-renderer-split:C1-2]
-def _section_team(panes, heading: "Optional[str]" = None) -> str:
-    _team_mod = _c2b_load_renderer("team")
-    if _team_mod is not None:
-        return _team_mod._section_team(panes, heading)
-    return ""
-
-
 # moved to monitor_server.renderers.subagents [core-renderer-split:C1-3]
-_SUBAGENT_INFO = (
-    '<p class="info">agent-pool subagents run inside the parent Claude session'
-    ' — output capture is unavailable (signals only).</p>'
-)
-
-
-def _render_subagent_row(sig) -> str:
-    _sub_mod = _c2b_load_renderer("subagents")
-    if _sub_mod is not None:
-        return _sub_mod._render_subagent_row(sig)
-    # fallback shim
-    kind = getattr(sig, "kind", "")
-    task_id = getattr(sig, "task_id", "")
-    state_map = {"running": "running", "done": "done", "failed": "failed", "bypassed": "done"}
-    data_state = state_map.get(kind, "pending")
-    return (
-        f'<span class="sub" data-state="{data_state}">'
-        f'<span class="sw"></span>'
-        f'{_esc(task_id)}'
-        f'<span class="n">{_esc(kind if kind else "?")}</span>'
-        f'</span>'
-    )
-
-
-def _section_subagents(signals, heading: "Optional[str]" = None) -> str:
-    _sub_mod = _c2b_load_renderer("subagents")
-    if _sub_mod is not None:
-        return _sub_mod._section_subagents(signals, heading)
-    return ""
-
-
 # moved to monitor_server.renderers.history [core-renderer-split:C2-4]
-def _status_class_for_phase(status_str: str) -> str:
-    _hist_mod = _c2b_load_renderer("history")
-    if _hist_mod is not None:
-        return _hist_mod._status_class_for_phase(status_str)
-    return ""
-
-
-# moved to monitor_server.renderers.history [core-renderer-split:C2-4]
-def _section_phase_history(tasks, features) -> str:
-    _hist_mod = _c2b_load_renderer("history")
-    if _hist_mod is not None:
-        return _hist_mod._section_phase_history(tasks, features)
-    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -2587,11 +2432,6 @@ def _section_phase_history(tasks, features) -> str:
 
 
 # moved to monitor_server.renderers.depgraph [core-renderer-split:C1-5]
-def _section_dep_graph(lang: str = "ko", subproject: str = "all") -> str:
-    _dg_mod = _c2b_load_renderer("depgraph")
-    if _dg_mod is not None:
-        return _dg_mod._section_dep_graph(lang, subproject)
-    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -2622,83 +2462,6 @@ def _parse_iso_utc(s):
 
 
 # moved to monitor_server.renderers.activity [core-renderer-split:C1-4]
-def _fmt_hms(dt):
-    _act_mod = _c2b_load_renderer("activity")
-    if _act_mod is not None:
-        return _act_mod._fmt_hms(dt)
-    return dt.astimezone(timezone.utc).strftime("%H:%M:%S")
-
-
-def _fmt_elapsed_short(seconds):
-    _act_mod = _c2b_load_renderer("activity")
-    if _act_mod is not None:
-        return _act_mod._fmt_elapsed_short(seconds)
-    if seconds is None:
-        return "-"
-    try:
-        total = int(float(seconds))
-    except (TypeError, ValueError):
-        return "-"
-    if total < 0:
-        return "-"
-    if total < 60:
-        return str(total) + "s"
-    if total < 3600:
-        m, s = divmod(total, 60)
-        return str(m) + "m " + str(s) + "s"
-    h, rem = divmod(total, 3600)
-    m = rem // 60
-    return str(h) + "h " + str(m) + "m"
-
-
-def _event_to_sig_kind(event: "Optional[str]") -> "Optional[str]":
-    _act_mod = _c2b_load_renderer("activity")
-    if _act_mod is not None:
-        return _act_mod._event_to_sig_kind(event)
-    if not event:
-        return None
-    if event == "bypass":
-        return "bypassed"
-    if event.endswith(".fail"):
-        return "failed"
-    if event.endswith(".done"):
-        return "done"
-    return None
-
-
-def _live_activity_rows(tasks, features, limit=_LIVE_ACTIVITY_LIMIT):
-    _act_mod = _c2b_load_renderer("activity")
-    if _act_mod is not None:
-        return _act_mod._live_activity_rows(tasks, features, limit)
-    return []
-
-
-def _live_activity_details_wrap(heading: str, body: str) -> str:
-    _act_mod = _c2b_load_renderer("activity")
-    if _act_mod is not None:
-        return _act_mod._live_activity_details_wrap(heading, body)
-    return body
-
-
-def _arow_data_to(event: "Optional[str]", to_s: "Optional[str]") -> str:
-    _act_mod = _c2b_load_renderer("activity")
-    if _act_mod is not None:
-        return _act_mod._arow_data_to(event, to_s)
-    return "pending"
-
-
-def _render_arow(item_id: str, entry, dt, sig_content: dict) -> str:
-    _act_mod = _c2b_load_renderer("activity")
-    if _act_mod is not None:
-        return _act_mod._render_arow(item_id, entry, dt, sig_content)
-    return ""
-
-
-def _section_live_activity(model, heading: "Optional[str]" = None):
-    _act_mod = _c2b_load_renderer("activity")
-    if _act_mod is not None:
-        return _act_mod._section_live_activity(model, heading)
-    return ""
 
 
 def _phase_label_history(status_str):
@@ -3354,19 +3117,7 @@ def _wrap_with_data_section(section_html: str, key: str) -> str:
 
 
 # moved to monitor_server.renderers.tabs [core-renderer-split:C2-5]
-def _section_subproject_tabs(model: dict) -> str:
-    _tabs_mod = _c2b_load_renderer("tabs")
-    if _tabs_mod is not None:
-        return _tabs_mod._section_subproject_tabs(model)
-    return ""
-
-
 # moved to monitor_server.renderers.filterbar [core-renderer-split:C1-5]
-def _section_filter_bar(lang: str, distinct_domains: list) -> str:
-    _fb_mod = _c2b_load_renderer("filterbar")
-    if _fb_mod is not None:
-        return _fb_mod._section_filter_bar(lang, distinct_domains)
-    return ""
 
 
 def _build_dashboard_body(s: dict) -> str:
@@ -3816,12 +3567,11 @@ def _render_pane_html(
     return ""
 
 
-# moved to monitor_server.renderers.panel [core-renderer-split:C2-7]
 def _render_pane_json(payload: dict) -> bytes:
     _panel_mod = _c2b_load_renderer("panel")
     if _panel_mod is not None:
         return _panel_mod._render_pane_json(payload)
-    return json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    return b"{}"
 
 
 def _send_html_response(handler, status: int, body_str: str) -> None:
@@ -5639,7 +5389,7 @@ except (ImportError, AttributeError):
         pass
 try:
     from .renderers.taskrow import (  # noqa: F401,E402
-        _phase_label, _phase_data_attr, _render_task_row_v2,
+        _phase_label, _phase_data_attr, _render_task_row_v2, _trow_data_status,
     )
 except (ImportError, AttributeError):
     try:
@@ -5648,6 +5398,7 @@ except (ImportError, AttributeError):
             _phase_label = _c2b_tr._phase_label  # type: ignore[assignment]
             _phase_data_attr = _c2b_tr._phase_data_attr  # type: ignore[assignment]
             _render_task_row_v2 = _c2b_tr._render_task_row_v2  # type: ignore[assignment]
+            _trow_data_status = _c2b_tr._trow_data_status  # type: ignore[assignment]
     except (ImportError, AttributeError):
         pass
 try:

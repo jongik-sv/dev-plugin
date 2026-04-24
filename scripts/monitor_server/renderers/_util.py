@@ -33,14 +33,13 @@ _wp_donut_style = _mod._wp_donut_style
 _wp_donut_svg = _mod._wp_donut_svg
 _pane_attr = _mod._pane_attr
 _pane_last_n_lines = _mod._pane_last_n_lines
-_render_pane_row = _mod._render_pane_row
 _TOO_MANY_PANES_THRESHOLD = _mod._TOO_MANY_PANES_THRESHOLD
 _PANE_PREVIEW_LINES = _mod._PANE_PREVIEW_LINES
-_render_subagent_row = _mod._render_subagent_row
-_SUBAGENT_INFO = _mod._SUBAGENT_INFO
-_live_activity_rows = _mod._live_activity_rows
-_render_arow = _mod._render_arow
-_live_activity_details_wrap = _mod._live_activity_details_wrap
+# _SUBAGENT_INFO는 facade 블록 이후 core에서 override되므로 lazy load
+_SUBAGENT_INFO = (
+    '<p class="info">agent-pool subagents run inside the parent Claude session'
+    ' — output capture is unavailable (signals only).</p>'
+)
 
 # taskrow.py 커밋 6(본문 이전) 이후 renderers/taskrow.py 로 이동 예정인 헬퍼들.
 _wrap_with_data_section = _mod._wrap_with_data_section
@@ -66,7 +65,11 @@ _KNOWN_PHASES = _mod._KNOWN_PHASES
 # taskrow.py C2-6 body-transfer에 필요한 추가 심볼
 _ERROR_TITLE_CAP = _mod._ERROR_TITLE_CAP
 _phase_models_for = _mod._phase_models_for
-_trow_data_status = _mod._trow_data_status
+
+
+def _trow_data_status(item, running_ids: set, failed_ids: set) -> str:
+    """Return the data-status attribute value for a .trow element."""
+    return _row_state_class(item, running_ids, failed_ids)
 
 # panel.py C2-7 body-transfer에 필요한 추가 심볼
 get_static_version = _mod.get_static_version
