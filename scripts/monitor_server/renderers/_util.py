@@ -68,5 +68,8 @@ _ERROR_TITLE_CAP = _mod._ERROR_TITLE_CAP
 _phase_models_for = _mod._phase_models_for
 _trow_data_status = _mod._trow_data_status
 
+# panel.py C2-7 body-transfer에 필요한 추가 심볼
+get_static_version = _mod.get_static_version
+
 # taskrow.py 선-shim이 _entry._phase_label 등에 접근할 수 있도록 _mod를 공개 심볼로 노출.
 # taskrow.py의 `from ._util import _mod as _entry` 에서 사용된다.

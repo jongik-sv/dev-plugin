@@ -3803,56 +3803,24 @@ def _pane_capture_payload(
     }
 
 
+# moved to monitor_server.renderers.panel [core-renderer-split:C2-7]
 def _render_pane_html(
     pane_id: str,
     payload: dict,
     *,
     refresh_seconds: int = 2,
 ) -> str:
-    """Render a complete HTML document for the pane detail page.
-
-    All user-derived strings are escaped with ``html.escape``. No external
-    resources are loaded — CSS and JS are fully inline. The page uses vanilla
-    JS ``setInterval + fetch`` for partial refresh (no ``<meta http-equiv=refresh>``).
-    """
-    escaped_id = html.escape(pane_id, quote=True)
-    escaped_ts = html.escape(payload.get("captured_at") or "", quote=True)
-    lines = payload.get("lines") or []
-    escaped_lines = "\n".join(html.escape(ln, quote=True) for ln in lines)
-    error_val = payload.get("error")
-    error_block = (
-        f'<p class="error">capture failed: {html.escape(str(error_val), quote=True)}</p>\n'
-        if error_val is not None
-        else ""
-    )
-
-    css_ver = get_static_version("style.css")
-    js_ver = get_static_version("app.js")
-    return (
-        '<!DOCTYPE html>\n'
-        '<html lang="en">\n'
-        '<head>\n'
-        '  <meta charset="utf-8">\n'
-        f'  <title>pane {escaped_id}</title>\n'
-        f'  <link rel="stylesheet" href="/static/style.css?v={css_ver}">\n'
-        f'  <script src="/static/app.js?v={js_ver}" defer></script>\n'
-        '</head>\n'
-        '<body>\n'
-        '<nav class="top-nav"><a href="/">&#x2190; back to dashboard</a></nav>\n'
-        f'<h1>pane <code>{escaped_id}</code></h1>\n'
-        f'{error_block}'
-        f'<pre class="pane-capture" data-pane="{escaped_id}">{escaped_lines}</pre>\n'
-        f'<div class="footer">captured at {escaped_ts}</div>\n'
-        '</body>\n'
-        '</html>\n'
-    )
+    _panel_mod = _c2b_load_renderer("panel")
+    if _panel_mod is not None:
+        return _panel_mod._render_pane_html(pane_id, payload, refresh_seconds=refresh_seconds)
+    return ""
 
 
+# moved to monitor_server.renderers.panel [core-renderer-split:C2-7]
 def _render_pane_json(payload: dict) -> bytes:
-    """Serialize the pane payload dict to UTF-8 JSON bytes.
-
-    ``line_count`` is always present (acceptance §3).
-    """
+    _panel_mod = _c2b_load_renderer("panel")
+    if _panel_mod is not None:
+        return _panel_mod._render_pane_json(payload)
     return json.dumps(payload, ensure_ascii=False).encode("utf-8")
 
 
@@ -5680,6 +5648,16 @@ except (ImportError, AttributeError):
             _phase_label = _c2b_tr._phase_label  # type: ignore[assignment]
             _phase_data_attr = _c2b_tr._phase_data_attr  # type: ignore[assignment]
             _render_task_row_v2 = _c2b_tr._render_task_row_v2  # type: ignore[assignment]
+    except (ImportError, AttributeError):
+        pass
+try:
+    from .renderers.panel import _render_pane_html, _render_pane_json  # noqa: F401,E402
+except (ImportError, AttributeError):
+    try:
+        _c2b_pan = _c2b_load_renderer("panel")
+        if _c2b_pan is not None:
+            _render_pane_html = _c2b_pan._render_pane_html  # type: ignore[assignment]
+            _render_pane_json = _c2b_pan._render_pane_json  # type: ignore[assignment]
     except (ImportError, AttributeError):
         pass
 # === /renderer facade ===
