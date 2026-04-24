@@ -187,13 +187,28 @@ class TestTTLCache(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 class TestScanSignalsCached(unittest.TestCase):
-    """Tests for the scan_signals_cached() TTL wrapper in core.py."""
+    """Tests for the scan_signals_cached() TTL wrapper.
+
+    core-decomposition (C1-2): scan_signals_cached 및 _SIGNALS_CACHE 는
+    monitor_server.signals 로 이관되었다. 내부 이름 참조가 signals 모듈의
+    전역 바인딩이므로 monkey-patch 는 signals_mod 경유로 수행한다.
+    core 경유 재-export(hasattr(self.core, ...)) 는 backward-compat 보증으로
+    계속 검증.
+    """
 
     def setUp(self):
         self.core = _import_core()
+        # scan_signals_cached 의 실제 모듈 (signals) 을 해석. core 경유 재-export
+        # 가 정상이면 __globals__['__name__'] 가 'monitor_server.signals' 다.
+        fn = getattr(self.core, "scan_signals_cached", None)
+        mod_name = (fn.__globals__.get("__name__") if fn is not None else None) or "monitor_server.signals"
+        self.signals_mod = sys.modules.get(mod_name)
+        if self.signals_mod is None:
+            import monitor_server.signals as signals_mod
+            self.signals_mod = signals_mod
 
     def test_scan_signals_cached_exists(self):
-        """scan_signals_cached must be defined in core.py."""
+        """scan_signals_cached must be defined (core 경유 재-export)."""
         self.assertTrue(
             hasattr(self.core, "scan_signals_cached"),
             "scan_signals_cached not found in monitor_server.core",
@@ -215,32 +230,31 @@ class TestScanSignalsCached(unittest.TestCase):
     def test_cache_hit_avoids_second_scan(self):
         """Second call within TTL should return cached result without calling scan_signals."""
         # Reset cache to ensure clean state
-        self.core._SIGNALS_CACHE.set("signals", None)  # prime with something
+        self.signals_mod._SIGNALS_CACHE.set("signals", None)  # prime with something
         # Use a fresh cache for isolation
         fake_cache = self.core._TTLCache(ttl_seconds=10.0)
         sentinel = [object()]  # unique sentinel list
         fake_cache.set("signals", sentinel)
 
         call_count = [0]
-        original_scan = self.core.scan_signals
 
         def counting_scan():
             call_count[0] += 1
             return []
 
-        # Temporarily patch module-level _SIGNALS_CACHE and scan_signals
-        original_cache = self.core._SIGNALS_CACHE
-        self.core._SIGNALS_CACHE = fake_cache
-        original_scan_ref = self.core.scan_signals
-        self.core.scan_signals = counting_scan
+        # Monkey-patch signals 모듈 전역 — scan_signals_cached 의 내부 이름 참조 대상.
+        original_cache = self.signals_mod._SIGNALS_CACHE
+        self.signals_mod._SIGNALS_CACHE = fake_cache
+        original_scan_ref = self.signals_mod.scan_signals
+        self.signals_mod.scan_signals = counting_scan
         try:
             result = self.core.scan_signals_cached()
             # Cache hit — scan_signals should NOT be called
             self.assertEqual(call_count[0], 0, "scan_signals called despite cache hit")
             self.assertIs(result, sentinel)
         finally:
-            self.core._SIGNALS_CACHE = original_cache
-            self.core.scan_signals = original_scan_ref
+            self.signals_mod._SIGNALS_CACHE = original_cache
+            self.signals_mod.scan_signals = original_scan_ref
 
     def test_cache_miss_calls_scan(self):
         """On cache miss, scan_signals is called and result is stored."""
@@ -253,17 +267,17 @@ class TestScanSignalsCached(unittest.TestCase):
             call_count[0] += 1
             return expected
 
-        original_cache = self.core._SIGNALS_CACHE
-        original_scan_ref = self.core.scan_signals
-        self.core._SIGNALS_CACHE = fake_cache
-        self.core.scan_signals = counting_scan
+        original_cache = self.signals_mod._SIGNALS_CACHE
+        original_scan_ref = self.signals_mod.scan_signals
+        self.signals_mod._SIGNALS_CACHE = fake_cache
+        self.signals_mod.scan_signals = counting_scan
         try:
             result = self.core.scan_signals_cached()
             self.assertEqual(call_count[0], 1, "scan_signals should be called on miss")
             self.assertEqual(result, expected)
         finally:
-            self.core._SIGNALS_CACHE = original_cache
-            self.core.scan_signals = original_scan_ref
+            self.signals_mod._SIGNALS_CACHE = original_cache
+            self.signals_mod.scan_signals = original_scan_ref
 
     def test_empty_list_cached_correctly(self):
         """Empty list [] is a valid cache value (edge case: not falsy-confused with miss)."""
@@ -276,17 +290,17 @@ class TestScanSignalsCached(unittest.TestCase):
             call_count[0] += 1
             return [{"kind": "running", "task_id": "X"}]
 
-        original_cache = self.core._SIGNALS_CACHE
-        original_scan_ref = self.core.scan_signals
-        self.core._SIGNALS_CACHE = fake_cache
-        self.core.scan_signals = counting_scan
+        original_cache = self.signals_mod._SIGNALS_CACHE
+        original_scan_ref = self.signals_mod.scan_signals
+        self.signals_mod._SIGNALS_CACHE = fake_cache
+        self.signals_mod.scan_signals = counting_scan
         try:
             result = self.core.scan_signals_cached()
             self.assertEqual(call_count[0], 0, "Empty list should be served from cache, not re-scanned")
             self.assertEqual(result, [])
         finally:
-            self.core._SIGNALS_CACHE = original_cache
-            self.core.scan_signals = original_scan_ref
+            self.signals_mod._SIGNALS_CACHE = original_cache
+            self.signals_mod.scan_signals = original_scan_ref
 
 
 # ---------------------------------------------------------------------------

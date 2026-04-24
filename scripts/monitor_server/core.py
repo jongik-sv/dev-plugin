@@ -88,11 +88,35 @@ except (ImportError, ModuleNotFoundError):
     _now_iso_z = _c04_mod._now_iso_z
 
 # ---------------------------------------------------------------------------
-# [core-decomposition:C1-1] caches 모듈 재-export
+# [core-decomposition:C1-1/C1-2] caches + signals 모듈 재-export
 # ---------------------------------------------------------------------------
-# _TTLCache, _SIGNALS_CACHE, _GRAPH_CACHE, _ensure_etag_cache 는 caches.py로
-# 이관되었다. `core._SIGNALS_CACHE` 등 기존 속성 접근을 유지하기 위해 재-export.
-# flat-load fallback 은 C0-4 의 monitor_server.api 처리와 동일 패턴 사용.
+# flat-load 컨텍스트(scripts/monitor-server.py 를 'monitor_server' 이름으로 로드한
+# 테스트)에서 'monitor_server.caches' 같은 dotted import 는 실패한다.
+# 이 fallback 은 caches.py / signals.py 를 파일로 로드한 뒤 sys.modules 의
+# 정규 키('monitor_server.caches', 'monitor_server.signals')에 등록하여
+# signals.py 내부의 `from monitor_server.caches import _SIGNALS_CACHE` 같은
+# 하위 import 가 정상 동작하게 만든다. 이렇게 해야 core/signals 두 경로에서
+# 동일한 _SIGNALS_CACHE 인스턴스가 공유된다.
+
+def _c1_bootstrap_submodules():
+    """flat-load 환경에서 caches/signals submodule 을 pre-populate."""
+    import importlib.util as _ilu
+    pkg_dir = Path(__file__).resolve().parent
+    for submod_name, fname in (("caches", "caches.py"), ("signals", "signals.py")):
+        key = f"monitor_server.{submod_name}"
+        if sys.modules.get(key) is not None:
+            continue
+        path = pkg_dir / fname
+        if not path.exists():
+            continue
+        spec = _ilu.spec_from_file_location(key, str(path))
+        if spec is None:
+            continue
+        mod = _ilu.module_from_spec(spec)
+        sys.modules[key] = mod
+        spec.loader.exec_module(mod)  # type: ignore[union-attr]
+
+
 try:
     from monitor_server.caches import (  # noqa: F401,E402
         _TTLCache,
@@ -105,19 +129,12 @@ try:
     # _ensure_etag_cache() 호출 후 caches 모듈에서 다시 읽는다.
     import monitor_server.caches as _caches_mod  # noqa: E402
 except (ImportError, ModuleNotFoundError):
-    import importlib.util as _c11_ilu  # type: ignore
-    _c11_caches_path = Path(__file__).resolve().parent / "caches.py"
-    _c11_spec = _c11_ilu.spec_from_file_location(
-        "monitor_server_caches_c1_1", _c11_caches_path
-    )
-    _c11_mod = _c11_ilu.module_from_spec(_c11_spec)
-    sys.modules.setdefault("monitor_server_caches_c1_1", _c11_mod)
-    _c11_spec.loader.exec_module(_c11_mod)  # type: ignore[union-attr]
-    _TTLCache = _c11_mod._TTLCache
-    _SIGNALS_CACHE = _c11_mod._SIGNALS_CACHE
-    _GRAPH_CACHE = _c11_mod._GRAPH_CACHE
-    _ensure_etag_cache = _c11_mod._ensure_etag_cache
-    _caches_mod = _c11_mod
+    _c1_bootstrap_submodules()
+    _caches_mod = sys.modules["monitor_server.caches"]
+    _TTLCache = _caches_mod._TTLCache
+    _SIGNALS_CACHE = _caches_mod._SIGNALS_CACHE
+    _GRAPH_CACHE = _caches_mod._GRAPH_CACHE
+    _ensure_etag_cache = _caches_mod._ensure_etag_cache
 
 
 def _compute_etag(*args, **kwargs):  # type: ignore[no-redef]
@@ -140,7 +157,41 @@ def _check_if_none_match(*args, **kwargs):  # type: ignore[no-redef]
 # Constants
 # ---------------------------------------------------------------------------
 
-_SIGNAL_KINDS = {"running", "done", "failed", "bypassed"}
+# ---------------------------------------------------------------------------
+# [core-decomposition:C1-2] signals 모듈 재-export
+# ---------------------------------------------------------------------------
+# SignalEntry, scan_signals*, _walk_signal_entries, _wp_busy_set, 신호 관련
+# 상수는 signals.py 로 이관되었다. core.py facade 에서는 재-export만 수행.
+try:
+    from monitor_server.signals import (  # noqa: F401,E402
+        SignalEntry,
+        _iso_mtime,
+        _signal_entry,
+        _walk_signal_entries,
+        scan_signals,
+        scan_signals_cached,
+        _wp_busy_set,
+        _SIGNAL_KINDS,
+        _AGENT_POOL_DIR_PREFIX,
+        _AGENT_POOL_SCOPE_PREFIX,
+        _WP_SIGNAL_PREFIX_RE,
+        _WP_ID_RE,
+    )
+except (ImportError, ModuleNotFoundError):
+    _c1_bootstrap_submodules()
+    _c12_mod = sys.modules["monitor_server.signals"]
+    SignalEntry = _c12_mod.SignalEntry
+    _iso_mtime = _c12_mod._iso_mtime
+    _signal_entry = _c12_mod._signal_entry
+    _walk_signal_entries = _c12_mod._walk_signal_entries
+    scan_signals = _c12_mod.scan_signals
+    scan_signals_cached = _c12_mod.scan_signals_cached
+    _wp_busy_set = _c12_mod._wp_busy_set
+    _SIGNAL_KINDS = _c12_mod._SIGNAL_KINDS
+    _AGENT_POOL_DIR_PREFIX = _c12_mod._AGENT_POOL_DIR_PREFIX
+    _AGENT_POOL_SCOPE_PREFIX = _c12_mod._AGENT_POOL_SCOPE_PREFIX
+    _WP_SIGNAL_PREFIX_RE = _c12_mod._WP_SIGNAL_PREFIX_RE
+    _WP_ID_RE = _c12_mod._WP_ID_RE
 
 _TMUX_FMT = (
     "#{window_name}\t#{window_id}\t#{pane_id}\t#{pane_index}\t"
@@ -164,17 +215,6 @@ _PANE_PREVIEW_LINES = 6
 # the implementation reference a single source of truth.
 _LIST_PANES_TIMEOUT = 2
 _CAPTURE_PANE_TIMEOUT = 3
-
-# Agent-pool signal directory prefix and scope prefix (scan_signals + _classify_signal_scopes).
-_AGENT_POOL_DIR_PREFIX = "agent-pool-signals-"
-_AGENT_POOL_SCOPE_PREFIX = "agent-pool:"
-
-# WP-scoped signal task_id prefix pattern (e.g. "WP-01-").
-_WP_SIGNAL_PREFIX_RE = re.compile(r"^WP-\d{2}-")
-
-# wp-progress-spinner: WP 레벨 busy 감지 패턴 (^WP-\d{2}$).
-# _WP_SIGNAL_PREFIX_RE (^WP-\d{2}-)는 Task 레벨 신호 감지용이므로 별도 패턴 사용.
-_WP_ID_RE = re.compile(r"^WP-\d{2}$")
 
 # ---------------------------------------------------------------------------
 # Static file serving constants (TSK-03-03)
@@ -202,25 +242,7 @@ _STATIC_WHITELIST: "frozenset[str]" = frozenset({
 # ---------------------------------------------------------------------------
 
 
-@dataclass
-class SignalEntry:
-    """Signal file 메타데이터 (TRD §5.2).
-
-    Attributes:
-        name: 파일명 (예: ``TSK-01-02.done``).
-        kind: 확장자로 결정되는 종류 (``running``/``done``/``failed``/``bypassed``).
-        task_id: 파일명 stem (확장자 제외).
-        mtime: ISO-8601 UTC 수정 시각 문자열.
-        scope: subdir 이름(``"proj-a"`` 등), ``"shared"`` (root 직하 파일 fallback),
-        또는 ``"agent-pool:{timestamp}"``.
-    """
-
-    name: str
-    kind: str
-    task_id: str
-    mtime: str
-    scope: str
-    content: str = ""
+# SignalEntry: moved to monitor_server.signals (C1-2).
 
 
 @dataclass
@@ -240,166 +262,8 @@ class PaneInfo:
     is_active: bool
 
 
-# ---------------------------------------------------------------------------
-# scan_signals
-# ---------------------------------------------------------------------------
-
-
-def _iso_mtime(path: str) -> str:
-    """Return ISO-8601 UTC mtime string for *path*.
-
-    Fallback to empty string if stat fails — caller stays exception-free.
-    """
-    try:
-        ts = os.path.getmtime(path)
-    except OSError:
-        return ""
-    return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
-
-
-def _signal_entry(path: str, scope: str) -> Optional[SignalEntry]:
-    """Build a SignalEntry from *path* or return None if extension is unknown."""
-    name = os.path.basename(path)
-    stem, dot, ext = name.rpartition(".")
-    if not dot or not stem:
-        return None
-    if ext not in _SIGNAL_KINDS:
-        return None
-    content = ""
-    try:
-        with open(path, encoding="utf-8", errors="replace") as fh:
-            raw = fh.read(500)
-        first_line = raw.splitlines()[0].strip() if raw.strip() else ""
-        content = first_line[:200]
-    except OSError:
-        pass
-    return SignalEntry(
-        name=name,
-        kind=ext,
-        task_id=stem,
-        mtime=_iso_mtime(path),
-        scope=scope,
-        content=content,
-    )
-
-
-def _walk_signal_entries(root: str, scope: str) -> List[SignalEntry]:
-    """Recursively collect valid ``SignalEntry`` items under *root* with *scope*.
-
-    Returns ``[]`` if *root* is not an existing directory — callers do not need to
-    pre-check ``os.path.isdir``. Files with unknown extensions are silently
-    skipped by ``_signal_entry``.
-
-    Subdirectories whose name starts with ``_`` are treated as archive/private
-    (Jekyll/pytest convention) and pruned from the walk. This protects live
-    signal state from being polluted by manual backups like ``_backup-{ts}/``
-    left behind after WBS resume cleanup.
-    """
-    if not os.path.isdir(root):
-        return []
-    collected: List[SignalEntry] = []
-    for dirpath, dirnames, filenames in os.walk(root):
-        # Prune archive/private subdirs in-place so os.walk skips their contents.
-        dirnames[:] = [d for d in dirnames if not d.startswith("_")]
-        for fn in filenames:
-            full = os.path.join(dirpath, fn)
-            entry = _signal_entry(full, scope)
-            if entry is not None:
-                collected.append(entry)
-    return collected
-
-
-def scan_signals() -> List[SignalEntry]:
-    """Enumerate signal files under ``${TMPDIR}``.
-
-    Scope resolution:
-
-    - ``${TMPDIR}/claude-signals/{subdir}/**`` (recursive) →
-      ``scope="{subdir}"`` (subdir name is the scope, TRD §3.3 subdir-per-scope).
-    - ``${TMPDIR}/claude-signals/{bare-file}`` (root-direct file, no subdir) →
-      ``scope="shared"`` (backward-compatibility fallback).
-    - ``${TMPDIR}/agent-pool-signals-*/**`` (recursive) →
-      ``scope="agent-pool:{timestamp}"`` where ``{timestamp}`` is the directory-name
-      suffix after the ``agent-pool-signals-`` prefix (preserves the trailing
-      ``-$$`` PID used by agent-pool).
-
-    Note: ``_classify_signal_scopes`` treats any scope that is not prefixed with
-    ``agent-pool:`` as the shared bucket (including subdir names), so the dashboard
-    display count is unchanged regardless of the actual scope value.
-
-    Files whose extension is not one of ``running``/``done``/``failed``/``bypassed``
-    are silently skipped. Missing directories are not errors — they simply yield
-    zero entries.
-    """
-    tmp_root = tempfile.gettempdir()
-    entries: List[SignalEntry] = []
-
-    # (A) Subdir-per-scope — iterate direct children of claude-signals/
-    cs_root = os.path.join(tmp_root, "claude-signals")
-    if os.path.isdir(cs_root):
-        for child_name in sorted(os.listdir(cs_root)):
-            child_path = os.path.join(cs_root, child_name)
-            if os.path.isdir(child_path):
-                # Directory: use child directory name as scope
-                entries.extend(_walk_signal_entries(child_path, child_name))
-            else:
-                # Root-direct file: backward-compatibility fallback → scope="shared"
-                entry = _signal_entry(child_path, "shared")
-                if entry is not None:
-                    entries.append(entry)
-
-    # (B) Agent-pool scope — each agent-pool-signals-{timestamp}/ directory
-    for pool_dir in glob.glob(os.path.join(tmp_root, f"{_AGENT_POOL_DIR_PREFIX}*")):
-        pool_name = os.path.basename(pool_dir)
-        timestamp = pool_name[len(_AGENT_POOL_DIR_PREFIX):]
-        entries.extend(_walk_signal_entries(pool_dir, f"{_AGENT_POOL_SCOPE_PREFIX}{timestamp}"))
-
-    return entries
-
-
-def scan_signals_cached() -> "List[SignalEntry]":
-    """Return ``scan_signals()`` result from the 1-second TTL cache.
-
-    Cache key: ``"signals"`` (singleton — all requests share the same cache slot).
-    On a cache miss, calls ``scan_signals()``, stores the result, and returns it.
-    The empty-list case ``[]`` is a valid cache value; it is not confused with a
-    miss (the cache uses a ``(value, hit)`` tuple protocol).
-    """
-    value, hit = _SIGNALS_CACHE.get("signals")
-    if hit:
-        return value  # type: ignore[return-value]
-    result = scan_signals()
-    _SIGNALS_CACHE.set("signals", result)
-    return result
-
-
-def _wp_busy_set(signals: "List[SignalEntry]") -> "dict[str, str]":
-    """WP 레벨 busy 상태를 {wp_id: label} 딕셔너리로 반환한다.
-
-    kind="running" AND task_id가 ^WP-\\d{2}$ 패턴인 시그널만 추출.
-    content 첫 줄 키워드로 레이블 결정:
-      - "merge" 포함 → "통합 중"
-      - "test" 포함 → "테스트 중"
-      - 그 외 → "처리 중"
-
-    wp-progress-spinner feature: 기존 _WP_SIGNAL_PREFIX_RE(^WP-\\d{2}-)는
-    Task 레벨 신호 감지용이므로 WP 레벨 감지에는 별도 _WP_ID_RE(^WP-\\d{2}$) 사용.
-    """
-    result: "dict[str, str]" = {}
-    for sig in signals:
-        if sig.kind != "running":
-            continue
-        if not _WP_ID_RE.match(sig.task_id):
-            continue
-        content_lower = sig.content.lower()
-        if "merge" in content_lower:
-            label = "통합 중"
-        elif "test" in content_lower:
-            label = "테스트 중"
-        else:
-            label = "처리 중"
-        result[sig.task_id] = label
-    return result
+# scan_signals*, _signal_entry, _walk_signal_entries, _iso_mtime, _wp_busy_set:
+# moved to monitor_server.signals (C1-2).
 
 
 # ---------------------------------------------------------------------------
