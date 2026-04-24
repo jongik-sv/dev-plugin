@@ -281,19 +281,10 @@ _STATIC_WHITELIST: "frozenset[str]" = frozenset({
 
 
 # ---------------------------------------------------------------------------
-# Dataclasses (TRD §5.2, §5.3)
-# ---------------------------------------------------------------------------
-
-
-# SignalEntry: moved to monitor_server.signals (C1-2).
-
-
-# PaneInfo, list_tmux_panes, capture_pane: moved to monitor_server.panes (C1-3).
-
-
-# ---------------------------------------------------------------------------
 # [core-decomposition:C1-4] workitems 모듈 재-export
 # ---------------------------------------------------------------------------
+# (TRD §5.2 SignalEntry → monitor_server.signals (C1-2))
+# (TRD §5.3 PaneInfo/list_tmux_panes/capture_pane → monitor_server.panes (C1-3))
 try:
     from monitor_server.workitems import (  # noqa: F401,E402
         PhaseEntry,
