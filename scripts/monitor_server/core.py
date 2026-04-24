@@ -1995,88 +1995,12 @@ def _empty_section(anchor: str, heading: str, message: str, css: str = "empty") 
     return _section_wrap(anchor, heading, f'  <p class="{css}">{message}</p>')
 
 
+# moved to monitor_server.renderers.header [core-renderer-split:C2-1]
 def _section_header(model: dict, lang: str = "ko", subproject: str = "") -> str:
-    """v3 cmdbar header: brand + meta + lang-toggle + actions.
-
-    TSK-02-02: ``lang`` / ``subproject`` 파라미터 추가.  헤더 우측
-    actions 블록 안에 ``<nav class="lang-toggle">`` 를 삽입하여 ko/en
-    전환 링크를 렌더링한다.  subproject 쿼리가 있으면 lang 링크에 보존한다.
-    """
-    generated_at = _esc(model.get("generated_at", ""))
-    project_root = _esc(model.get("project_root", ""))
-    docs_dir = _esc(model.get("docs_dir", ""))
-    refresh_s = _refresh_seconds(model)
-
-    # Build lang-toggle href pairs (subproject preserved when non-empty).
-    if subproject:
-        sp_enc = quote(subproject, safe="")
-        href_ko = f"?lang=ko&subproject={sp_enc}"
-        href_en = f"?lang=en&subproject={sp_enc}"
-    else:
-        href_ko = "?lang=ko"
-        href_en = "?lang=en"
-
-    ko_current = ' aria-current="page" class="active"' if lang == "ko" else ""
-    en_current = ' aria-current="page" class="active"' if lang == "en" else ""
-    lang_toggle_html = (
-        f'<nav class="lang-toggle">'
-        f'<a href="{href_ko}"{ko_current}>한</a>'
-        f' <a href="{href_en}"{en_current}>EN</a>'
-        f'</nav>\n'
-    )
-    top_nav_html = (
-        '<nav class="top-nav">'
-        '<a href="#wp-cards">Wp-Cards</a>'
-        '<a href="#features">Features</a>'
-        '<a href="#team">Team</a>'
-        '<a href="#subagents">Subagents</a>'
-        '<a href="#activity">Activity</a>'
-        '<a href="#phases">Phases</a>'
-        '</nav>\n'
-    )
-
-    return (
-        '<header class="cmdbar" data-section="hdr" role="banner" aria-label="Command bar">\n'
-        '  <div class="brand">\n'
-        '    <span class="logo" aria-hidden="true">\n'
-        '      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"'
-        ' stroke-linecap="round" stroke-linejoin="round">\n'
-        '        <path d="M4 7 L10 12 L4 17"/>\n'
-        '        <path d="M13 17 L20 17"/>\n'
-        '      </svg>\n'
-        '    </span>\n'
-        '    <span class="title">dev-plugin</span>\n'
-        '    <span class="slash">/</span>\n'
-        '    <span class="sub">monitor</span>\n'
-        '  </div>\n'
-        '  <div class="meta" role="group" aria-label="Session info">\n'
-        f'    <span><span class="k">project</span>'
-        f'<span class="v path">{project_root}</span></span>\n'
-        '    <span class="dot">&middot;</span>\n'
-        f'    <span><span class="k">docs</span><span class="v">{docs_dir}</span></span>\n'
-        '    <span class="dot">&middot;</span>\n'
-        f'    <span><span class="k">now</span>'
-        # monitor-perf (2026-04-24): 서버에서 now를 박으면 매 응답마다 HTML이 달라져 ETag/304 불가.
-        # 클라이언트 startClock()이 매초 갱신하므로 초기값을 빈 문자열로 두어도 UX 영향 없음.
-        f'<span class="v" id="clock"></span></span>\n'
-        '    <span class="dot">&middot;</span>\n'
-        f'    <span><span class="k">interval</span>'
-        f'<span class="v">{refresh_s}s</span></span>\n'
-        '  </div>\n'
-        '  <div class="actions">\n'
-        f'    {lang_toggle_html}'
-        f'    {top_nav_html}'
-        '    <span class="pulse" aria-live="polite">'
-        '<span class="dot" aria-hidden="true"></span> live</span>\n'
-        '    <button class="btn refresh-toggle" type="button"'
-        ' aria-pressed="true" aria-label="Auto-refresh">\n'
-        '      <span class="led" aria-hidden="true"></span>\n'
-        '      <span>auto</span>\n'
-        '      <span class="kbd" aria-hidden="true">R</span>\n'
-        '    </button>\n'
-        '  </div>\n'
-        '</header>'
-    )
+    _hdr_mod = _c2b_load_renderer("header")
+    if _hdr_mod is not None:
+        return _hdr_mod._section_header(model, lang, subproject)
+    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -2235,21 +2159,12 @@ def _kpi_spark_svg(buckets: List[int], color: str) -> str:
     )
 
 
+# moved to monitor_server.renderers.header [core-renderer-split:C2-1]
 def _section_sticky_header(model: dict) -> str:
-    """Render the sticky header: logo dot, title, project_root (ellipsis),
-    refresh label, and auto-refresh toggle button (style only; JS wired in WP-02).
-    """
-    project_root = _esc(model.get("project_root", ""))
-    refresh_s = _refresh_seconds(model)
-    return (
-        '<header class="sticky-hdr" data-section="hdr">\n'
-        '  <span class="logo-dot" aria-hidden="true">●</span>\n'
-        '  <span class="hdr-title">dev-plugin Monitor</span>\n'
-        f'  <span class="hdr-project" title="{project_root}">{project_root}</span>\n'
-        f'  <span class="hdr-refresh">⟳ {refresh_s}s</span>\n'
-        '  <button class="refresh-toggle" aria-pressed="true" tabindex="0">◐ auto</button>\n'
-        '</header>'
-    )
+    _hdr_mod = _c2b_load_renderer("header")
+    if _hdr_mod is not None:
+        return _hdr_mod._section_sticky_header(model)
+    return ""
 
 
 # v3 CSS-suffix for each KPI kind (matches reference stylesheet .kpi--run etc.)
@@ -6085,6 +6000,16 @@ except (ImportError, AttributeError):
         _c2b_fb = _c2b_load_renderer("filterbar")
         if _c2b_fb is not None:
             _section_filter_bar = _c2b_fb._section_filter_bar  # type: ignore[assignment]
+    except (ImportError, AttributeError):
+        pass
+try:
+    from .renderers.header import _section_header, _section_sticky_header  # noqa: F401,E402
+except (ImportError, AttributeError):
+    try:
+        _c2b_hdr = _c2b_load_renderer("header")
+        if _c2b_hdr is not None:
+            _section_header = _c2b_hdr._section_header  # type: ignore[assignment]
+            _section_sticky_header = _c2b_hdr._section_sticky_header  # type: ignore[assignment]
     except (ImportError, AttributeError):
         pass
 # === /renderer facade ===
