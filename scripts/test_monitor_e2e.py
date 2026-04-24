@@ -997,40 +997,36 @@ class TaskExpandLogsE2ETests(unittest.TestCase):
             return json.loads(resp.read())
 
     def test_slide_panel_logs_section(self) -> None:
-        """대시보드 HTML에 renderLogs JS 함수 + .log-tail CSS + .log-entry 클래스 포함 (AC-23).
+        """renderLogs JS 함수 + .log-tail CSS + .log-entry 클래스 포함 (AC-23).
 
-        Reachability: GET / → <script> 블록에서 renderLogs, .log-tail, .log-entry 확인.
-        패널을 실제로 열 수 없는 urllib 환경에서, JS 함수 존재와 CSS를 검증한다.
+        TSK-01-02/TSK-01-03 이후 JS는 /static/app.js, CSS는 /static/style.css에서 서빙됨.
         """
-        html = self._get_html("/")
-        self.assertIn("renderLogs", html, "renderLogs JS function not found in dashboard HTML")
-        self.assertIn("log-entry", html, ".log-entry class not found in dashboard HTML")
-        self.assertIn("log-tail", html, ".log-tail CSS class not found in dashboard HTML")
-        self.assertIn("보고서 없음", html, "placeholder '보고서 없음' not found in renderLogs JS")
+        js = self._get_html("/static/app.js")
+        self.assertIn("renderLogs", js, "renderLogs JS function not found in /static/app.js")
+        self.assertIn("log-entry", js, ".log-entry class not found in /static/app.js")
+        self.assertIn("log-tail", js, ".log-tail class not found in /static/app.js")
+        self.assertIn("보고서 없음", js, "placeholder '보고서 없음' not found in /static/app.js")
 
     def test_slide_panel_section_order(self) -> None:
         """openTaskPanel body 조립: wbs → state → artifacts → logs 순서 (AC-22).
 
-        Reachability: GET / → JS 소스에서 renderWbsSection / renderStateJson /
-        renderArtifacts / renderLogs 호출 순서가 올바른지 확인.
+        TSK-01-02/TSK-01-03 이후 JS는 /static/app.js에서 서빙됨.
         """
-        html = self._get_html("/")
-        pos_wbs = html.find("renderWbsSection")
-        pos_state = html.find("renderStateJson")
-        pos_artifacts = html.find("renderArtifacts")
-        pos_logs = html.find("renderLogs")
-        self.assertGreater(pos_wbs, 0, "renderWbsSection not found")
-        self.assertGreater(pos_state, 0, "renderStateJson not found")
-        self.assertGreater(pos_artifacts, 0, "renderArtifacts not found")
-        self.assertGreater(pos_logs, 0, "renderLogs not found")
+        js = self._get_html("/static/app.js")
+        pos_wbs = js.find("renderWbsSection")
+        pos_state = js.find("renderStateJson")
+        pos_artifacts = js.find("renderArtifacts")
+        pos_logs = js.find("renderLogs")
+        self.assertGreater(pos_wbs, 0, "renderWbsSection not found in /static/app.js")
+        self.assertGreater(pos_state, 0, "renderStateJson not found in /static/app.js")
+        self.assertGreater(pos_artifacts, 0, "renderArtifacts not found in /static/app.js")
+        self.assertGreater(pos_logs, 0, "renderLogs not found in /static/app.js")
         # openTaskPanel 내 body.innerHTML 조립부에서 호출 순서 확인
-        # 마지막 정의 위치가 아닌 innerHTML 조립부에서의 등장 순서를 검사하기 위해
-        # openTaskPanel 함수 본문 스코프를 추출
-        panel_fn_start = html.find("function openTaskPanel")
-        panel_fn_end = html.find("function closeTaskPanel")
-        self.assertGreater(panel_fn_start, 0, "openTaskPanel not found")
+        panel_fn_start = js.find("function openTaskPanel")
+        panel_fn_end = js.find("function closeTaskPanel")
+        self.assertGreater(panel_fn_start, 0, "openTaskPanel not found in /static/app.js")
         self.assertGreater(panel_fn_end, panel_fn_start, "closeTaskPanel not after openTaskPanel")
-        panel_fn = html[panel_fn_start:panel_fn_end]
+        panel_fn = js[panel_fn_start:panel_fn_end]
         # innerHTML 조립 라인에서 4개 함수가 모두 등장해야 함
         self.assertIn("renderWbsSection", panel_fn, "renderWbsSection not in openTaskPanel body")
         self.assertIn("renderStateJson", panel_fn, "renderStateJson not in openTaskPanel body")

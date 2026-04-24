@@ -2247,13 +2247,6 @@ body[data-filter="bypass"]  .trow:not([data-status="bypass"]) { display: none; }
 .filter-bar input{ min-width:140px; }
 """
 
-def _minify_css(css: str) -> str:
-    """Collapse verbose CSS into a compact single-line string for SSR tests."""
-    return re.sub(r"\n\s*", " ", css).strip()
-
-
-DASHBOARD_CSS = _minify_css(DASHBOARD_CSS)
-
 _PKG_VERSION = "5.0.0"
 
 
@@ -4306,32 +4299,6 @@ _API_PANE_PATH_PREFIX = "/api/pane/"
 _DEFAULT_MAX_PANE_LINES = 500
 
 
-_PANE_CSS = """\
-:root {
-  --bg: #0d1117; --fg: #e6edf3; --muted: #8b949e; --border: #30363d;
-  --panel: #161b22; --accent: #58a6ff; --warn: #f85149;
-}
-* { box-sizing: border-box; }
-body {
-  margin: 0; padding: 1.25rem 1.5rem;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  background: var(--bg); color: var(--fg); line-height: 1.5;
-}
-h1 { font-size: 1.25rem; margin: 0 0 0.5rem; }
-nav.top-nav { margin: 0 0 1rem; padding: 0.25rem 0; border-bottom: 1px solid var(--border); }
-nav.top-nav a { color: var(--accent); text-decoration: none; }
-nav.top-nav a:hover { text-decoration: underline; }
-pre.pane-capture {
-  background: #0d1117; border: 1px solid var(--border); border-radius: 4px;
-  padding: 0.75rem; margin: 0.5rem 0;
-  white-space: pre-wrap; word-break: break-all;
-  max-height: 75vh; overflow: auto;
-  font-family: "SFMono-Regular", Consolas, monospace; font-size: 0.85rem;
-}
-.error { color: var(--warn); font-weight: 600; margin: 0.5rem 0; }
-.footer { color: var(--muted); font-size: 0.8rem; margin-top: 0.5rem; }"""
-
-
 # ---------------------------------------------------------------------------
 # Static file route helpers (TSK-03-03)
 # ---------------------------------------------------------------------------
@@ -5350,61 +5317,6 @@ def _handle_api_merge_status(handler) -> None:
     except Exception as exc:
         sys.stderr.write(f"/api/merge-status error: {exc!r}\n")
         _json_error(handler, 500, str(exc))
-
-
-def _task_panel_css() -> str:
-    """CSS for task slide panel (TSK-02-04)."""
-    return (
-        ".slide-panel{position:fixed;top:0;right:-560px;bottom:0;width:560px;"
-        "background:var(--bg-2,#1e1e2e);border-left:1px solid var(--border,#313244);"
-        "overflow-y:auto;z-index:90;transition:right 0.22s cubic-bezier(.4,0,.2,1);"
-        "display:flex;flex-direction:column;}"
-        ".slide-panel.open{right:0;}"
-        "#task-panel-overlay{position:fixed;inset:0;background:rgba(0,0,0,.3);z-index:80;}"
-        "#task-panel header{display:flex;align-items:center;justify-content:space-between;"
-        "padding:12px 16px;border-bottom:1px solid var(--border,#313244);flex-shrink:0;}"
-        "#task-panel-body{flex:1;overflow-y:auto;padding:16px;}"
-        "#task-panel-close{background:none;border:none;cursor:pointer;font-size:18px;"
-        "color:var(--ink-3,#cdd6f4);opacity:.7;line-height:1;}"
-        "#task-panel-close:hover{opacity:1;}"
-        "#task-panel-body h4{margin:16px 0 8px;font-size:13px;color:var(--ink-3,#cdd6f4);}"
-        "#task-panel-body pre{background:var(--bg-1,#181825);border-radius:4px;padding:10px;"
-        "overflow-x:auto;font-size:12px;white-space:pre-wrap;word-break:break-word;}"
-        "#task-panel-body .disabled{color:var(--ink-3,#585b70);}"
-        "#task-panel-body .size{font-size:11px;color:var(--ink-3,#585b70);margin-left:6px;}"
-        "#task-panel-body ul{list-style:none;padding:0;margin:0;}"
-        "#task-panel-body li{padding:4px 0;font-size:12px;}"
-        ".expand-btn{font-size:14px;padding:2px 6px;opacity:.5;background:none;"
-        "border:none;cursor:pointer;color:inherit;}"
-        ".expand-btn:hover{opacity:1;}"
-        "#task-panel-body code{font-family:var(--font-mono,monospace);font-size:12px;}"
-        ".panel-logs{margin-top:4px;}"
-        ".log-entry{margin-bottom:8px;}"
-        ".log-entry summary{cursor:pointer;font-size:12px;color:var(--ink-3,#cdd6f4);padding:2px 0;user-select:none;}"
-        ".log-tail{max-height:300px;overflow:auto;font-size:11px;white-space:pre-wrap;"
-        "word-break:break-all;background:var(--bg-1,#181825);border-radius:4px;"
-        "padding:8px;margin:4px 0 0;font-family:var(--font-mono,monospace);}"
-        ".log-empty{font-size:12px;color:var(--ink-3,#585b70);padding:4px 0;}"
-        ".log-trunc{font-size:10px;color:var(--ink-3,#585b70);margin-left:8px;}"
-        # TSK-04-03: merge-badge + merge preview panel CSS
-        ".merge-badge{display:inline-flex;align-items:center;gap:4px;"
-        "padding:2px 8px;border-radius:12px;cursor:pointer;"
-        "font-size:11px;font-weight:600;border:1px solid transparent;"
-        "flex-shrink:0;white-space:nowrap;background:none;}"
-        ".merge-badge[data-state=\"ready\"]{background:var(--done,#22c55e20);color:var(--done,#22c55e);border-color:var(--done,#22c55e);}"
-        ".merge-badge[data-state=\"waiting\"]{background:var(--run,#eab30820);color:var(--run,#eab308);border-color:var(--run,#eab308);}"
-        ".merge-badge[data-state=\"conflict\"]{background:var(--fail,#ef444420);color:var(--fail,#ef4444);border-color:var(--fail,#ef4444);}"
-        ".merge-badge[data-state=\"stale\"]{background:transparent;color:var(--ink-3,#cdd6f4);border:1px dashed var(--ink-3,#cdd6f4);}"
-        ".merge-badge[data-state=\"unknown\"]{background:transparent;color:var(--ink-3,#585b70);border-color:var(--ink-3,#585b70);}"
-        ".merge-badge .stale{font-size:10px;opacity:.8;}"
-        ".merge-stale-banner{padding:6px 10px;background:var(--run,#eab30820);border:1px solid var(--run,#eab308);border-radius:4px;font-size:12px;margin-bottom:12px;}"
-        ".merge-ready-banner{padding:6px 10px;background:var(--done,#22c55e20);border:1px solid var(--done,#22c55e);border-radius:4px;font-size:12px;margin-bottom:12px;}"
-        ".merge-conflict-file li.disabled{color:var(--ink-3,#585b70);}"
-        ".merge-conflict-file li.disabled code{opacity:.6;}"
-        ".merge-hunk-preview{max-height:120px;overflow:auto;font-size:11px;font-family:var(--font-mono,monospace);background:var(--bg-1,#181825);border-radius:4px;padding:6px;white-space:pre-wrap;word-break:break-all;margin-top:4px;}"
-    )
-
-
 
 
 def _task_panel_dom() -> str:
