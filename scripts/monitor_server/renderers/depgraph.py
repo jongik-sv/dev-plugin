@@ -162,6 +162,13 @@ def _build_graph_payload(
         node_status = _derive_node_status(task, signals)
         status_counts[node_status] += 1
 
+        # TSK-04-01 (FR-06): per-node data-phase attribute derivation
+        _node_phase = _phase_data_attr(
+            task.status,
+            failed=(node_status == "failed"),
+            bypassed=bool(task.bypassed),
+        )
+
         nodes.append({
             "id": task.id,
             "label": task.title or task.id,
@@ -184,6 +191,8 @@ def _build_graph_payload(
             # TSK-05-02: filter predicate support fields
             "domain": task.domain if task.domain is not None else "-",
             "model": task.model if task.model is not None else "-",
+            # TSK-04-01 (FR-06): data-phase attribute value for graph node
+            "phase": _node_phase,
         })
 
     # Build edges from task depends relationships
