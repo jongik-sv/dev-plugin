@@ -12,17 +12,24 @@ import pytest
 _SERVER_PATH = os.path.join(os.path.dirname(__file__), "monitor-server.py")
 
 
+_CORE_PATH = os.path.join(os.path.dirname(_SERVER_PATH), "monitor_server", "core.py")
+
+
 def _load_dashboard_css():
-    """monitor-server.py에서 DASHBOARD_CSS 문자열을 추출한다."""
-    with open(_SERVER_PATH, encoding="utf-8") as f:
-        source = f.read()
-    # DASHBOARD_CSS = """...""" 또는 '''...''' 패턴 (언더스코어 없음)
-    m = re.search(r'\bDASHBOARD_CSS\s*=\s*"""(.*?)"""', source, re.DOTALL)
-    if not m:
-        m = re.search(r"\bDASHBOARD_CSS\s*=\s*'''(.*?)'''", source, re.DOTALL)
-    if not m:
-        pytest.fail("DASHBOARD_CSS 변수를 monitor-server.py에서 찾을 수 없습니다.")
-    return m.group(1)
+    """monitor-server.py 또는 monitor_server/core.py에서 DASHBOARD_CSS를 추출한다."""
+    for path in (_SERVER_PATH, _CORE_PATH):
+        try:
+            with open(path, encoding="utf-8") as f:
+                source = f.read()
+        except OSError:
+            continue
+        # DASHBOARD_CSS = """...""" 또는 '''...''' 패턴 (언더스코어 없음)
+        m = re.search(r'\bDASHBOARD_CSS\s*=\s*"""(.*?)"""', source, re.DOTALL)
+        if not m:
+            m = re.search(r"\bDASHBOARD_CSS\s*=\s*'''(.*?)'''", source, re.DOTALL)
+        if m:
+            return m.group(1)
+    pytest.fail("DASHBOARD_CSS 변수를 monitor-server.py 또는 monitor_server/core.py에서 찾을 수 없습니다.")
 
 
 @pytest.fixture(scope="module")

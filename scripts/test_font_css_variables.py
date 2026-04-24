@@ -20,10 +20,14 @@ from pathlib import Path
 
 _THIS_DIR = Path(__file__).resolve().parent
 _MONITOR_PATH = _THIS_DIR / "monitor-server.py"
+_CORE_PATH = _THIS_DIR / "monitor_server" / "core.py"
 
 # DASHBOARD_CSS 문자열을 소스 파일에서 직접 읽어 테스트
 # (import 대신 소스 파싱 방식 — 서버 기동 없이 CSS 블록 검사)
+# TSK-02-03: monitor_server/core.py로 이전되었으므로 두 파일을 합쳐 검색한다.
 _SOURCE_TEXT = _MONITOR_PATH.read_text(encoding="utf-8")
+if _CORE_PATH.exists():
+    _SOURCE_TEXT += "\n" + _CORE_PATH.read_text(encoding="utf-8")
 
 # DASHBOARD_CSS 변수에 할당된 삼중따옴표 문자열을 추출
 _CSS_MATCH = re.search(

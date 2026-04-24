@@ -329,13 +329,31 @@ class TestThreadingMonitorServerPluginRoot(unittest.TestCase):
 # 5. do_GET 분기 테스트 (통합 — HTTP 레이어 모킹)
 # ---------------------------------------------------------------------------
 
+def _get_do_get_module():
+    """MonitorHandler.do_GET이 정의된 모듈을 반환한다.
+
+    TSK-02-03: do_GET이 monitor_server.core로 이전되었으므로 해당 모듈을 찾는다.
+    이전 코드(모노리스)에서는 _mod 자체가 do_GET을 정의한다.
+    """
+    do_get_fn = getattr(_mod.MonitorHandler, "do_GET", None)
+    if do_get_fn is not None:
+        globs = getattr(do_get_fn, "__globals__", None)
+        if globs is not None:
+            mod_name = globs.get("__name__")
+            if mod_name and mod_name in sys.modules:
+                return sys.modules[mod_name]
+    return _mod
+
+
 class TestDoGetStaticBranch(unittest.TestCase):
     """do_GET이 /static/ 경로를 _is_static_path → _handle_static로 위임하는지 확인."""
 
     def test_do_get_delegates_static(self):
         """_is_static_path가 True를 반환하면 _handle_static이 호출된다."""
-        with mock.patch.object(_mod, "_is_static_path", return_value=True) as mock_is, \
-             mock.patch.object(_mod, "_handle_static") as mock_handle:
+        # TSK-02-03: do_GET이 monitor_server.core로 이전된 경우 해당 모듈에서 patch해야 함
+        _do_get_mod = _get_do_get_module()
+        with mock.patch.object(_do_get_mod, "_is_static_path", return_value=True) as mock_is, \
+             mock.patch.object(_do_get_mod, "_handle_static") as mock_handle:
             # MonitorHandler는 BaseHTTPRequestHandler이므로 직접 생성하지 않고
             # do_GET을 함수로 직접 호출
             handler = mock.MagicMock()
@@ -349,7 +367,8 @@ class TestDoGetStaticBranch(unittest.TestCase):
 
     def test_do_get_non_static_skips_handle_static(self):
         """일반 경로에서는 _handle_static이 호출되지 않는다."""
-        with mock.patch.object(_mod, "_handle_static") as mock_handle:
+        _do_get_mod = _get_do_get_module()
+        with mock.patch.object(_do_get_mod, "_handle_static") as mock_handle:
             handler = mock.MagicMock()
             handler.path = "/"
 

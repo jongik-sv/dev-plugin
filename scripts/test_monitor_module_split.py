@@ -229,5 +229,71 @@ class RendererAttributeTests(unittest.TestCase):
         self.assertTrue(callable(m._drawer_skeleton))
 
 
+class HandlersModuleTests(unittest.TestCase):
+    """TSK-02-03: handlers.py + monitor-server.py 크기/import 검증."""
+
+    _SCRIPTS_DIR = _SCRIPTS_DIR
+    _HANDLERS_PATH = _SCRIPTS_DIR / "monitor_server" / "handlers.py"
+    _ENTRY_PATH = _SCRIPTS_DIR / "monitor-server.py"
+
+    def test_monitor_server_entry_under_500_lines(self):
+        """AC-FR07-c: monitor-server.py 줄 수 < 500."""
+        with self._ENTRY_PATH.open(encoding="utf-8") as f:
+            n = sum(1 for _ in f)
+        self.assertLess(
+            n, 500,
+            f"monitor-server.py is {n} lines — must be < 500 (AC-FR07-c)",
+        )
+
+    def test_handlers_under_800_lines(self):
+        """AC-FR07-c: handlers.py ≤ 800줄."""
+        if not self._HANDLERS_PATH.exists():
+            self.skipTest("handlers.py not yet created")
+        with self._HANDLERS_PATH.open(encoding="utf-8") as f:
+            n = sum(1 for _ in f)
+        self.assertLessEqual(
+            n, 800,
+            f"handlers.py is {n} lines — must be ≤ 800 (AC-FR07-c)",
+        )
+
+    def test_import_handlers(self):
+        """TSK-02-03: from monitor_server.handlers import Handler 성공."""
+        if not self._HANDLERS_PATH.exists():
+            self.skipTest("handlers.py not yet created")
+        _ensure_package_in_sys_modules()
+        for key in list(sys.modules.keys()):
+            if key == "monitor_server.handlers" or key.startswith("monitor_server.handlers."):
+                del sys.modules[key]
+        import importlib
+        mod = importlib.import_module("monitor_server.handlers")
+        self.assertTrue(hasattr(mod, "Handler"), "monitor_server.handlers should export Handler class")
+        from monitor_server.handlers import Handler  # noqa: F401
+        from http.server import BaseHTTPRequestHandler
+        self.assertTrue(
+            issubclass(Handler, BaseHTTPRequestHandler),
+            "Handler must be a subclass of BaseHTTPRequestHandler",
+        )
+
+    def test_handler_has_do_get(self):
+        """Handler.do_GET 메서드가 존재한다."""
+        if not self._HANDLERS_PATH.exists():
+            self.skipTest("handlers.py not yet created")
+        _ensure_package_in_sys_modules()
+        from monitor_server.handlers import Handler
+        self.assertTrue(callable(getattr(Handler, "do_GET", None)))
+
+    def test_handler_has_non_get_405(self):
+        """Handler.do_POST / do_PUT / do_DELETE / do_PATCH / do_HEAD 가 존재한다."""
+        if not self._HANDLERS_PATH.exists():
+            self.skipTest("handlers.py not yet created")
+        _ensure_package_in_sys_modules()
+        from monitor_server.handlers import Handler
+        for method in ("do_POST", "do_PUT", "do_DELETE", "do_PATCH", "do_HEAD"):
+            self.assertTrue(
+                callable(getattr(Handler, method, None)),
+                f"Handler.{method} must exist",
+            )
+
+
 if __name__ == "__main__":
     unittest.main()

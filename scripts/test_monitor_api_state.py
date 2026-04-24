@@ -34,6 +34,23 @@ monitor_server = importlib.util.module_from_spec(_spec)
 sys.modules["monitor_server"] = monitor_server
 _spec.loader.exec_module(monitor_server)
 
+# TSK-02-03: 구현이 monitor_server/core.py로 이전되었으므로 core 모듈을 별도로 참조한다.
+# discover_subprojects 등이 core 모듈의 네임스페이스에서 직접 호출되므로
+# mock.patch를 core 모듈에도 적용해야 한다.
+def _get_impl_mod(sym_name):
+    """sym_name 함수가 정의된 실제 모듈을 반환한다."""
+    fn = getattr(monitor_server, sym_name, None)
+    if fn is None:
+        return monitor_server
+    globs = getattr(fn, "__globals__", None)
+    if globs is None:
+        return monitor_server
+    mod_name = globs.get("__name__", "")
+    return sys.modules.get(mod_name, monitor_server)
+
+
+_core_mod = _get_impl_mod("_handle_api_state")
+
 
 WorkItem = monitor_server.WorkItem
 PhaseEntry = monitor_server.PhaseEntry
@@ -818,7 +835,14 @@ class ApiStateSubprojectAndSchemaTests(unittest.TestCase):
             # 기본: single-mode (서브프로젝트 없음)
             discover_fn = lambda _d: []
 
-        with mock.patch.object(monitor_server, "discover_subprojects", discover_fn, create=True):
+        # TSK-02-03: discover_subprojects가 core 모듈 네임스페이스에서 호출되므로
+        # core 모듈에도 patch를 적용한다.
+        ctx_flat = mock.patch.object(monitor_server, "discover_subprojects", discover_fn, create=True)
+        if _core_mod is not None and _core_mod is not monitor_server:
+            ctx_core = mock.patch.object(_core_mod, "discover_subprojects", discover_fn, create=True)
+        else:
+            ctx_core = mock.patch.object(monitor_server, "discover_subprojects", discover_fn, create=True)
+        with ctx_flat, ctx_core:
             monitor_server._handle_api_state(
                 h,
                 scan_tasks=lambda _d: _tasks,

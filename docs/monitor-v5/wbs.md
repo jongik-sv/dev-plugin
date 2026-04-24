@@ -364,7 +364,7 @@ monitor-server, monitor-launcher
 - category: infrastructure
 - domain: backend
 - model: sonnet
-- status: [dd]
+- status: [xx]
 - priority: high
 - assignee: -
 - schedule: 2026-05-07 ~ 2026-05-07
