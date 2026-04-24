@@ -42,6 +42,11 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 from urllib.parse import parse_qs, quote, unquote, urlsplit
 
+# TRD R-H: 엔트리 파일명은 하이픈(monitor-server.py),
+# 패키지 이름은 언더스코어(monitor_server) — Python import 시스템 제약.
+# scripts/ 디렉토리를 sys.path 맨 앞에 추가하여 `import monitor_server` 가 동작하도록 한다.
+sys.path.insert(0, str(Path(__file__).parent))
+
 if not sys.pycache_prefix:
     sys.pycache_prefix = "/tmp/codex-pycache"
 
