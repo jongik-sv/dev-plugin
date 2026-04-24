@@ -8,6 +8,8 @@ monitor-server.py 대응: 원본 함수 제거 후 shim 라인으로 대체.
 
 from __future__ import annotations
 
+from typing import Optional
+
 from ._util import (
     _resolve_heading,
     _live_activity_rows,
@@ -34,7 +36,7 @@ def _phase_label_history(status_str):
     return _map.get(str(status_str).strip(), str(status_str))
 
 
-def _section_live_activity(model, heading: "str | None" = None):
+def _section_live_activity(model, heading: "Optional[str]" = None):
     """Live Activity 섹션을 렌더링한다.
 
     모든 WBS 태스크 + 피처의 phase_history_tail을 평탄화하여 최신 20건을

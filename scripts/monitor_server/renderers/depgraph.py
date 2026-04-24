@@ -21,7 +21,7 @@ from ._util import (
     _serialize_phase_history_tail_for_graph,
     _now_iso_z,
 )
-from .taskrow import _phase_data_attr  # noqa: F401 (used by _build_graph_payload indirectly)
+from .taskrow import _phase_data_attr  # noqa: F401 — re-exports via monitor_server.renderers.depgraph for downstream consumers
 
 
 def _section_dep_graph(lang: str = "ko", subproject: str = "all") -> str:
