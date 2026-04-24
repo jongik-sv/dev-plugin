@@ -30,6 +30,45 @@ _DEFAULT_MAX_PANE_LINES = 500  # mirrors core.py _DEFAULT_MAX_PANE_LINES
 
 
 # ---------------------------------------------------------------------------
+# Internal: core module resolver (flat-load compatible)
+# ---------------------------------------------------------------------------
+
+def _resolve_core():
+    """monitor_server.core를 반환한다.
+
+    flat-load 컨텍스트(테스트가 monitor-server.py를 monitor_server로 등록한 경우)
+    에서는 monitor_server.core 대신 monitor_server_core_impl을 사용한다.
+
+    우선순위: monitor_server_core_impl → monitor_server.core → 패키지 import → 파일 load.
+    monitor_server_core_impl을 먼저 확인하는 이유: 테스트가 mock.patch.object(core_mod, ...)
+    로 패치할 때 core_mod = sys.modules["monitor_server_core_impl"] 이고,
+    _resolve_core()가 같은 객체를 반환해야 패치가 유효하다.
+    """
+    c = sys.modules.get("monitor_server_core_impl")
+    if c is not None:
+        return c
+    c = sys.modules.get("monitor_server.core")
+    if c is not None:
+        return c
+    try:
+        import monitor_server.core as _c  # type: ignore[import]
+        return _c
+    except (ImportError, ModuleNotFoundError):
+        pass
+    # Last resort: file load
+    import importlib.util
+    from pathlib import Path
+    _pkg = Path(__file__).resolve().parent
+    spec = importlib.util.spec_from_file_location("monitor_server_core_impl", str(_pkg / "core.py"))
+    if spec is None:
+        return None
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["monitor_server_core_impl"] = mod
+    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+    return mod
+
+
+# ---------------------------------------------------------------------------
 # Handler functions
 # ---------------------------------------------------------------------------
 
@@ -46,7 +85,7 @@ def _handle_pane_html(
     Migrated from core.py _handle_pane_html.
     순환 참조 회피: core 심볼은 함수 내부에서 지연 import.
     """
-    from monitor_server import core as _core  # noqa: PLC0415
+    _core = _resolve_core()  # noqa: PLC0415
 
     if capture is None:
         capture = _core.capture_pane
@@ -82,7 +121,7 @@ def _handle_pane_api(
     Migrated from core.py _handle_pane_api.
     순환 참조 회피: core 심볼은 함수 내부에서 지연 import.
     """
-    from monitor_server import core as _core  # noqa: PLC0415
+    _core = _resolve_core()
 
     if capture is None:
         capture = _core.capture_pane

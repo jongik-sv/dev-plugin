@@ -25,6 +25,74 @@ if TYPE_CHECKING:
     from monitor_server.signals import SignalEntry
     from monitor_server.workitems import WorkItem
 
+
+# ---------------------------------------------------------------------------
+# Internal: core module resolver (flat-load compatible)
+# ---------------------------------------------------------------------------
+
+def _resolve_core():
+    """monitor_server.core를 반환한다 (flat-load 컨텍스트 호환).
+
+    우선순위: monitor_server_core_impl → monitor_server.core → 패키지 import → 파일 load.
+    monitor_server_core_impl을 먼저 확인: 테스트 mock.patch.object 패치 대상과 동일 객체 보장.
+    (test_monitor_graph_api.py가 core_mod = sys.modules["monitor_server_core_impl"]로
+     _call_dep_analysis_graph_stats를 패치하므로, _resolve_core()가 같은 객체를 반환해야 함)
+    """
+    c = sys.modules.get("monitor_server_core_impl")
+    if c is not None:
+        return c
+    c = sys.modules.get("monitor_server.core")
+    if c is not None:
+        return c
+    try:
+        import monitor_server.core as _c  # type: ignore[import]
+        return _c
+    except (ImportError, ModuleNotFoundError):
+        pass
+    import importlib.util
+    _pkg = Path(__file__).resolve().parent
+    spec = importlib.util.spec_from_file_location("monitor_server_core_impl", str(_pkg / "core.py"))
+    if spec is None:
+        return None
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["monitor_server_core_impl"] = mod
+    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+    return mod
+
+
+def _resolve_graph_cache():
+    """_GRAPH_CACHE 인스턴스를 반환한다.
+
+    테스트 패치 호환 전략:
+    - test_monitor_server_perf.py: self.core._GRAPH_CACHE 교체 (self.core = monitor_server.core)
+      → monitor_server.core 를 먼저 확인해야 패치가 반영됨.
+    - test_monitor_graph_api.py: _GRAPH_CACHE를 직접 건드리지 않고 TTL=0 기본값 사용.
+      → monitor_server_core_impl / monitor_server.core 어느 쪽 _GRAPH_CACHE 를 써도 무관.
+
+    따라서 monitor_server.core 를 먼저, monitor_server_core_impl 을 fallback으로 한다.
+    이 순서는 _resolve_core()와 반대임에 주의 — _resolve_core()는 함수 호출 패치용,
+    _resolve_graph_cache()는 객체 교체 패치용으로 역할이 다르다.
+    """
+    # 1. 패키지 monitor_server.core 우선 (test_monitor_server_perf 패치 대상)
+    c = sys.modules.get("monitor_server.core")
+    if c is not None:
+        cache = getattr(c, "_GRAPH_CACHE", None)
+        if cache is not None:
+            return cache
+    # 2. flat-load monitor_server_core_impl fallback
+    c = sys.modules.get("monitor_server_core_impl")
+    if c is not None:
+        cache = getattr(c, "_GRAPH_CACHE", None)
+        if cache is not None:
+            return cache
+    # 3. 최후 fallback: 직접 import
+    try:
+        from monitor_server.caches import _GRAPH_CACHE  # type: ignore[import]
+        return _GRAPH_CACHE
+    except (ImportError, ModuleNotFoundError):
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Constants (local copies — mirrors core.py values)
 # ---------------------------------------------------------------------------
@@ -55,8 +123,8 @@ def _handle_graph_api(
     Migrated from core.py _handle_graph_api.
     순환 참조 회피: core 심볼은 함수 내부에서 지연 import.
     """
-    from monitor_server import core as _core  # noqa: PLC0415
-    from monitor_server.caches import _GRAPH_CACHE  # noqa: PLC0415
+    _core = _resolve_core()
+    _GRAPH_CACHE = _resolve_graph_cache()
 
     if scan_tasks_fn is None:
         scan_tasks_fn = _core.scan_tasks
@@ -136,7 +204,11 @@ def _handle_graph_api(
         return
 
     # Inject locally-computed fan_in_map
-    from monitor_server import api as _api  # noqa: PLC0415
+    # api 모듈 resolving: 패키지 컨텍스트면 direct import, flat-load면 core facade 경유
+    try:
+        from monitor_server import api as _api  # type: ignore[import]  # noqa: PLC0415
+    except (ImportError, ModuleNotFoundError):
+        _api = getattr(_core, "_api_module", None) or _core  # type: ignore[assignment]
     graph_stats.setdefault("fan_in_map", _api._build_fan_in_map(tasks))
 
     try:
@@ -186,9 +258,19 @@ def _handle_api_task_detail(handler) -> None:
     Migrated from core.py _handle_api_task_detail.
     순환 참조 회피: core 심볼은 함수 내부에서 지연 import.
     """
-    from monitor_server import core as _core  # noqa: PLC0415
-    from monitor_server import api as _api  # noqa: PLC0415
-    from monitor_server.workitems import discover_subprojects  # noqa: PLC0415
+    _core = _resolve_core()
+    try:
+        from monitor_server import api as _api  # type: ignore[import]  # noqa: PLC0415
+    except (ImportError, ModuleNotFoundError):
+        _api = _core  # type: ignore[assignment]  # flat-load: core re-exports api symbols
+
+    # discover_subprojects: 패키지 컨텍스트면 workitems 직접, flat-load면 core facade 경유
+    _discover_subprojects = getattr(_core, "discover_subprojects", None)
+    if _discover_subprojects is None:
+        try:
+            from monitor_server.workitems import discover_subprojects as _discover_subprojects  # type: ignore[import]  # noqa: PLC0415
+        except (ImportError, ModuleNotFoundError):
+            _discover_subprojects = lambda _d: []  # type: ignore[assignment]
 
     try:
         raw_path = getattr(handler, "path", "") or ""
@@ -197,7 +279,7 @@ def _handle_api_task_detail(handler) -> None:
         task_id = (qp.get("task") or [""])[0] or ""
         raw_sp = (qp.get("subproject") or ["all"])[0] or "all"
         base_docs_dir = _core._server_attr(handler, "docs_dir")
-        available_subprojects = discover_subprojects(base_docs_dir)
+        available_subprojects = _discover_subprojects(base_docs_dir)
         if raw_sp != "all" and raw_sp not in available_subprojects:
             raw_sp = "all"
         effective_docs_dir = _core._resolve_effective_docs_dir(base_docs_dir, raw_sp)

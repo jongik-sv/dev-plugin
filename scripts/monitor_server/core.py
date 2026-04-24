@@ -6485,233 +6485,105 @@ def _handle_api_state(
 
 
 # ---------------------------------------------------------------------------
-# HTTP Handler & Server (TSK-01-01)
+# [core-http-split:C2-1] HTTP Handler — facade re-export from handlers.py
 # ---------------------------------------------------------------------------
+# MonitorHandler가 handlers.py로 이관되었다. core.py는 facade 재-export만 수행.
+# handlers_pane / handlers_graph / handlers_state 도 동일하게 facade 처리.
+# flat-load 컨텍스트(test spec_from_file_location)에서 monitor_server.handlers를
+# dotted import할 수 없는 경우를 대비해 try/except 로드 패턴을 동일하게 적용한다.
+
+import importlib.util as _c21_ilu
+_c21_pkg_dir = Path(__file__).resolve().parent
 
 
-class MonitorHandler(BaseHTTPRequestHandler):
-    """HTTP request handler for the dev-plugin monitor server.
+def _c21_load_mod(logical_name: str, fname: str):
+    """handler 서브모듈을 안정적인 이름으로 로드한다.
 
-    Routing:
-        GET /              → HTML dashboard (render_dashboard)
-        GET /api/state     → JSON snapshot (_handle_api_state)
-        GET /pane/{id}     → HTML pane detail (_handle_pane_html)
-        GET /api/pane/{id} → JSON pane payload (_handle_pane_api)
-        GET <other>        → 404
-        non-GET methods    → 405 Method Not Allowed
+    flat-load 컨텍스트(test_monitor_module_split.py 등)에서
+    test 픽스처가 sys.modules에서 "monitor_server.*" 키를 제거하더라도
+    "monitor_server_*_impl" 형태의 키는 제거되지 않아 모듈 객체가
+    동일한 id로 유지된다. 따라서 do_GET.__globals__ 는 항상 같은 dict를
+    참조하고, mock.patch.object(sys.modules[key], ...) 패치가 유효하다.
 
-    Binding is always ``127.0.0.1`` (set by ThreadingMonitorServer).
-    ``log_message`` is overridden to write only the request line to stderr
-    and leave stdout untouched.
+    동작:
+    1. "monitor_server_{logical_name}_impl" 키 확인 (flat-load 안정 키)
+    2. "monitor_server.{logical_name}" 키 확인 (패키지 컨텍스트)
+    3. 없으면 file-load 후 양쪽 키 모두 등록
     """
+    stable_key = f"monitor_server_{logical_name}_impl"
+    pkg_key = f"monitor_server.{logical_name}"
 
-    def log_message(self, format: str, *args) -> None:  # noqa: A002
-        """Override: write request line to stderr only; leave stdout empty."""
-        sys.stderr.write(f"{self.requestline}\n")
+    # 1. 이미 안정 키로 로드된 경우
+    existing = sys.modules.get(stable_key)
+    if existing is not None:
+        # 패키지 키도 동기화
+        if sys.modules.get(pkg_key) is not existing:
+            sys.modules[pkg_key] = existing
+        return existing
 
-    # ------------------------------------------------------------------
-    # Non-GET methods → 405
-    # ------------------------------------------------------------------
+    # 2. 패키지 키로만 로드된 경우 → 안정 키에도 등록
+    existing = sys.modules.get(pkg_key)
+    if existing is not None:
+        sys.modules[stable_key] = existing
+        return existing
 
-    def _send_405(self) -> None:
-        self.send_response(405)
-        self.send_header("Content-Length", "0")
-        self.end_headers()
+    # 3. 파일 로드
+    path = _c21_pkg_dir / fname
+    if not path.exists():
+        return None
+    spec = _c21_ilu.spec_from_file_location(stable_key, str(path))
+    if spec is None:
+        return None
+    mod = _c21_ilu.module_from_spec(spec)
+    sys.modules[stable_key] = mod
+    sys.modules[pkg_key] = mod  # 패키지 키도 동일 객체로 등록
+    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+    return mod
 
-    def do_POST(self) -> None:  # noqa: N802
-        self._send_405()
 
-    def do_PUT(self) -> None:  # noqa: N802
-        self._send_405()
+# 패키지 import 시도 → 실패하면 파일 로드로 폴백
+try:
+    from monitor_server.handlers import MonitorHandler  # noqa: F401,E402
+    from monitor_server.handlers_pane import (  # noqa: F401,E402
+        _handle_pane_html,
+        _handle_pane_api,
+    )
+    from monitor_server.handlers_graph import (  # noqa: F401,E402
+        _handle_graph_api,
+        _handle_api_task_detail,
+    )
+    from monitor_server.handlers_state import _handle_api_state  # noqa: F401,E402
+    # 패키지 import 성공 시에도 안정 키로 alias 등록
+    # (test_monitor_module_split가 "monitor_server.*" 키를 지워도 _impl 키는 유지)
+    for _c21_name, _c21_file in [
+        ("handlers", "handlers.py"),
+        ("handlers_pane", "handlers_pane.py"),
+        ("handlers_graph", "handlers_graph.py"),
+        ("handlers_state", "handlers_state.py"),
+    ]:
+        _c21_pkg_k = f"monitor_server.{_c21_name}"
+        _c21_stable_k = f"monitor_server_{_c21_name}_impl"
+        _c21_m = sys.modules.get(_c21_pkg_k)
+        if _c21_m is not None and sys.modules.get(_c21_stable_k) is None:
+            sys.modules[_c21_stable_k] = _c21_m
+except (ImportError, ModuleNotFoundError):
+    _c21_handlers = _c21_load_mod("handlers", "handlers.py")
+    if _c21_handlers is not None:
+        MonitorHandler = _c21_handlers.MonitorHandler  # type: ignore[assignment,misc]
 
-    def do_DELETE(self) -> None:  # noqa: N802
-        self._send_405()
+    _c21_pane = _c21_load_mod("handlers_pane", "handlers_pane.py")
+    if _c21_pane is not None:
+        _handle_pane_html = _c21_pane._handle_pane_html  # type: ignore[assignment]
+        _handle_pane_api = _c21_pane._handle_pane_api  # type: ignore[assignment]
 
-    def do_PATCH(self) -> None:  # noqa: N802
-        self._send_405()
+    _c21_graph = _c21_load_mod("handlers_graph", "handlers_graph.py")
+    if _c21_graph is not None:
+        _handle_graph_api = _c21_graph._handle_graph_api  # type: ignore[assignment]
+        _handle_api_task_detail = _c21_graph._handle_api_task_detail  # type: ignore[assignment]
 
-    def do_HEAD(self) -> None:  # noqa: N802
-        self._send_405()
-
-    # ------------------------------------------------------------------
-    # GET routing
-    # ------------------------------------------------------------------
-
-    def do_GET(self) -> None:  # noqa: N802
-        path = urlsplit(self.path).path
-
-        if path == "/":
-            self._route_root()
-        elif _is_static_path(path):
-            _handle_static(self, path)
-        elif _is_api_graph_path(self.path):
-            from monitor_server import api as _api
-            _api.handle_graph(self, {}, None)
-        elif _is_api_state_path(self.path):
-            self._route_api_state()
-        elif _is_api_task_detail_path(self.path):
-            from monitor_server import api as _api
-            _api.handle_task_detail(self, {}, None)
-        elif _is_api_merge_status_path(self.path):
-            from monitor_server import api as _api
-            _api.handle_merge_status(self, {}, None)
-        elif _is_pane_api_path(path):
-            pane_id = _extract_pane_id(path, _API_PANE_PATH_PREFIX)
-            _handle_pane_api(self, pane_id)
-        elif _is_pane_html_path(path):
-            pane_id = _extract_pane_id(path, _PANE_PATH_PREFIX)
-            _handle_pane_html(self, pane_id)
-        else:
-            self._route_not_found()
-
-    # ------------------------------------------------------------------
-    # Route implementations
-    # ------------------------------------------------------------------
-
-    def _route_root(self) -> None:
-        """GET / — parse query, build model dict and render dashboard HTML.
-
-        TSK-01-02: Parses ``?subproject=`` and ``?lang=`` query parameters,
-        discovers subprojects, resolves effective_docs_dir, and composes
-        filter closures before calling :func:`_build_render_state`.
-
-        Uses :func:`_build_render_state` (raw dataclass lists) instead of
-        :func:`_build_state_snapshot` (dict lists) because the renderer
-        accesses fields via ``getattr(item, "id")``; dict items would silently
-        render as empty spans.
-
-        TSK-02-02: Parses ?lang= and ?subproject= query parameters.
-        """
-        from urllib.parse import parse_qs
-
-        server = getattr(self, "server", None)
-        refresh_seconds = int(getattr(server, "refresh_seconds", _DEFAULT_REFRESH_SECONDS))
-
-        no_tmux = bool(getattr(server, "no_tmux", False))
-        _tmux_fn = (lambda: None) if no_tmux else list_tmux_panes
-
-        project_root = _server_attr(self, "project_root")
-        base_docs_dir = _server_attr(self, "docs_dir")
-
-        # --- TSK-01-02: query parsing ---
-        query_string = urlsplit(self.path).query or ""
-        qs = parse_qs(query_string, keep_blank_values=False)
-        raw_sp = (qs.get("subproject") or ["all"])[0] or "all"
-        lang = (qs.get("lang") or ["ko"])[0] or "ko"
-
-        # Discover available subprojects from base docs dir
-        available_subprojects = discover_subprojects(base_docs_dir)
-        is_multi_mode = bool(available_subprojects)
-
-        # Validate subproject whitelist (path-traversal guard + fallback)
-        if raw_sp != "all" and raw_sp not in available_subprojects:
-            sys.stderr.write(
-                f"[monitor] unknown subproject={raw_sp!r}, falling back to 'all'\n"
-            )
-            raw_sp = "all"
-        subproject = raw_sp
-
-        # Resolve effective docs dir
-        effective_docs_dir = _resolve_effective_docs_dir(base_docs_dir, subproject)
-
-        # Build project_name for filter helpers
-        project_name: str = (
-            getattr(server, "project_name", None)
-            or os.path.basename(os.path.normpath(project_root))
-            or ""
-        )
-
-        # Compose filter closures (layer 1: project, layer 2: subproject)
-        def _scan_signals_f() -> List[SignalEntry]:
-            raw_sigs = scan_signals()
-            if project_name:
-                raw_sigs = _filter_signals_by_project(raw_sigs, project_name)
-            if subproject != "all" and project_name:
-                filtered = _filter_by_subproject(
-                    {"signals": raw_sigs}, subproject, project_name
-                )
-                raw_sigs = filtered.get("signals") or []
-            return raw_sigs
-
-        def _list_panes_f() -> Optional[List[PaneInfo]]:
-            raw_panes = _tmux_fn()
-            if raw_panes is None:
-                return None
-            if project_root and project_name:
-                raw_panes = _filter_panes_by_project(raw_panes, project_root, project_name)
-            if subproject != "all" and project_name:
-                filtered = _filter_by_subproject(
-                    {"tmux_panes": raw_panes}, subproject, project_name
-                )
-                raw_panes = filtered.get("tmux_panes") or []
-            return raw_panes
-
-        _project_root_path = Path(project_root) if project_root else None
-
-        def _scan_features_f(docs_dir_arg) -> List[WorkItem]:
-            if subproject == "all" and is_multi_mode:
-                items: List[WorkItem] = list(
-                    _aggregated_scan(Path(base_docs_dir), _project_root_path, scan_features) or []
-                )
-                for sp in available_subprojects:
-                    items.extend(
-                        _aggregated_scan(Path(base_docs_dir) / sp, _project_root_path, scan_features) or []
-                    )
-                return _dedup_workitems_by_id(items)
-            if subproject and subproject != "all" and is_multi_mode:
-                # See ``_scan_features_api``: features are project-global, so
-                # subproject views must still surface ``docs/features/`` in
-                # addition to any ``docs/<sp>/features/``.
-                items = list(
-                    _aggregated_scan(Path(base_docs_dir), _project_root_path, scan_features) or []
-                )
-                items.extend(
-                    _aggregated_scan(Path(docs_dir_arg), _project_root_path, scan_features) or []
-                )
-                return _dedup_workitems_by_id(items)
-            return _aggregated_scan(Path(docs_dir_arg), _project_root_path, scan_features)
-
-        def _scan_tasks_f(docs_dir_arg) -> List[WorkItem]:
-            return _aggregated_scan(Path(docs_dir_arg), _project_root_path, scan_tasks)
-
-        state = _build_render_state(
-            project_root=project_root,
-            docs_dir=effective_docs_dir,
-            scan_tasks=_scan_tasks_f,
-            scan_features=_scan_features_f,
-            scan_signals=_scan_signals_f,
-            list_tmux_panes=_list_panes_f,
-            subproject=subproject,
-            lang=lang,
-        )
-        # Override available_subprojects and is_multi_mode from top-level docs dir
-        # (_build_render_state computes them from effective_docs_dir which may be a subdir)
-        state["available_subprojects"] = available_subprojects
-        state["is_multi_mode"] = is_multi_mode
-        model = {**state, "refresh_seconds": refresh_seconds}
-
-        # Parse ?lang= and ?subproject= query parameters (TSK-02-02).
-        query_string = urlsplit(self.path).query or ""
-        query_params = parse_qs(query_string)
-
-        lang = _normalize_lang((query_params.get("lang") or ["ko"])[0])
-
-        subproject = (query_params.get("subproject") or [""])[0]
-
-        html_body = render_dashboard(model, lang=lang, subproject=subproject)
-        _send_html_response(self, 200, html_body)
-
-    def _route_api_state(self) -> None:
-        """GET /api/state — delegate to api.handle_state (TSK-02-02)."""
-        server = getattr(self, "server", None)
-        no_tmux = bool(getattr(server, "no_tmux", False))
-        _tmux_fn = (lambda: None) if no_tmux else list_tmux_panes
-        from monitor_server import api as _api
-        _api.handle_state(self, {}, None, list_tmux_panes=_tmux_fn)
-
-    def _route_not_found(self) -> None:
-        """Unmatched GET path → 404."""
-        _send_plain_404(self)
+    _c21_state = _c21_load_mod("handlers_state", "handlers_state.py")
+    if _c21_state is not None:
+        _handle_api_state = _c21_state._handle_api_state  # type: ignore[assignment]
 
 
 class ThreadingMonitorServer(ThreadingHTTPServer):

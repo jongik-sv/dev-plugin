@@ -308,7 +308,17 @@ class Handler(BaseHTTPRequestHandler):
 # ---------------------------------------------------------------------------
 
 def _load_core():
-    """monitor_server.core를 임포트한다. 실패 시 None을 반환한다."""
+    """monitor_server.core를 반환한다.
+
+    우선순위: monitor_server_core_impl → monitor_server.core → 패키지 import → None.
+    monitor_server_core_impl을 먼저 확인: 테스트 mock.patch.object 패치 대상과 동일 객체 보장.
+    """
+    c = sys.modules.get("monitor_server_core_impl")
+    if c is not None:
+        return c
+    c = sys.modules.get("monitor_server.core")
+    if c is not None:
+        return c
     try:
         import monitor_server.core as _c  # type: ignore[import]
         return _c
@@ -384,6 +394,29 @@ _MH_PANE_PATH_PREFIX = "/pane/"
 _MH_API_PANE_PATH_PREFIX = "/api/pane/"
 
 
+# ---------------------------------------------------------------------------
+# Module-level core symbol proxies
+# テスト가 mock.patch.object(handlers_mod, "_is_static_path", ...)로 패치할 수
+# 있도록 모듈 레벨에 래퍼를 노출한다.
+# ---------------------------------------------------------------------------
+
+def _is_static_path(path: str) -> bool:
+    """core._is_static_path에 위임 (패치 가능 모듈 레벨 프록시)."""
+    fn = _get_core_attr("_is_static_path")
+    if fn is None:
+        return False
+    return fn(path)
+
+
+def _handle_static(handler, path: str) -> None:
+    """core._handle_static에 위임 (패치 가능 모듈 레벨 프록시)."""
+    fn = _get_core_attr("_handle_static")
+    if fn is None:
+        _send_plain_404(handler)
+        return
+    fn(handler, path)
+
+
 class MonitorHandler(BaseHTTPRequestHandler):
     """HTTP request handler for the dev-plugin monitor server.
 
@@ -435,30 +468,27 @@ class MonitorHandler(BaseHTTPRequestHandler):
     # ------------------------------------------------------------------
 
     def do_GET(self) -> None:  # noqa: N802
-        from monitor_server import core as _core  # noqa: PLC0415
         path = urlsplit(self.path).path
 
         if path == "/":
             self._route_root()
-        elif _core._is_static_path(path):
-            _core._handle_static(self, path)
-        elif _core._is_api_graph_path(self.path):
-            from monitor_server import api as _api  # noqa: PLC0415
-            _api.handle_graph(self, {}, None)
-        elif _core._is_api_state_path(self.path):
+        elif _is_static_path(path):
+            # 모듈 레벨 프록시 경유 — 테스트 패치 가능
+            _handle_static(self, path)
+        elif _get_core_attr("_is_api_graph_path")(self.path):
+            _get_api_module().handle_graph(self, {}, None)
+        elif _get_core_attr("_is_api_state_path")(self.path):
             self._route_api_state()
-        elif _core._is_api_task_detail_path(self.path):
-            from monitor_server import api as _api  # noqa: PLC0415
-            _api.handle_task_detail(self, {}, None)
-        elif _core._is_api_merge_status_path(self.path):
-            from monitor_server import api as _api  # noqa: PLC0415
-            _api.handle_merge_status(self, {}, None)
-        elif _core._is_pane_api_path(path):
-            pane_id = _core._extract_pane_id(path, _core._API_PANE_PATH_PREFIX)
-            _core._handle_pane_api(self, pane_id)
-        elif _core._is_pane_html_path(path):
-            pane_id = _core._extract_pane_id(path, _core._PANE_PATH_PREFIX)
-            _core._handle_pane_html(self, pane_id)
+        elif _get_core_attr("_is_api_task_detail_path")(self.path):
+            _get_api_module().handle_task_detail(self, {}, None)
+        elif _get_core_attr("_is_api_merge_status_path")(self.path):
+            _get_api_module().handle_merge_status(self, {}, None)
+        elif _get_core_attr("_is_pane_api_path")(path):
+            pane_id = _get_core_attr("_extract_pane_id")(path, _get_core_attr("_API_PANE_PATH_PREFIX"))
+            _get_core_attr("_handle_pane_api")(self, pane_id)
+        elif _get_core_attr("_is_pane_html_path")(path):
+            pane_id = _get_core_attr("_extract_pane_id")(path, _get_core_attr("_PANE_PATH_PREFIX"))
+            _get_core_attr("_handle_pane_html")(self, pane_id)
         else:
             self._route_not_found()
 
