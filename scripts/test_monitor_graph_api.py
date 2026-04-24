@@ -603,17 +603,34 @@ class TestHandleGraphApi(unittest.TestCase):
         self.assertEqual(body["subproject"], "all")
 
     def test_api_graph_subprocess_error_returns_500(self):
-        """dep-analysis.py subprocess 실패 시 500 JSON 에러 반환."""
+        """dep-analysis 호출 실패 시 500 JSON 에러 반환.
+
+        _call_dep_analysis_graph_stats는 in-process importlib 경로(subprocess fork
+        없음)로 전환되었기 때문에 subprocess.run 모킹으로는 에러 경로를 재현할 수
+        없다. 대신 _call_dep_analysis_graph_stats 자체를 (None, err) 반환으로
+        덮어 써 동등한 에러→500 전이를 검증한다.
+        """
+        # _handle_graph_api는 core 모듈 내부에서 _call_dep_analysis_graph_stats를
+        # 로컬 바인딩으로 호출하므로, 실제 core 모듈(monitor_server_core_impl)에
+        # monkey-patch 해야 한다.
+        core_mod = sys.modules.get("monitor_server_core_impl")
+        self.assertIsNotNone(
+            core_mod,
+            "core module must be loaded before patching — flat monitor-server.py "
+            "populates sys.modules['monitor_server_core_impl'] on first attr access",
+        )
         task = _make_task("TSK-01-01", status="[dd]")
         handler = MockHandler("/api/graph?subproject=all", docs_dir="/proj/docs")
+
+        def _failing_call(_tasks_input):
+            return None, "dep-analysis error: OSError('subprocess failure')"
 
         with mock.patch.object(
             monitor_server, "scan_tasks", return_value=[task]
         ), mock.patch.object(
             monitor_server, "scan_signals", return_value=[]
-        ), mock.patch(
-            "subprocess.run",
-            side_effect=OSError("subprocess failure"),
+        ), mock.patch.object(
+            core_mod, "_call_dep_analysis_graph_stats", side_effect=_failing_call,
         ):
             self.fn(
                 handler,
@@ -627,18 +644,27 @@ class TestHandleGraphApi(unittest.TestCase):
         self.assertEqual(body.get("code"), 500)
 
     def test_api_graph_subprocess_timeout_returns_500(self):
-        """dep-analysis.py subprocess timeout 시 500 반환."""
+        """dep-analysis 타임아웃 상당 에러 시 500 반환.
+
+        in-process 전환 이후 subprocess.TimeoutExpired는 _call_dep_analysis_graph_stats
+        의 직접 반환값으로 표현된다. 테스트는 동등한 에러→500 경로만 검증한다.
+        """
         import subprocess as subprocess_module
+        core_mod = sys.modules.get("monitor_server_core_impl")
+        self.assertIsNotNone(core_mod)
         task = _make_task("TSK-01-01")
         handler = MockHandler("/api/graph?subproject=all", docs_dir="/proj/docs")
+
+        def _timeout_call(_tasks_input):
+            err = subprocess_module.TimeoutExpired(cmd="dep-analysis.py", timeout=3)
+            return None, f"dep-analysis error: {err!r}"
 
         with mock.patch.object(
             monitor_server, "scan_tasks", return_value=[task]
         ), mock.patch.object(
             monitor_server, "scan_signals", return_value=[]
-        ), mock.patch(
-            "subprocess.run",
-            side_effect=subprocess_module.TimeoutExpired(cmd="dep-analysis.py", timeout=3),
+        ), mock.patch.object(
+            core_mod, "_call_dep_analysis_graph_stats", side_effect=_timeout_call,
         ):
             self.fn(
                 handler,
