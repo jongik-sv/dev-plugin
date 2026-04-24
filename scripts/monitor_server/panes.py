@@ -40,7 +40,10 @@ _TMUX_FMT = (
 _PANE_ID_RE = re.compile(r"^%\d+$")
 
 # CSI-style ANSI escape sequences (color, cursor, etc.). panes 모듈 전용 사본 —
-# core.py 의 _ANSI_RE 와 동일 정의이며 두 모듈이 독립적으로 유지된다.
+# core.py / api.py 에도 동일 정의가 존재한다. 의도된 중복: panes 모듈이
+# capture_pane 구현만을 위해 core 에 역-import 하면 facade 초기화 연쇄가
+# 꼬이므로(signals → caches 와 달리 core 는 panes 를 재-export 하는 쪽),
+# 단순 정규식 한 줄은 각 모듈이 로컬 사본으로 보유한다.
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
 
 # tmux scrollback depth passed to ``capture-pane -S``. Negative = lines from bottom.
