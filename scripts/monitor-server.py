@@ -1541,7 +1541,7 @@ summary::-webkit-details-marker{ display:none; }
 /* ---------- main 2-col grid ---------- */
 .grid{
   display: grid;
-  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
   gap: 28px;
   padding-top: 8px;
 }
@@ -1550,7 +1550,7 @@ summary::-webkit-details-marker{ display:none; }
 /* ---------- 4. WP Cards ---------- */
 .wp-stack{
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(520px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
   gap: 14px;
   align-items: start;
 }
