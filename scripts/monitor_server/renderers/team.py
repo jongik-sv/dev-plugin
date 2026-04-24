@@ -20,6 +20,7 @@ from ._util import (
     _pane_last_n_lines,
     _render_pane_row,
     _TOO_MANY_PANES_THRESHOLD,
+    _PANE_PREVIEW_LINES,
 )
 
 
@@ -59,7 +60,10 @@ def _section_team(panes, heading: "Optional[str]" = None) -> str:
                 pane,
                 preview_lines=(
                     None if too_many
-                    else _pane_last_n_lines(_pane_attr(pane, "pane_id", ""))
+                    else _pane_last_n_lines(
+                        _pane_attr(pane, "pane_id", ""),
+                        n=_PANE_PREVIEW_LINES,
+                    )
                 ),
             )
             for pane in groups[window_name]

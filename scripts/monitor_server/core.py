@@ -192,6 +192,11 @@ _ANSI_RE = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
 # tmux scrollback depth passed to ``capture-pane -S``. Negative = lines from bottom.
 _CAPTURE_PANE_SCROLLBACK = "-500"
 
+# TSK-04-03 / FR-04: pane-preview last-N lines — single source of truth shared by
+# ``_pane_last_n_lines`` default, ``_section_team`` call-site, CSS ``max-height``
+# (1.5em * 6 = 9em), and the ``::before`` "last 6 lines" label.
+_PANE_PREVIEW_LINES = 6
+
 # subprocess timeouts (seconds). Kept as named constants so test assertions and
 # the implementation reference a single source of truth.
 _LIST_PANES_TIMEOUT = 2
@@ -1949,7 +1954,7 @@ body[data-filter="bypass"]  .trow:not([data-status="bypass"]) { display: none; }
   display: grid;
   grid-template-columns: auto 1fr auto auto;
   gap: 10px; align-items: center;
-  padding: 10px 14px 8px;
+  padding: 20px 14px 16px;
 }
 .pane-head .name{
   font-family: var(--mono);
@@ -1987,16 +1992,18 @@ body[data-filter="bypass"]  .trow:not([data-status="bypass"]) { display: none; }
   border: 1px solid var(--line); border-radius: var(--radius);
   font-family: var(--mono); font-size: 11px; line-height: 1.5;
   color: var(--ink-2); white-space: pre-wrap; overflow-x: auto;
+  overflow-y: auto;
   position: relative;
-  max-height: 4.5em;
+  max-height: 9em;
 }
 .pane-preview.empty{ color: var(--ink-3); }
 .pane-preview::before{
-  content: "\\25B8 last 3 lines"; position: absolute; top: -8px; left: 10px;
+  content: "\\25B8 last 6 lines"; position: absolute; top: -8px; left: 10px;
   font-size: 9px; letter-spacing: .1em; text-transform: uppercase;
   background: var(--bg-1); padding: 0 5px;
   color: var(--ink-4);
 }
+[lang="ko"] .pane-preview::before{ content: "\\25B8 최근 6줄"; }
 .pane-preview .prompt{ color: var(--done); }
 .pane-preview .dim{ color: var(--ink-4); }
 .pane-preview .err{ color: var(--fail); }
@@ -3596,7 +3603,31 @@ def _is_claude_cli_chrome(line: str) -> bool:
     return False
 
 
-def _pane_last_n_lines(pane_id: str, n: int = 3) -> str:
+def _iter_flat_entry_modules():
+    """Yield sys.modules entries whose ``__file__`` ends with ``monitor-server.py``.
+
+    Tests load the thin entry file via ``spec_from_file_location(<alias>, ...)``
+    under arbitrary alias names (e.g. ``monitor_server_pane_size``). When a
+    test applies ``mock.patch.object`` to the flat entry module, core-level
+    functions need to honour those patches — we do so by sweeping ``sys.modules``
+    for any module whose source file is the thin entry.
+    """
+    import os as _os
+    for _mod_obj in list(sys.modules.values()):
+        try:
+            _f = getattr(_mod_obj, "__file__", None)
+        except Exception:  # noqa: BLE001
+            continue
+        if not _f:
+            continue
+        try:
+            if _os.path.basename(_f) == "monitor-server.py":
+                yield _mod_obj
+        except (TypeError, ValueError):
+            continue
+
+
+def _pane_last_n_lines(pane_id: str, n: int = _PANE_PREVIEW_LINES) -> str:
     """Return the last *n* non-chrome lines from a tmux pane's scrollback.
 
     Calls ``capture_pane(pane_id)``, strips trailing Claude CLI chrome
@@ -3604,10 +3635,14 @@ def _pane_last_n_lines(pane_id: str, n: int = 3) -> str:
     then returns the last *n* remaining lines.  Returns an empty string on
     any error or when the result is entirely blank/chrome.
     """
-    # Look up capture_pane via sys.modules["monitor_server"] first so that
-    # test mocks applied to the flat entry module are honoured.
-    _cp = sys.modules.get("monitor_server")
-    _capture = getattr(_cp, "capture_pane", capture_pane) if _cp is not None else capture_pane
+    # Look up capture_pane via flat entry modules first so that test mocks
+    # applied to spec_from_file_location("…", "monitor-server.py") are honoured.
+    _capture = capture_pane
+    for _entry in _iter_flat_entry_modules():
+        _mock = getattr(_entry, "capture_pane", None)
+        if _mock is not None and _mock is not capture_pane:
+            _capture = _mock
+            break
     try:
         raw = _capture(pane_id)
     except Exception:
@@ -3700,6 +3735,14 @@ def _section_team(panes, heading: "Optional[str]" = None) -> str:
         all_panes, lambda pane: _pane_attr(pane, "window_name", None) or "(unnamed)"
     )
 
+    # Honour mock.patch.object(flat_entry, "_pane_last_n_lines", ...) from tests.
+    _last_n = _pane_last_n_lines
+    for _entry in _iter_flat_entry_modules():
+        _mock = getattr(_entry, "_pane_last_n_lines", None)
+        if _mock is not None and _mock is not _pane_last_n_lines:
+            _last_n = _mock
+            break
+
     blocks: List[str] = []
     for window_name in order:
         row_parts = [
@@ -3707,7 +3750,10 @@ def _section_team(panes, heading: "Optional[str]" = None) -> str:
                 pane,
                 preview_lines=(
                     None if too_many
-                    else _pane_last_n_lines(_pane_attr(pane, "pane_id", ""))
+                    else _last_n(
+                        _pane_attr(pane, "pane_id", ""),
+                        n=_PANE_PREVIEW_LINES,
+                    )
                 ),
             )
             for pane in groups[window_name]

@@ -30,6 +30,7 @@ _pane_attr = _mod._pane_attr
 _pane_last_n_lines = _mod._pane_last_n_lines
 _render_pane_row = _mod._render_pane_row
 _TOO_MANY_PANES_THRESHOLD = _mod._TOO_MANY_PANES_THRESHOLD
+_PANE_PREVIEW_LINES = _mod._PANE_PREVIEW_LINES
 _render_subagent_row = _mod._render_subagent_row
 _SUBAGENT_INFO = _mod._SUBAGENT_INFO
 _live_activity_rows = _mod._live_activity_rows

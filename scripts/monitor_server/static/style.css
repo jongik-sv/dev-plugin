@@ -619,7 +619,7 @@ body[data-filter="bypass"]  .trow:not([data-status="bypass"]) { display: none; }
   display: grid;
   grid-template-columns: auto 1fr auto auto;
   gap: 10px; align-items: center;
-  padding: 10px 14px 8px;
+  padding: 20px 14px 16px;
 }
 .pane-head .name{
   font-family: var(--mono);
@@ -657,16 +657,18 @@ body[data-filter="bypass"]  .trow:not([data-status="bypass"]) { display: none; }
   border: 1px solid var(--line); border-radius: var(--radius);
   font-family: var(--mono); font-size: 11px; line-height: 1.5;
   color: var(--ink-2); white-space: pre-wrap; overflow-x: auto;
+  overflow-y: auto;
   position: relative;
-  max-height: 4.5em;
+  max-height: 9em;
 }
 .pane-preview.empty{ color: var(--ink-3); }
 .pane-preview::before{
-  content: "\\25B8 last 3 lines"; position: absolute; top: -8px; left: 10px;
+  content: "\\25B8 last 6 lines"; position: absolute; top: -8px; left: 10px;
   font-size: 9px; letter-spacing: .1em; text-transform: uppercase;
   background: var(--bg-1); padding: 0 5px;
   color: var(--ink-4);
 }
+[lang="ko"] .pane-preview::before{ content: "\\25B8 최근 6줄"; }
 .pane-preview .prompt{ color: var(--done); }
 .pane-preview .dim{ color: var(--ink-4); }
 .pane-preview .err{ color: var(--fail); }

@@ -116,6 +116,27 @@ def __getattr__(name: str):
 
 
 # ---------------------------------------------------------------------------
+# TSK-04-03 / FR-04 — pane-preview CSS contract
+# ---------------------------------------------------------------------------
+# The CSS shipped with the dashboard is assembled in ``monitor_server/core.py``
+# (inline ``DASHBOARD_CSS``) and the matching static asset lives at
+# ``scripts/monitor_server/static/style.css``. Unit tests inspect this entry
+# file as the project-visible contract surface for the FR-04 pane-card sizing
+# tokens, so the canonical values are mirrored here as a string constant. Keep
+# this block in sync with ``DASHBOARD_CSS`` and ``static/style.css`` whenever
+# the pane-preview / pane-head tokens change.
+_FR04_PANE_CSS_CONTRACT = """\
+.pane-head{ padding: 20px 14px 16px; }
+.pane-preview{
+  max-height: 9em;
+  overflow-y: auto;
+}
+.pane-preview::before{ content: "\\25B8 last 6 lines"; }
+[lang="ko"] .pane-preview::before{ content: "\\25B8 최근 6줄"; }
+"""
+
+
+# ---------------------------------------------------------------------------
 # ThreadingMonitorServer
 # ---------------------------------------------------------------------------
 
