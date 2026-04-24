@@ -109,6 +109,8 @@ _GRAPH_PHASE_TAIL_LIMIT = 3
 
 _WBS_SECTION_RE = re.compile(r"^### (?P<id>TSK-\S+):", re.MULTILINE)
 _TSK_ID_VALID_RE = re.compile(r"^TSK-\S+$")
+# Mirrors feat-init.py's FEAT_NAME_RE — only kebab-case lowercase names are valid.
+_FEAT_ID_VALID_RE = re.compile(r"^[a-z][a-z0-9-]*$")
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
 
 _MERGE_STATUS_FILENAME = "merge-status.json"
@@ -364,9 +366,8 @@ def _collect_logs(task_dir) -> list:
     return [_tail_report(Path(task_dir) / name) for name in LOG_NAMES]
 
 
-def _collect_artifacts(task_dir) -> list:
-    """Return [{name, path, exists, size}] for design/test-report/refactor."""
-    artifact_names = ("design.md", "test-report.md", "refactor.md")
+def _collect_artifacts(task_dir, artifact_names=("design.md", "test-report.md", "refactor.md")):
+    """Return [{name, path, exists, size}] for the given artifact names."""
     result = []
     for name in artifact_names:
         filepath = Path(task_dir) / name
@@ -382,6 +383,14 @@ def _collect_artifacts(task_dir) -> list:
         rel = raw[docs_idx:] if docs_idx >= 0 else raw
         result.append({"name": name, "path": rel, "exists": exists, "size": size})
     return result
+
+
+_FEAT_ARTIFACT_NAMES = ("spec.md", "design.md", "test-report.md", "refactor.md")
+
+
+def _collect_feat_artifacts(feat_dir):
+    """Return [{name, path, exists, size}] for Feature artifacts (includes spec.md)."""
+    return _collect_artifacts(feat_dir, _FEAT_ARTIFACT_NAMES)
 
 
 def _extract_title_from_section(section_md: str) -> str:
@@ -426,23 +435,48 @@ def _load_state_json(task_dir) -> dict:
 
 
 def _build_task_detail_payload(task_id: str, subproject: str, effective_docs_dir, wbs_md: str):
-    """Build /api/task-detail payload. Returns (status_code, dict)."""
-    if not _TSK_ID_VALID_RE.match(task_id):
-        return (400, {"error": f"Invalid task_id format: {task_id!r}", "code": 400})
-    wbs_section_md = _extract_wbs_section(wbs_md, task_id)
-    if not wbs_section_md:
-        return (404, {"error": f"Task {task_id!r} not found in wbs.md", "code": 404})
-    title = _extract_title_from_section(wbs_section_md)
-    wp_id = _extract_wp_id(wbs_section_md, wbs_md, task_id)
-    task_dir = Path(effective_docs_dir) / "tasks" / task_id
-    state = _load_state_json(task_dir)
-    artifacts = _collect_artifacts(task_dir)
-    logs = _collect_logs(task_dir)
-    return (200, {
-        "task_id": task_id, "title": title, "wp_id": wp_id, "source": "wbs",
-        "wbs_section_md": wbs_section_md, "state": state, "artifacts": artifacts,
-        "logs": logs,
-    })
+    """Build /api/task-detail payload. Returns (status_code, dict).
+
+    Handles two ID kinds: WBS Tasks (``TSK-…``) and Features (kebab-case names
+    under ``{docs}/features/{name}/``). Invalid IDs return 400; missing
+    resources return 404.
+    """
+    if _TSK_ID_VALID_RE.match(task_id):
+        wbs_section_md = _extract_wbs_section(wbs_md, task_id)
+        if not wbs_section_md:
+            return (404, {"error": f"Task {task_id!r} not found in wbs.md", "code": 404})
+        title = _extract_title_from_section(wbs_section_md)
+        wp_id = _extract_wp_id(wbs_section_md, wbs_md, task_id)
+        task_dir = Path(effective_docs_dir) / "tasks" / task_id
+        state = _load_state_json(task_dir)
+        artifacts = _collect_artifacts(task_dir)
+        logs = _collect_logs(task_dir)
+        return (200, {
+            "task_id": task_id, "title": title, "wp_id": wp_id, "source": "wbs",
+            "wbs_section_md": wbs_section_md, "state": state, "artifacts": artifacts,
+            "logs": logs,
+        })
+
+    if _FEAT_ID_VALID_RE.match(task_id):
+        feat_dir = Path(effective_docs_dir) / "features" / task_id
+        if not feat_dir.is_dir():
+            return (404, {"error": f"Feature {task_id!r} not found", "code": 404})
+        state = _load_state_json(feat_dir)
+        title = state.get("name") or task_id
+        artifacts = _collect_feat_artifacts(feat_dir)
+        logs = _collect_logs(feat_dir)
+        spec_md = ""
+        try:
+            spec_md = (feat_dir / "spec.md").read_text(encoding="utf-8")
+        except OSError:
+            pass
+        return (200, {
+            "task_id": task_id, "title": title, "wp_id": "", "source": "feat",
+            "wbs_section_md": spec_md, "state": state, "artifacts": artifacts,
+            "logs": logs,
+        })
+
+    return (400, {"error": f"Invalid task_id format: {task_id!r}", "code": 400})
 
 
 # ---------------------------------------------------------------------------
