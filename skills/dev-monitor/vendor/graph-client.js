@@ -74,7 +74,7 @@
     const spinner    = isRunning ? '<span class="node-spinner"></span>' : "";
     const dataRunning = isRunning ? "true" : "false";
     return (
-      `<div class="${classes.join(" ")}" data-running="${dataRunning}">` +
+      `<div class="${classes.join(" ")}" data-running="${dataRunning}" data-phase="${escapeHtml(nd.phase || 'pending')}">` +
       `<span class="dep-node-id">${nodeId}</span>` +
       `<span class="dep-node-title">${nodeTitle}</span>` +
       `${spinner}</div>`

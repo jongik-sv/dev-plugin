@@ -968,6 +968,52 @@ class TestApiGraphPayloadV4Fields(unittest.TestCase):
         self.assertEqual(node["wp_id"], "WP-01")
         self.assertEqual(node["depends"], ["TSK-00-01"])
 
+    def test_graph_node_has_phase_field(self):
+        """TSK-04-01: 각 노드 dict에 'phase' 필드가 존재하고 유효한 값을 가진다.
+
+        AC-FR06-d: /api/graph 응답 node 객체에 phase 필드 추가.
+        유효값: "dd"|"im"|"ts"|"xx"|"failed"|"bypass"|"pending"
+        """
+        valid_phases = {"dd", "im", "ts", "xx", "failed", "bypass", "pending"}
+
+        # 정상 케이스 — 각 status별 phase 필드 검증
+        cases = [
+            ("[dd]", False, False, "dd"),
+            ("[im]", False, False, "im"),
+            ("[ts]", False, False, "ts"),
+            ("[xx]", False, False, "xx"),
+            (None, False, False, "pending"),
+        ]
+        for status, bypassed, _failed, expected_phase in cases:
+            task = _make_task("TSK-01-01", status=status, bypassed=bypassed)
+            graph_stats = self._graph_stats(["TSK-01-01"])
+            payload = self.fn([task], [], graph_stats, "/proj/docs", "all")
+            node = payload["nodes"][0]
+            self.assertIn("phase", node, f"status={status}: 'phase' 필드 누락")
+            self.assertIn(node["phase"], valid_phases,
+                          f"status={status}: phase 값 '{node['phase']}' 이 유효하지 않음")
+            self.assertEqual(node["phase"], expected_phase,
+                             f"status={status}: phase '{node['phase']}' != '{expected_phase}'")
+
+        # bypassed=True → "bypass"
+        task_bypassed = _make_task("TSK-01-01", status="[im]", bypassed=True)
+        graph_stats = self._graph_stats(["TSK-01-01"])
+        payload = self.fn([task_bypassed], [], graph_stats, "/proj/docs", "all")
+        node = payload["nodes"][0]
+        self.assertIn("phase", node, "bypassed task: 'phase' 필드 누락")
+        self.assertEqual(node["phase"], "bypass",
+                         f"bypassed task: phase '{node['phase']}' != 'bypass'")
+
+        # failed signal → "failed"
+        task_failed = _make_task("TSK-01-01", status="[im]", bypassed=False)
+        signal_failed = _make_signal("TSK-01-01", "failed")
+        graph_stats = self._graph_stats(["TSK-01-01"])
+        payload = self.fn([task_failed], [signal_failed], graph_stats, "/proj/docs", "all")
+        node = payload["nodes"][0]
+        self.assertIn("phase", node, "failed task: 'phase' 필드 누락")
+        self.assertEqual(node["phase"], "failed",
+                         f"failed task: phase '{node['phase']}' != 'failed'")
+
 
 if __name__ == "__main__":
     unittest.main()

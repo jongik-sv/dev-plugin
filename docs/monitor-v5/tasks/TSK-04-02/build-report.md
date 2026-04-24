@@ -26,6 +26,8 @@
 | 기존 단위 테스트 (test_monitor_filter_bar.py) | 55 | 0 | 55 |
 | 기존 단위 테스트 (test_font_css_variables.py) | 11 | 0 | 11 |
 
+- 전체 scripts/ pytest: 1784 passed, 61 failed, 36 skipped — 61개 실패는 모두 pre-existing (git stash 후에도 동일 실패 확인됨), TSK-04-02 범위 외.
+
 ## E2E 테스트 (작성만 — 실행은 dev-test)
 
 | 파일 경도 | 검증 대상 |

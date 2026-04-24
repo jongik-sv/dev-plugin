@@ -82,22 +82,20 @@ def test_monitor_shared_css_node_spinner_class(css):
 
 # ---------------------------------------------------------------------------
 # test_monitor_shared_css_spinner_visibility_rule
-# .trow[data-running="true"] .spinner { display:inline-block } 규칙이 있다.
+# TSK-04-01: .trow[data-running="true"] .badge .spinner-inline { display:inline-block } 규칙이 있다.
+# (v4 row-level .spinner display 규칙은 TSK-04-01에서 제거됨 — .spinner-inline으로 이동)
 # ---------------------------------------------------------------------------
 def test_monitor_shared_css_spinner_visibility_rule(css):
-    # 셀렉터가 존재하는지 확인 (공백 정규화 허용)
-    pattern = r'\.trow\[data-running=["\']true["\']\]\s*\.spinner'
+    # TSK-04-01: spinner moved inside badge as .spinner-inline
+    pattern = r'\.trow\[data-running=["\']true["\']\]\s*\.badge\s*\.spinner-inline'
     assert re.search(pattern, css), (
-        '.trow[data-running="true"] .spinner 규칙이 _DASHBOARD_CSS에 없습니다.'
+        '.trow[data-running="true"] .badge .spinner-inline 규칙이 _DASHBOARD_CSS에 없습니다.'
     )
     # display:inline-block 포함 여부
-    trow_pos = css.find(".trow[data-running")
-    if trow_pos == -1:
-        # 따옴표 변형 시도
-        trow_pos = css.find('.trow[data-running="true"] .spinner')
+    trow_pos = css.find('.trow[data-running="true"] .badge .spinner-inline')
     snippet = css[trow_pos: trow_pos + 200] if trow_pos != -1 else ""
     assert "inline-block" in snippet, (
-        '.trow[data-running="true"] .spinner 에 display:inline-block 이 없습니다.'
+        '.trow[data-running="true"] .badge .spinner-inline 에 display:inline-block 이 없습니다.'
     )
 
 

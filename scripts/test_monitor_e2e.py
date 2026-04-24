@@ -722,10 +722,10 @@ class TaskRowSpinnerE2ETests(unittest.TestCase):
         )
 
     def test_trow_has_spinner_span(self) -> None:
-        """대시보드 HTML의 .trow 에 <span class="spinner"> 가 존재한다.
+        """TSK-04-01: 대시보드 HTML의 .trow badge 에 <span class="spinner-inline"> 가 존재한다.
 
-        Reachability: GET / → 대시보드 루트 진입 → .trow 행 내 spinner span 확인.
-        모든 trow 에 항상 삽입되므로 task 가 하나라도 있으면 반드시 존재한다.
+        Reachability: GET / → 대시보드 루트 진입 → .badge 내 spinner-inline span 확인.
+        모든 badge 에 항상 삽입되므로 task 가 하나라도 있으면 반드시 존재한다.
         """
         data = self._api_state()
         wbs_tasks = data.get("wbs_tasks") or []
@@ -734,9 +734,9 @@ class TaskRowSpinnerE2ETests(unittest.TestCase):
             self.skipTest("No tasks or features to render — spinner check skipped")
         html = self._get_html("/")
         self.assertIn(
-            '<span class="spinner"',
+            'class="spinner-inline"',
             html,
-            '<span class="spinner"> not found in dashboard HTML — expected in every .trow',
+            'class="spinner-inline" not found in dashboard HTML — expected inside .badge in every .trow',
         )
 
     def test_spinner_span_has_aria_hidden(self) -> None:
@@ -757,15 +757,15 @@ class TaskRowSpinnerE2ETests(unittest.TestCase):
         )
 
     def test_dashboard_css_has_spinner_rule(self) -> None:
-        """대시보드 CSS에 .trow[data-running="true"] .spinner 규칙이 포함된다.
+        """TSK-04-01: 대시보드 CSS에 .trow[data-running="true"] .badge .spinner-inline 규칙이 포함된다.
 
         Reachability: GET / → 대시보드 루트 진입 → <style> 블록 내 CSS 규칙 확인.
         """
         html = self._get_html("/")
         self.assertIn(
-            '.trow[data-running="true"] .spinner',
+            '.trow[data-running="true"] .badge .spinner-inline',
             html,
-            '.trow[data-running="true"] .spinner CSS rule not found in dashboard',
+            '.trow[data-running="true"] .badge .spinner-inline CSS rule not found in dashboard',
         )
 
     def test_dashboard_css_has_keyframes_spin_once(self) -> None:

@@ -238,7 +238,7 @@ class ErrorBadgeTests(unittest.TestCase):
     """TSK-01-08: error 필드가 있는 Task 에 ⚠ 배지 + badge-warn CSS."""
 
     def test_error_task_shows_warn_badge(self) -> None:
-        """v3: 손상 Task 행은 badge 'error' 텍스트 + title 속성 포함."""
+        """TSK-04-01: 손상 Task 행은 badge에 title 속성 + data-phase="failed" 포함."""
         model = _normal_model()
         bad = _make_task(tsk_id="TSK-BAD", title=None, status=None,
                          last_event=None, last_event_at=None,
@@ -247,8 +247,9 @@ class ErrorBadgeTests(unittest.TestCase):
         model["wbs_tasks"].append(bad)
         html = render_dashboard(model)
         self.assertIn("TSK-BAD", html)
-        # v3: badge shows literal "error" text
-        self.assertIn('<div class="badge" title=', html)
+        # TSK-04-01: badge now has data-phase attribute before optional title attr
+        self.assertIn('class="badge"', html)
+        self.assertIn('title=', html)
 
     def test_error_task_has_badge_warn_class(self) -> None:
         """TSK-02-01: error 필드 있는 Task 배지는 'Failed' 텍스트로 표시 (data-phase='failed')."""
@@ -264,15 +265,20 @@ class ErrorBadgeTests(unittest.TestCase):
         self.assertIn('data-phase="failed"', html)
 
     def test_normal_task_has_no_warn_badge(self) -> None:
-        """v3: 정상 Task 행에는 title 속성 없는 badge, 'error' 텍스트 미출현.
+        """TSK-04-01: 정상 Task 행에는 badge에 title 속성 없음, 'error' 텍스트 미출현.
 
-        Badge 값은 data-status와 동일 (running/done/failed/bypass/pending).
+        Badge 값은 data-phase로 제어 (dd/im/ts/xx/failed/bypass/pending).
         """
+        import re as _re
         model = _normal_model()
         model["wbs_tasks"] = [_make_task(tsk_id="TSK-OK", status="[dd]")]
         html = render_dashboard(model)
         # 정상 Task의 badge는 title 속성을 갖지 않아야 한다.
-        self.assertNotIn('<div class="badge" title=', html)
+        # TSK-04-01: badge now has data-phase; check no title on badge element specifically
+        # badge elements: class="badge" ... — should not have title attr (only error tasks get it)
+        badges_with_title = _re.findall(r'class="badge"[^>]*title=', html)
+        self.assertEqual(len(badges_with_title), 0,
+                         f"정상 Task badge에 title 속성이 있음 (오류만 허용): {badges_with_title}")
 
     def test_error_title_attribute_contains_error_preview(self) -> None:
         """v3: 경고 div에 title 속성으로 에러 미리보기 포함."""
@@ -314,8 +320,12 @@ class ErrorBadgeTests(unittest.TestCase):
         html = render_dashboard(model)
         self.assertIn("TSK-GOOD", html)
         self.assertIn("TSK-BAD2", html)
-        # v3: error tasks get title attr on badge; count exactly 1 (only TSK-BAD2)
-        self.assertEqual(html.count('<div class="badge" title='), 1)
+        # TSK-04-01: badge now has data-phase before title attr; use title= count
+        # error tasks get title attr on badge (data-phase="failed" + title=)
+        # Verify exactly 1 badge has title attr (only TSK-BAD2 has error)
+        import re as _re
+        title_in_badge = _re.findall(r'class="badge"[^>]*title=', html)
+        self.assertEqual(len(title_in_badge), 1)
 
 
 class XSSEscapeTests(unittest.TestCase):
@@ -2498,10 +2508,10 @@ class TaskRowDataPhaseAttributeTests(unittest.TestCase):
         self.assertIn('data-status="done"', html)
 
     def test_spinner_placeholder_in_badge(self):
-        """배지 내부에 spinner span 자리가 존재한다 (TSK-02-02 준비)."""
+        """TSK-04-01: 배지 내부에 .spinner-inline span이 존재한다 (row-level .spinner 제거 후)."""
         task = _make_task(tsk_id="TSK-02-01", status="[dd]")
         html = monitor_server._render_task_row_v2(task, set(), set())
-        self.assertIn('class="spinner"', html)
+        self.assertIn('class="spinner-inline"', html)
 
 
 class I18NPhaseKeysTests(unittest.TestCase):
@@ -2543,16 +2553,16 @@ class TskSpinnerTests(unittest.TestCase):
         self.assertIn('data-running="false"', html)
 
     def test_task_row_spinner_span_always_present(self):
-        """모든 trow 에 <span class="spinner"> 가 존재해야 한다 (CSS 로 노출 제어)."""
+        """TSK-04-01: 모든 trow badge에 <span class="spinner-inline"> 가 존재 (CSS 로 노출 제어)."""
         task = _make_task(tsk_id="TSK-01-01", status="[dd]")
         html = monitor_server._render_task_row_v2(task, set(), set())
-        self.assertIn('<span class="spinner"', html)
+        self.assertIn('<span class="spinner-inline"', html)
 
     def test_task_row_spinner_span_present_when_running(self):
-        """running 상태 trow 에도 <span class="spinner"> 가 존재한다."""
+        """TSK-04-01: running 상태 trow badge 에도 <span class="spinner-inline"> 가 존재한다."""
         task = _make_task(tsk_id="TSK-01-01", status="[im]")
         html = monitor_server._render_task_row_v2(task, {"TSK-01-01"}, set())
-        self.assertIn('<span class="spinner"', html)
+        self.assertIn('<span class="spinner-inline"', html)
 
     def test_task_row_spinner_has_aria_hidden(self):
         """spinner span 에 aria-hidden="true" 가 있어야 한다."""
@@ -2583,9 +2593,9 @@ class TskSpinnerTests(unittest.TestCase):
         self.assertIn('data-status="done"', html)
 
     def test_dashboard_css_has_trow_running_spinner_rule(self):
-        """.trow[data-running="true"] .spinner { display: inline-block } 규칙 존재."""
+        """TSK-04-01: .trow[data-running="true"] .badge .spinner-inline { display: inline-block } 규칙 존재."""
         css = monitor_server.DASHBOARD_CSS
-        self.assertIn('.trow[data-running="true"] .spinner', css)
+        self.assertIn('.trow[data-running="true"] .badge .spinner-inline', css)
 
 
 class TskTooltipStateSummaryTests(unittest.TestCase):

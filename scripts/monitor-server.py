@@ -1219,6 +1219,15 @@ DASHBOARD_CSS = """
   --pending: #f0c24a;
   --pending-glow: rgba(240,194,74,.16);
 
+  /* DDTR phase tokens (TSK-04-01 / TSK-03-01) — 7종 */
+  --phase-dd: #6366f1;      /* indigo — Design */
+  --phase-im: #0ea5e9;      /* sky — Build */
+  --phase-ts: #8b5cf6;      /* violet — Test */
+  --phase-xx: #10b981;      /* emerald — Done */
+  --phase-failed: #ef4444;  /* red — Failed */
+  --phase-bypass: #f59e0b;  /* amber — Bypass (AC-FR06-e) */
+  --phase-pending: #6b7280; /* gray — Pending */
+
   /* type */
   --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   --sans: "Space Grotesk", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -1379,8 +1388,7 @@ summary::-webkit-details-marker{ display:none; }
   animation: spin 1s linear infinite;
   vertical-align: middle;
 }
-.trow[data-running="true"] .spinner{ display: inline-block; }
-.badge .spinner{ margin-left: 4px; }
+/* v4 row-level spinner display rule REMOVED (TSK-04-01) — spinner moved inside .badge as .spinner-inline */
 .dep-node[data-running="true"] .node-spinner{
   display:inline-block; position:absolute; top:4px; right:4px;
 }
@@ -1721,6 +1729,38 @@ summary::-webkit-details-marker{ display:none; }
 .trow[data-status="pending"] .badge{ color: var(--pending); border-color: rgba(240,194,74,.2); background: rgba(240,194,74,.04); }
 .trow[data-status="pending"] .badge::before{ background: var(--pending); }
 @keyframes breathe{ 0%,100%{ opacity:1; transform: scale(1);} 50%{ opacity: .55; transform: scale(.85);} }
+
+/* ---------- Phase badge colors — TSK-04-01 ---------- */
+/* .badge[data-phase=PHASE] — 7종 DDTR phase 색 분기 */
+.badge[data-phase="dd"]{ background: color-mix(in srgb, var(--phase-dd) 15%, transparent); border-color: var(--phase-dd); color: var(--phase-dd); }
+.badge[data-phase="im"]{ background: color-mix(in srgb, var(--phase-im) 15%, transparent); border-color: var(--phase-im); color: var(--phase-im); }
+.badge[data-phase="ts"]{ background: color-mix(in srgb, var(--phase-ts) 15%, transparent); border-color: var(--phase-ts); color: var(--phase-ts); }
+.badge[data-phase="xx"]{ background: color-mix(in srgb, var(--phase-xx) 15%, transparent); border-color: var(--phase-xx); color: var(--phase-xx); }
+.badge[data-phase="failed"]{ background: color-mix(in srgb, var(--phase-failed) 15%, transparent); border-color: var(--phase-failed); color: var(--phase-failed); }
+.badge[data-phase="bypass"]{ background: color-mix(in srgb, var(--phase-bypass) 15%, transparent); border-color: var(--phase-bypass); color: var(--phase-bypass); }
+.badge[data-phase="pending"]{ background: color-mix(in srgb, var(--phase-pending) 15%, transparent); border-color: var(--phase-pending); color: var(--phase-pending); }
+/* .badge .spinner-inline — 8×8px inline spinner inside badge; visible only when .trow[data-running="true"] */
+.badge .spinner-inline{
+  display:none;
+  width:8px; height:8px;
+  border: 1.5px solid transparent;
+  border-top-color: currentColor;
+  border-radius:50%;
+  animation: spin 1s linear infinite;
+  vertical-align: middle;
+  flex-shrink:0;
+}
+.trow[data-running="true"] .badge .spinner-inline{ display: inline-block; }
+
+/* ---------- Dep-Graph node data-phase color (TSK-04-01) ---------- */
+/* .dep-node-id color — 6종 (pending 제외, pending은 기본 .dep-node-id 색 사용) */
+/* CSS property scope: color만 담당. border-left-color는 기존 .dep-node.status-* 가 담당 (TSK-03-03 불가침) */
+.dep-node[data-phase="dd"] .dep-node-id{ color: var(--phase-dd); }
+.dep-node[data-phase="im"] .dep-node-id{ color: var(--phase-im); }
+.dep-node[data-phase="ts"] .dep-node-id{ color: var(--phase-ts); }
+.dep-node[data-phase="xx"] .dep-node-id{ color: var(--phase-xx); }
+.dep-node[data-phase="failed"] .dep-node-id{ color: var(--phase-failed); }
+.dep-node[data-phase="bypass"] .dep-node-id{ color: var(--phase-bypass); }
 
 .trow .ttitle{
   color: var(--ink);
@@ -3129,8 +3169,7 @@ def _render_task_row_v2(item, running_ids: set, failed_ids: set, lang: str = "ko
         f" data-state-summary='{_state_summary_encoded}'>\n"
         '  <div class="statusbar"></div>\n'
         f'  <div class="tid id">{_esc(item_id)}</div>\n'
-        f'  <div class="badge"{badge_title_attr}>{_esc(badge_text)}</div>\n'
-        '  <span class="spinner" aria-hidden="true"></span>\n'
+        f'  <div class="badge" data-phase="{data_phase}"{badge_title_attr}>{_esc(badge_text)}<span class="spinner-inline" aria-hidden="true"></span></div>\n'
         f'  <div class="ttitle title">{clean_title}{model_chip}</div>\n'
         f'  <div class="elapsed">{_esc(elapsed_display)}</div>\n'
         f'  <div class="retry">×{rc}</div>\n'
@@ -4377,7 +4416,7 @@ _DASHBOARD_JS = """\
     var dl=document.createElement('dl');
     function row(label,value){
       var dt=document.createElement('dt');dt.textContent=label;
-      var dd=document.createElement('dd');dd.textContent=(value===null||value===undefined)?'—':String(value);
+      var dd=document.createElement('dd');dd.textContent=(value==null)?'—':String(value);
       dl.appendChild(dt);dl.appendChild(dd);
     }
     row('status',data.status);
@@ -4403,19 +4442,19 @@ _DASHBOARD_JS = """\
   function positionPopover(btn,pop){
     pop.style.visibility='hidden';
     pop.hidden=false;
-    var r=btn.getBoundingClientRect();
-    var pw=pop.offsetWidth;
-    var ph=pop.offsetHeight;
+    var btnRect=btn.getBoundingClientRect();
+    var popW=pop.offsetWidth;
+    var popH=pop.offsetHeight;
     pop.hidden=true;
     pop.style.visibility='';
-    var top=r.top+window.scrollY-ph-8;
+    var top=btnRect.top+window.scrollY-popH-8;
     var placement='above';
     if(top<window.scrollY+8){
-      top=r.bottom+window.scrollY+8;
+      top=btnRect.bottom+window.scrollY+8;
       placement='below';
     }
-    var left=r.left+window.scrollX;
-    left=Math.max(8,Math.min(left,window.innerWidth-pw-8));
+    var left=btnRect.left+window.scrollX;
+    left=Math.max(8,Math.min(left,window.innerWidth-popW-8));
     pop.style.top=top+'px';
     pop.style.left=left+'px';
     pop.setAttribute('data-placement',placement);
@@ -4423,6 +4462,7 @@ _DASHBOARD_JS = """\
 
   function close(){
     if(!openBtn)return;
+    /* guard: if openBtn was detached by 5s poll, still clean up */
     openBtn.setAttribute('aria-expanded','false');
     pop.hidden=true;
     openBtn=null;
@@ -4450,8 +4490,6 @@ _DASHBOARD_JS = """\
       positionPopover(btn,pop);
       pop.hidden=false;
       btn.setAttribute('aria-expanded','true');
-      /* guard: if openBtn detached (5s poll), silently close */
-      if(!document.contains(openBtn)){pop.hidden=true;openBtn=null;return;}
       return;
     }
     /* outside click */
@@ -5370,6 +5408,12 @@ def _build_graph_payload(
             # TSK-05-02: filter predicate support fields
             "domain": task.domain if task.domain is not None else "-",
             "model": task.model if task.model is not None else "-",
+            # TSK-04-01: DDTR phase attribute for dep-graph node coloring
+            "phase": _phase_data_attr(
+                task.status,
+                failed=(node_status == "failed"),
+                bypassed=task.bypassed,
+            ),
         })
 
     # Build edges from task depends relationships

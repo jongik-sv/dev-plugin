@@ -575,7 +575,7 @@ monitor-server, monitor-launcher
 - category: development
 - domain: fullstack
 - model: sonnet
-- status: [dd]
+- status: [im]
 - priority: high
 - assignee: -
 - schedule: 2026-05-13 ~ 2026-05-14
@@ -646,7 +646,7 @@ monitor-server, monitor-launcher
 - category: development
 - domain: fullstack
 - model: opus
-- status: [im]
+- status: [xx]
 - priority: high
 - assignee: -
 - schedule: 2026-05-15 ~ 2026-05-18
