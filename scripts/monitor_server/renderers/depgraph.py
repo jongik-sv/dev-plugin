@@ -16,14 +16,46 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from typing import List
 
-from ._util import (
-    _t,
-    _signal_set,
-    _derive_node_status,
-    _serialize_phase_history_tail_for_graph,
-    _now_iso_z,
-)
-from .taskrow import _phase_data_attr  # noqa: F401 — re-exports via monitor_server.renderers.depgraph for downstream consumers
+try:
+    from ._util import (
+        _t,
+        _signal_set,
+        _derive_node_status,
+        _serialize_phase_history_tail_for_graph,
+        _now_iso_z,
+    )
+    from .taskrow import _phase_data_attr  # noqa: F401 — re-exports via monitor_server.renderers.depgraph for downstream consumers
+except ImportError:
+    # Standalone load (e.g. importlib.util.spec_from_file_location in unit tests
+    # that only exercise pure helpers like render_legend()). _util/taskrow helpers
+    # stay unbound; any caller needing them (e.g. _section_dep_graph) will fail
+    # loudly, which is the right behavior.
+    pass
+
+
+def render_legend(wheel_label: str = "") -> str:
+    """Render the dep-graph legend HTML.
+
+    TSK-03-03 (FR-05): Critical Path 항목을 Failed 와 별도 <li>로 분리.
+    구조는 <ul id="dep-graph-legend"> + <li class="legend-{state} leg-item">.
+    크리티컬 swatch 색은 #f59e0b (앰버, --critical 토큰과 동일 hex).
+
+    Args:
+        wheel_label: wheel-zoom 토글 라벨 텍스트 (이미 HTML-escape 되어 있다고 가정).
+    """
+    return (
+        '<ul id="dep-graph-legend" class="dep-graph-legend">'
+        '<li class="legend-done leg-item" style="color:#22c55e">&#9632; done</li>'
+        '<li class="legend-running leg-item" style="color:#eab308">&#9632; running</li>'
+        '<li class="legend-pending leg-item" style="color:#94a3b8">&#9632; pending</li>'
+        '<li class="legend-failed leg-item" style="color:#ef4444">&#9632; failed</li>'
+        '<li class="legend-bypassed leg-item" style="color:#a855f7">&#9632; bypassed</li>'
+        '<li class="legend-critical leg-item" style="color:#f59e0b">&#9632; critical path</li>'
+        '<label class="dep-graph-wheel" for="dep-graph-wheel-toggle">'
+        '<input type="checkbox" id="dep-graph-wheel-toggle">'
+        f'<span>{wheel_label}</span></label>'
+        '</ul>'
+    )
 
 
 def _section_dep_graph(lang: str = "ko", subproject: str = "all") -> str:
@@ -55,18 +87,7 @@ def _section_dep_graph(lang: str = "ko", subproject: str = "all") -> str:
     summary_html = f'<aside id="dep-graph-summary" class="dep-graph-summary">{chips}</aside>'
 
     wheel_label = html.escape(_t(lang, "dep_wheel_zoom"))
-    legend_html = (
-        '<div id="dep-graph-legend" class="dep-graph-legend">'
-        '<span class="leg-item" style="color:#22c55e">&#9632; done</span> '
-        '<span class="leg-item" style="color:#eab308">&#9632; running</span> '
-        '<span class="leg-item" style="color:#94a3b8">&#9632; pending</span> '
-        '<span class="leg-item" style="color:#ef4444">&#9632; failed</span> '
-        '<span class="leg-item" style="color:#a855f7">&#9632; bypassed</span>'
-        '<label class="dep-graph-wheel" for="dep-graph-wheel-toggle">'
-        '<input type="checkbox" id="dep-graph-wheel-toggle">'
-        f'<span>{wheel_label}</span></label>'
-        '</div>'
-    )
+    legend_html = render_legend(wheel_label=wheel_label)
 
     # graph-client.js는 개발 중 자주 바뀌므로 mtime 기반 cache-buster를 붙여 브라우저 캐시를 무효화한다.
     plugin_root = os.environ.get("CLAUDE_PLUGIN_ROOT") or str(Path(__file__).resolve().parents[3])

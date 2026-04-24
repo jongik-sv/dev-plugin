@@ -497,10 +497,14 @@ class TestDepGraphCssRulesPresent(unittest.TestCase):
         self.assertIn("box-shadow", m.group(1), ".dep-node.critical box-shadow(글로우) 없음")
 
     def test_dep_node_critical_border_color_fail(self):
-        """.dep-node.critical에 border-color: var(--fail) 규칙이 있다."""
+        """.dep-node.critical에 border-color: var(--critical) 규칙이 있다.
+
+        TSK-03-03 (FR-05): 크리티컬 패스 색상을 failed(빨강)에서 critical(앰버 #f59e0b)로 분리.
+        과거 var(--fail) 단언은 옛 디자인 lock-in 이었으며, 본 Task에서 신디자인 토큰으로 갱신.
+        """
         m = re.search(r'\.dep-node\.critical\s*\{([^}]*)\}', self.css)
         self.assertIsNotNone(m, ".dep-node.critical 블록 없음")
-        self.assertIn("var(--fail)", m.group(1), ".dep-node.critical border-color: var(--fail) 없음")
+        self.assertIn("var(--critical)", m.group(1), ".dep-node.critical border-color: var(--critical) 없음")
 
     def test_dep_node_bottleneck_dashed_border(self):
         """.dep-node.bottleneck에 border-style: dashed 규칙이 있다."""

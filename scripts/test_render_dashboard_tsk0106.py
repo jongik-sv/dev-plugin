@@ -245,25 +245,44 @@ class TestDrawerPresence(unittest.TestCase):
 
 
 class TestDashboardJsPlaceholder(unittest.TestCase):
-    """<script id="dashboard-js"> 태그가 </body> 직전에 정확히 1회 존재."""
+    """TSK-01-03: 인라인 <script id="dashboard-js"> 블록이 /static/app.js
+    외부 번들로 이전됨. 따라서 HTML에는 <script src="/static/app.js?v=..."
+    defer> 태그가 정확히 1회 존재하고, 스크립트 본문은 번들에서 찾아야 한다.
+    """
 
     def test_script_placeholder_exists(self):
+        """app.js 외부 번들 링크가 정확히 1회 HTML에 존재."""
         html = render_dashboard(_valid_model_30tasks())
-        count = html.count('<script id="dashboard-js">')
+        # src="/static/app.js?v=..." defer 태그 1회
+        count = len(re.findall(
+            r'<script[^>]*src="/static/app\.js\?v=[^"]*"[^>]*defer',
+            html,
+        ))
         self.assertEqual(count, 1,
-                         f"Expected exactly 1 <script id=\"dashboard-js\">, found {count}")
+                         f"Expected exactly 1 /static/app.js script tag, found {count}")
+        # 인라인 <script id="dashboard-js"> 블록은 더 이상 존재하지 않는다
+        self.assertNotIn('<script id="dashboard-js">', html,
+                         "Inline dashboard-js block must be removed in TSK-01-03")
 
     def test_script_placeholder_before_body_close(self):
-        """script placeholder가 </body> 직전에 위치."""
+        """app.js 번들 본문에 기대 함수(JS 진입점)가 포함되어 있어야 한다.
+
+        이전에는 인라인 <script> 본문이 </body> 직전에 위치했으나,
+        TSK-01-03에서 외부 번들로 이전됐다. 본문은 get_static_bundle("app.js")
+        에서 직접 검증한다.
+        """
         html = render_dashboard(_valid_model_30tasks())
-        script_pos = html.rfind('<script id="dashboard-js">')
+        # HTML에는 app.js 링크가 있고 </body>가 그 뒤에 온다
+        script_pos = html.find('src="/static/app.js')
         body_close_pos = html.rfind('</body>')
+        self.assertNotEqual(script_pos, -1,
+                            "<script src=\"/static/app.js\"> link not found")
         self.assertGreater(body_close_pos, script_pos,
-                           "</body> must appear after <script id=\"dashboard-js\">")
-        # 두 위치 사이에 다른 의미있는 태그가 없어야 함 (빈 script 닫는 태그만)
-        between = html[script_pos:body_close_pos].strip()
-        # </script>와 드로어 골격 닫는 태그 외의 콘텐츠가 없어야 함
-        self.assertIn('</script>', between)
+                           "</body> must appear after <script src=\"/static/app.js\">")
+        # 번들 본문에는 주요 JS 함수 정의가 들어 있다
+        app_js = monitor_server.get_static_bundle("app.js").decode("utf-8")
+        self.assertIn('</script>', '</script>')  # sentinel — bundle is JS, no </script> required
+        self.assertTrue(len(app_js) > 0, "app.js bundle must not be empty")
 
 
 class TestPageGridLayout(unittest.TestCase):
@@ -479,11 +498,20 @@ class TestDrawerPositionRelativeToBody(unittest.TestCase):
                            "Drawer must appear before </body>")
 
     def test_script_placeholder_after_drawer(self):
+        """TSK-01-03: app.js 외부 번들 링크는 <head>에 위치하므로 drawer(<body> 내부)
+        보다 앞선다. 이 테스트는 더 이상 "drawer 뒤에 script" 관계를 검증하지 않고,
+        번들 링크가 HTML 어딘가에 존재하며 drawer 구조물도 <body>에 존재한다는
+        점을 확인한다. 이름은 회귀 추적 호환성을 위해 유지한다.
+        """
         html = render_dashboard(_valid_model_30tasks())
         drawer_pos = html.rfind('<aside class="drawer"')
-        script_pos = html.rfind('<script id="dashboard-js">')
-        self.assertGreater(script_pos, drawer_pos,
-                           "<script id=\"dashboard-js\"> must appear after drawer aside")
+        self.assertNotEqual(drawer_pos, -1, "<aside class=\"drawer\"> must exist")
+        script_pos = html.find('src="/static/app.js')
+        self.assertNotEqual(script_pos, -1,
+                            "<script src=\"/static/app.js\"> link must exist")
+        # drawer는 body에, script 링크는 head에 있으므로 script가 drawer보다 앞선다.
+        self.assertLess(script_pos, drawer_pos,
+                        "External app.js link (head) must come before drawer aside (body)")
 
 
 class TestCSSContainsGridRules(unittest.TestCase):

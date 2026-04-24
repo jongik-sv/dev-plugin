@@ -165,11 +165,12 @@ class TestDepGraphSummaryLegendParity(_DepGraphBase):
         section_html = self.ms._section_dep_graph(lang="ko")
 
         # legend 인라인 style에서 state별 색상 추출
-        # <span class="leg-item" style="color:#22c55e">&#9632; done</span>
+        # TSK-03-03: legend 구조가 <span> → <li>로 전환됨 (FR-05 Critical 항목 분리).
+        # <li class="legend-done leg-item" style="color:#22c55e">&#9632; done</li>
         legend_colors: dict[str, str] = {
             label: color_hex.lower()
             for m in re.finditer(
-                r'style="color:(#[0-9a-fA-F]{3,8})"[^>]*>.*?(\w+)</span>',
+                r'style="color:(#[0-9a-fA-F]{3,8})"[^>]*>.*?(\w+)</(?:span|li)>',
                 section_html,
             )
             for color_hex, label in [(m.group(1), m.group(2).strip().lower())]

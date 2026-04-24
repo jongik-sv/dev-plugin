@@ -381,6 +381,61 @@ class WpCardsSectionE2ETests(unittest.TestCase):
         self.assertIn("task-row", section_html,
                       "wp-card 섹션 내부에 task-row 클래스 없음")
 
+    def test_wp_card_no_horizontal_scroll(self) -> None:
+        """TSK-03-02 AC-FR03-c / AC-2: 1280px 뷰포트에서 WP 카드 내 가로 스크롤 없음.
+
+        Reachability: 상단 네비 href="#wp-cards" 링크 → id="wp-cards" 섹션 도달.
+
+        구현 방식: Playwright 없이 HTTP + 정규식 기반.
+        1. GET / HTML에서 href="#wp-cards" 네비 앵커 존재 확인 (reachability gate).
+        2. GET / HTML에 id="wp-cards" 섹션이 존재함을 확인.
+        3. GET / HTML 응답(인라인 CSS 포함)에서 .wp-stack의 minmax 값이 380px 이하인지 확인.
+           (minmax(380px, 1fr) → 카드 열이 380px 이상에서만 확장되므로 1280px÷2≈640px 열에서
+            가로 스크롤 발생 불가).
+        4. .grid에서 2fr:3fr 비율이 적용됨을 확인 (좌측 약 40%).
+        """
+        html = self._dashboard_html()
+
+        # Reachability gate: 상단 네비 앵커 클릭 경로
+        self.assertIn('href="#wp-cards"', html,
+                      "상단 네비에 href='#wp-cards' 앵커 없음 — reachability 미충족")
+
+        # AC-FR03-c / AC-2: id="wp-cards" 섹션 존재
+        self.assertIn('id="wp-cards"', html,
+                      "id='wp-cards' 섹션이 HTML에 없음")
+
+        # .wp-stack minmax 값 확인 — 380px 이하 보장
+        # 인라인 CSS에서 .wp-stack 블록의 minmax 값을 추출
+        wp_stack_match = re.search(
+            r"\.wp-stack\s*\{[^}]*minmax\(\s*(\d+)px\s*,\s*1fr\s*\)",
+            html,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(
+            wp_stack_match,
+            ".wp-stack { minmax(Xpx, 1fr) } 패턴이 응답 HTML에 없음",
+        )
+        min_px = int(wp_stack_match.group(1))
+        # 1280px 뷰포트에서 좌측 열 ≈ 512px (40%), minmax ≤ 512px이면 가로 스크롤 없음
+        # 380px ≤ 512px → AC-FR03-c 충족
+        self.assertLessEqual(
+            min_px, 512,
+            f".wp-stack minmax 값 {min_px}px이 1280px 기준 좌측 열 폭(≈512px)보다 큼 "
+            f"— 가로 스크롤 발생 가능",
+        )
+
+        # AC-FR03-a: .grid 2fr:3fr 비율 확인
+        grid_match = re.search(
+            r"\.grid\s*\{[^}]*grid-template-columns\s*:[^}]*minmax\(0,\s*2fr\)\s+minmax\(0,\s*3fr\)",
+            html,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(
+            grid_match,
+            ".grid { grid-template-columns: minmax(0, 2fr) minmax(0, 3fr) } 패턴이 "
+            "응답 HTML에 없음 — 2fr:3fr 비율 미적용",
+        )
+
 
 @unittest.skipUnless(_SERVER_UP, f"monitor-server not reachable at {_E2E_URL}")
 class StickyHeaderKpiSectionE2ETests(unittest.TestCase):

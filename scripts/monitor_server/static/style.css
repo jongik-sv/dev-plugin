@@ -37,6 +37,8 @@
   --bypass-glow: rgba(209,107,224,.16);
   --pending: #f0c24a;
   --pending-glow: rgba(240,194,74,.16);
+  --critical: #f59e0b;
+  --critical-glow: rgba(245,158,11,.18);
 
   /* type */
   --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
@@ -940,8 +942,13 @@ body[data-filter="bypass"]  .trow:not([data-status="bypass"]) { display: none; }
   --_tint: color-mix(in srgb, #a855f7 10%, transparent);
 }
 .dep-node.status-bypassed .dep-node-id { color: #a855f7; }
-/* --- 모디파이어: critical (붉은 글로우 + border) --- */
+/* --- 모디파이어: critical (앰버 글로우 + border) --- */
 .dep-node.critical {
+  border-color: var(--critical);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--critical) 35%, transparent);
+}
+/* --- failed + critical 동시 적용 시 failed(빨강) 우선 (specificity 0,3,0 > 0,2,0) --- */
+.dep-node.status-failed.critical {
   border-color: var(--fail);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--fail) 35%, transparent);
 }
@@ -949,6 +956,9 @@ body[data-filter="bypass"]  .trow:not([data-status="bypass"]) { display: none; }
 .dep-node.bottleneck {
   border-style: dashed;
 }
+
+/* --- legend <ul>/<li> reset (TSK-03-03) --- */
+ul#dep-graph-legend { list-style: none; margin: 0; padding: 0; }
 
 /* ---------- dep-graph summary chips (TSK-04-04) ---------- */
 /* AC-32: color values match #dep-graph-legend inline style hex 1:1 */

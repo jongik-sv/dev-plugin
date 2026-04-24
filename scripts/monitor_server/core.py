@@ -214,7 +214,9 @@ _WP_ID_RE = re.compile(r"^WP-\d{2}$")
 
 _STATIC_PATH_PREFIX = "/static/"
 
-# Whitelist of allowed vendor filenames under skills/dev-monitor/vendor/.
+# Whitelist of allowed filenames under /static/.
+# - vendor JS (5): served from plugin_root/skills/dev-monitor/vendor/
+# - local bundles (2): style.css + app.js, served in-memory by handlers (see get_static_bundle)
 # graph-client.js is a TSK-03-04 placeholder committed as an empty file.
 _STATIC_WHITELIST: "frozenset[str]" = frozenset({
     "cytoscape.min.js",
@@ -222,6 +224,8 @@ _STATIC_WHITELIST: "frozenset[str]" = frozenset({
     "cytoscape-node-html-label.min.js",
     "cytoscape-dagre.min.js",
     "graph-client.js",
+    "style.css",
+    "app.js",
 })
 
 
@@ -1380,6 +1384,8 @@ DASHBOARD_CSS = """
   --bypass-glow: rgba(209,107,224,.16);
   --pending: #f0c24a;
   --pending-glow: rgba(240,194,74,.16);
+  --critical: #f59e0b;
+  --critical-glow: rgba(245,158,11,.18);
 
   /* type */
   --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
@@ -1703,7 +1709,7 @@ summary::-webkit-details-marker{ display:none; }
 /* ---------- main 2-col grid ---------- */
 .grid{
   display: grid;
-  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
   gap: 28px;
   padding-top: 8px;
 }
@@ -1712,7 +1718,7 @@ summary::-webkit-details-marker{ display:none; }
 /* ---------- 4. WP Cards ---------- */
 .wp-stack{
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(520px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
   gap: 14px;
   align-items: start;
 }
@@ -2266,8 +2272,13 @@ body[data-filter="bypass"]  .trow:not([data-status="bypass"]) { display: none; }
   --_tint: color-mix(in srgb, #a855f7 10%, transparent);
 }
 .dep-node.status-bypassed .dep-node-id { color: #a855f7; }
-/* --- 모디파이어: critical (붉은 글로우 + border) --- */
+/* --- 모디파이어: critical (앰버 글로우 + border) --- */
 .dep-node.critical {
+  border-color: var(--critical);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--critical) 35%, transparent);
+}
+/* --- failed + critical 동시 적용 시 failed(빨강) 우선 (specificity 0,3,0 > 0,2,0) --- */
+.dep-node.status-failed.critical {
   border-color: var(--fail);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--fail) 35%, transparent);
 }
@@ -2275,6 +2286,9 @@ body[data-filter="bypass"]  .trow:not([data-status="bypass"]) { display: none; }
 .dep-node.bottleneck {
   border-style: dashed;
 }
+
+/* --- legend <ul>/<li> reset (TSK-03-03) --- */
+ul#dep-graph-legend { list-style: none; margin: 0; padding: 0; }
 
 /* ---------- dep-graph summary chips (TSK-04-04) ---------- */
 /* AC-32: color values match #dep-graph-legend inline style hex 1:1 */
@@ -2399,6 +2413,60 @@ def _minify_css(css: str) -> str:
 
 
 DASHBOARD_CSS = _minify_css(DASHBOARD_CSS)
+
+
+# ---------------------------------------------------------------------------
+# Static bundle assembly (TSK-01-02 / TSK-01-03)
+# ---------------------------------------------------------------------------
+# In-memory source of truth for /static/style.css and /static/app.js. Inline
+# constants (``DASHBOARD_CSS``, ``_PANE_CSS``, ``_task_panel_css()``) and the
+# three JS blocks (``_DASHBOARD_JS``, ``_PANE_JS``, ``_task_panel_js()``) are
+# concatenated at request time and fingerprinted for ``?v=`` cache-busting.
+# ``handlers._serve_local_static`` prefers this bundle over the on-disk files
+# under ``monitor_server/static/`` so edits to the inline constants never drift
+# from what the browser receives.
+
+_STATIC_BUNDLE_CACHE: "dict" = {}
+
+
+def get_static_bundle(name: str) -> bytes:
+    """Return the current bytes for ``/static/{name}``.
+
+    Supported names: ``style.css``, ``app.js``. Empty bytes for anything else
+    (vendor JS is served separately from the plugin vendor dir).
+    """
+    if name == "style.css":
+        body = "\n".join([
+            DASHBOARD_CSS,
+            _task_panel_css(),
+            _PANE_CSS,
+        ])
+        return body.encode("utf-8")
+    if name == "app.js":
+        body = "\n".join([
+            _DASHBOARD_JS,
+            _task_panel_js(),
+            _PANE_JS,
+        ])
+        return body.encode("utf-8")
+    return b""
+
+
+def get_static_version(name: str) -> str:
+    """Return a stable short fingerprint for ``/static/{name}`` (md5, 8 chars).
+
+    Cached per-name for the process lifetime — inline constants are effectively
+    immutable once the module is imported.
+    """
+    cached = _STATIC_BUNDLE_CACHE.get(name)
+    if cached is not None:
+        return cached
+    data = get_static_bundle(name)
+    if not data:
+        return ""
+    fp = hashlib.md5(data).hexdigest()[:8]
+    _STATIC_BUNDLE_CACHE[name] = fp
+    return fp
 
 
 def _esc(value) -> str:
@@ -3822,17 +3890,19 @@ def _section_dep_graph(lang: str = "ko", subproject: str = "all") -> str:
     summary_html = f'<aside id="dep-graph-summary" class="dep-graph-summary">{chips}</aside>'
 
     wheel_label = html.escape(_t(lang, "dep_wheel_zoom"))
+    # TSK-03-03: Critical Path 항목을 Failed 와 별도 <li>로 분리. <div>/<span> → <ul>/<li> 전환.
     legend_html = (
-        '<div id="dep-graph-legend" class="dep-graph-legend">'
-        '<span class="leg-item" style="color:#22c55e">&#9632; done</span> '
-        '<span class="leg-item" style="color:#eab308">&#9632; running</span> '
-        '<span class="leg-item" style="color:#94a3b8">&#9632; pending</span> '
-        '<span class="leg-item" style="color:#ef4444">&#9632; failed</span> '
-        '<span class="leg-item" style="color:#a855f7">&#9632; bypassed</span>'
+        '<ul id="dep-graph-legend" class="dep-graph-legend">'
+        '<li class="legend-done leg-item" style="color:#22c55e">&#9632; done</li>'
+        '<li class="legend-running leg-item" style="color:#eab308">&#9632; running</li>'
+        '<li class="legend-pending leg-item" style="color:#94a3b8">&#9632; pending</li>'
+        '<li class="legend-failed leg-item" style="color:#ef4444">&#9632; failed</li>'
+        '<li class="legend-bypassed leg-item" style="color:#a855f7">&#9632; bypassed</li>'
+        '<li class="legend-critical leg-item" style="color:#f59e0b">&#9632; critical path</li>'
         '<label class="dep-graph-wheel" for="dep-graph-wheel-toggle">'
         '<input type="checkbox" id="dep-graph-wheel-toggle">'
         f'<span>{wheel_label}</span></label>'
-        '</div>'
+        '</ul>'
     )
 
     # graph-client.js는 개발 중 자주 바뀌므로 mtime 기반 cache-buster를 붙여 브라우저 캐시를 무효화한다.
@@ -4936,6 +5006,8 @@ def render_dashboard(model: dict, lang: str = "ko", subproject: str = "all") -> 
         "filter-bar": filter_bar_html,
     })
 
+    css_ver = get_static_version("style.css")
+    js_ver = get_static_version("app.js")
     return "".join([
         '<!DOCTYPE html>\n',
         '<html lang="en">\n',
@@ -4946,15 +5018,13 @@ def render_dashboard(model: dict, lang: str = "ko", subproject: str = "all") -> 
         '  <link rel="preconnect" href="https://fonts.googleapis.com">\n',
         '  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>\n',
         '  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">\n',
-        f'  <style>{DASHBOARD_CSS}</style>\n',
+        f'  <link rel="stylesheet" href="/static/style.css?v={css_ver}">\n',
+        f'  <script src="/static/app.js?v={js_ver}" defer></script>\n',
         '</head>\n',
         '<body>\n',
         body, "\n",
         _drawer_skeleton(), "\n",
         _trow_tooltip_skeleton(), "\n",
-        f'<style>{_task_panel_css()}</style>\n',
-        f'<script id="dashboard-js">{_DASHBOARD_JS}</script>\n',
-        f'<script id="task-panel-js">{_task_panel_js()}</script>\n',
         _task_panel_dom(), "\n",
         '</body>\n',
         '</html>\n',
@@ -5228,13 +5298,14 @@ def _render_pane_html(
         else ""
     )
 
+    css_ver = get_static_version("style.css")
     return (
         '<!DOCTYPE html>\n'
         '<html lang="en">\n'
         '<head>\n'
         '  <meta charset="utf-8">\n'
         f'  <title>pane {escaped_id}</title>\n'
-        f'  <style>{_PANE_CSS}</style>\n'
+        f'  <link rel="stylesheet" href="/static/style.css?v={css_ver}">\n'
         '</head>\n'
         '<body>\n'
         '<nav class="top-nav"><a href="/">&#x2190; back to dashboard</a></nav>\n'

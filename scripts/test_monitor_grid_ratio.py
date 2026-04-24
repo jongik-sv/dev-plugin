@@ -15,10 +15,22 @@ import unittest
 
 _SCRIPTS_DIR = pathlib.Path(__file__).parent
 _SERVER_SRC = _SCRIPTS_DIR / "monitor-server.py"
+_CORE_SRC = _SCRIPTS_DIR / "monitor_server" / "core.py"
 
 
 def _read_server_source() -> str:
-    return _SERVER_SRC.read_text(encoding="utf-8")
+    """monitor-server.py + monitor_server/core.py 전체 소스를 합쳐 반환한다.
+
+    TSK-02-03 이후 CSS/JS 본체가 monitor_server/core.py로 이전되었으므로,
+    두 파일을 합친 소스로 검색해야 CSS 블록을 찾을 수 있다.
+    """
+    parts = []
+    for p in (_SERVER_SRC, _CORE_SRC):
+        try:
+            parts.append(p.read_text(encoding="utf-8"))
+        except OSError:
+            pass
+    return "\n".join(parts)
 
 
 class GridTemplateColumnsTests(unittest.TestCase):

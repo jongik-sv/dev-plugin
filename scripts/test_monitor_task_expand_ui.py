@@ -262,10 +262,18 @@ class TestDashboardIncludesPanelAssets(unittest.TestCase):
             self.assertIn(".slide-panel", html)
 
     def test_task_panel_js_in_output(self):
-        """슬라이드 패널 JS가 전체 HTML에 포함."""
+        """슬라이드 패널 JS가 app.js 번들에 포함 (TSK-01-03: HTML → /static/app.js 이전).
+
+        이제 HTML에는 <script src="/static/app.js?v=..." defer> 링크만 있고
+        실제 함수 본문은 get_static_bundle("app.js") 에서 검증한다.
+        """
         html = self._render()
-        self.assertIn("openTaskPanel", html)
-        self.assertIn("closeTaskPanel", html)
+        # HTML에는 app.js 외부 번들 링크가 존재
+        self.assertIn('src="/static/app.js', html)
+        # 번들에는 openTaskPanel/closeTaskPanel 정의가 포함
+        app_js = monitor_server.get_static_bundle("app.js").decode("utf-8")
+        self.assertIn("openTaskPanel", app_js)
+        self.assertIn("closeTaskPanel", app_js)
 
     def test_task_panel_dom_in_output(self):
         """슬라이드 패널 DOM이 전체 HTML에 포함."""

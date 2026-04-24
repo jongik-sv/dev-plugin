@@ -522,24 +522,24 @@ class TestSlidePanelDomInBody(unittest.TestCase):
         self.assertIn('id="task-panel-body"', html)
 
     def test_open_task_panel_js_function(self):
-        """openTaskPanel JS 함수 포함."""
-        html = self._render()
-        self.assertIn("openTaskPanel", html)
+        """openTaskPanel JS 함수 포함 (TSK-01-03: app.js 번들에서 검증)."""
+        app_js = monitor_server.get_static_bundle("app.js").decode("utf-8")
+        self.assertIn("openTaskPanel", app_js)
 
     def test_close_task_panel_js_function(self):
-        """closeTaskPanel JS 함수 포함."""
-        html = self._render()
-        self.assertIn("closeTaskPanel", html)
+        """closeTaskPanel JS 함수 포함 (TSK-01-03: app.js 번들에서 검증)."""
+        app_js = monitor_server.get_static_bundle("app.js").decode("utf-8")
+        self.assertIn("closeTaskPanel", app_js)
 
     def test_render_wbs_section_js_function(self):
-        """renderWbsSection JS 함수 포함."""
-        html = self._render()
-        self.assertIn("renderWbsSection", html)
+        """renderWbsSection JS 함수 포함 (TSK-01-03: app.js 번들에서 검증)."""
+        app_js = monitor_server.get_static_bundle("app.js").decode("utf-8")
+        self.assertIn("renderWbsSection", app_js)
 
     def test_escape_html_js_function(self):
-        """escapeHtml JS 함수 포함 (XSS 방어)."""
-        html = self._render()
-        self.assertIn("escapeHtml", html)
+        """escapeHtml JS 함수 포함 (XSS 방어, TSK-01-03: app.js 번들에서 검증)."""
+        app_js = monitor_server.get_static_bundle("app.js").decode("utf-8")
+        self.assertIn("escapeHtml", app_js)
 
     def test_task_panel_not_inside_data_section(self):
         """#task-panel이 data-section 속성을 가진 컨테이너 안에 없음 (auto-refresh 격리)."""
@@ -552,9 +552,9 @@ class TestSlidePanelDomInBody(unittest.TestCase):
         self.assertIn('id="task-panel"', html)
 
     def test_esc_key_closes_panel(self):
-        """Escape 키 이벤트 핸들러 포함 (Escape → closeTaskPanel)."""
-        html = self._render()
-        self.assertIn("Escape", html)
+        """Escape 키 이벤트 핸들러 포함 (TSK-01-03: app.js 번들에서 검증)."""
+        app_js = monitor_server.get_static_bundle("app.js").decode("utf-8")
+        self.assertIn("Escape", app_js)
 
     def test_task_panel_title_element(self):
         """#task-panel-title 요소 존재."""
@@ -573,12 +573,12 @@ class TestXssSafetyInWbsSection(unittest.TestCase):
         return monitor_server.render_dashboard(_empty_model(), lang="ko", subproject="all")
 
     def test_escape_html_function_escapes_lt(self):
-        """escapeHtml 함수가 < 를 &lt; 로 변환하는 로직 포함."""
-        html = self._render()
+        """escapeHtml 함수가 < 를 &lt; 로 변환하는 로직 포함 (TSK-01-03: app.js 번들에서 검증)."""
+        app_js = monitor_server.get_static_bundle("app.js").decode("utf-8")
         # escapeHtml 구현에 &lt; 또는 replace('<' 패턴이 있어야 함
         self.assertTrue(
-            "&lt;" in html or "replace('<'" in html or "replace(\"<\"" in html,
-            "escapeHtml must handle < character"
+            "&lt;" in app_js or "replace('<'" in app_js or "replace(\"<\"" in app_js,
+            "escapeHtml must handle < character (checked against app.js bundle)"
         )
 
 

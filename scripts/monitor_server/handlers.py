@@ -220,27 +220,42 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def _serve_local_static(self, filename: str) -> None:
-        """CSS/JS를 monitor_server/static/ 에서 서빙."""
-        asset_path = _STATIC_DIR / filename
+        """CSS/JS를 in-memory 번들 우선, monitor_server/static/ 폴백으로 서빙.
 
-        # Guard: post-resolve traversal check
-        try:
-            resolved = asset_path.resolve()
-            static_resolved = _STATIC_DIR.resolve()
-            if static_resolved not in (resolved, *resolved.parents):
+        TSK-01-02/03: core.get_static_bundle(filename)이 inline constants를
+        concat하여 반환한다. 이게 source of truth이며 on-disk static 파일은
+        옵셔널 (외부 도구 참조용). 번들이 비어있을 때만 디스크로 폴백.
+        """
+        # Primary: in-memory bundle (source of truth)
+        data = b""
+        core = _load_core()
+        if core is not None:
+            get_bundle = getattr(core, "get_static_bundle", None)
+            if get_bundle is not None:
+                try:
+                    data = get_bundle(filename)
+                except Exception:
+                    data = b""
+
+        # Fallback: on-disk static file
+        if not data:
+            asset_path = _STATIC_DIR / filename
+            try:
+                resolved = asset_path.resolve()
+                static_resolved = _STATIC_DIR.resolve()
+                if static_resolved not in (resolved, *resolved.parents):
+                    _send_plain_404(self)
+                    return
+            except (OSError, ValueError):
                 _send_plain_404(self)
                 return
-        except (OSError, ValueError):
-            _send_plain_404(self)
-            return
+            try:
+                data = asset_path.read_bytes()
+            except OSError:
+                _send_plain_404(self)
+                return
 
-        try:
-            data = asset_path.read_bytes()
-        except OSError:
-            _send_plain_404(self)
-            return
-
-        suffix = asset_path.suffix
+        suffix = Path(filename).suffix
         content_type = _MIME_MAP.get(suffix, "application/octet-stream")
 
         self.send_response(200)
