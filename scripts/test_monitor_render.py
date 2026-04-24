@@ -13,11 +13,16 @@ from pathlib import Path
 
 _THIS_DIR = Path(__file__).resolve().parent
 _MONITOR_PATH = _THIS_DIR / "monitor-server.py"
+_APP_JS_PATH = _THIS_DIR / "monitor_server" / "static" / "app.js"
 _spec = importlib.util.spec_from_file_location("monitor_server", _MONITOR_PATH)
 monitor_server = importlib.util.module_from_spec(_spec)
 # dataclass + `from __future__ import annotations` 는 실행 전 module 등록 필요.
 sys.modules["monitor_server"] = monitor_server
 _spec.loader.exec_module(monitor_server)
+
+# TSK-01-03: _DASHBOARD_JS가 app.js로 추출됨 — 속성 없는 경우 app.js를 읽어 호환
+if not hasattr(monitor_server, "_DASHBOARD_JS"):
+    monitor_server._DASHBOARD_JS = _APP_JS_PATH.read_text(encoding="utf-8") if _APP_JS_PATH.exists() else ""
 
 
 WorkItem = monitor_server.WorkItem
@@ -949,8 +954,9 @@ class V3Stage4PhaseHistoryDrawerTests(unittest.TestCase):
         self.assertIn('tabindex', monitor_server._DASHBOARD_JS)
 
     def test_render_dashboard_has_script_tag(self):
+        # TSK-01-03: 인라인 dashboard-js → static/app.js 교체 후 테스트 갱신.
         html = render_dashboard(_normal_model())
-        self.assertIn('<script id="dashboard-js">', html)
+        self.assertIn('/static/app.js', html)
 
     def test_render_dashboard_full_empty_model(self):
         """빈 모델에서도 정상 동작."""
@@ -2791,6 +2797,121 @@ class TskTooltipStateSummaryTests(unittest.TestCase):
         self.assertIn('id="trow-tooltip"', h)
         self.assertIn('role="tooltip"', h)
         self.assertIn("hidden", h)
+
+
+class TestTsk0102CssExtraction(unittest.TestCase):
+    """TSK-01-02: 인라인 <style> 제거 + <link rel="stylesheet" href="/static/style.css?v=..."> 주입 검증."""
+
+    def _html(self) -> str:
+        return render_dashboard(_normal_model())
+
+    def _pane_html(self) -> str:
+        return monitor_server._render_pane_html(
+            "test-pane",
+            {"captured_at": "2026-04-24T00:00:00Z", "lines": ["hello"]},
+        )
+
+    def test_no_inline_style_block(self) -> None:
+        """render_dashboard HTML에 인라인 <style> 블록이 없어야 한다."""
+        html = self._html()
+        self.assertNotIn(
+            "<style>",
+            html,
+            "인라인 <style> 블록이 render_dashboard HTML에 남아있다 — 제거해야 한다.",
+        )
+
+    def test_link_tag_injected_in_head(self) -> None:
+        """render_dashboard HTML의 <head>에 <link rel=\"stylesheet\" href=\"/static/style.css?v=...\"> 태그가 포함되어야 한다."""
+        html = self._html()
+        self.assertIn(
+            "/static/style.css",
+            html,
+            "<link href=\"/static/style.css\"> 태그가 HTML에 없다.",
+        )
+        self.assertIn(
+            'rel="stylesheet"',
+            html,
+            "<link> 태그에 rel=\"stylesheet\" 속성이 없다.",
+        )
+        import re
+        self.assertTrue(
+            re.search(r'<link[^>]+rel=["\']stylesheet["\'][^>]+href=["\'][^"\']*style\.css', html)
+            or re.search(r'<link[^>]+href=["\'][^"\']*style\.css[^"\']*["\'][^>]*rel=["\']stylesheet', html),
+            "<link rel=\"stylesheet\" href=\"/static/style.css...\"> 태그를 찾을 수 없다.",
+        )
+
+    def test_link_tag_in_head_before_body(self) -> None:
+        """<link rel=\"stylesheet\"> 태그가 <head> 내에 위치해야 한다."""
+        html = self._html()
+        head_end = html.find("</head>")
+        style_link = html.find("/static/style.css")
+        self.assertGreater(head_end, 0, "</head> 태그를 찾을 수 없다.")
+        self.assertGreater(style_link, 0, "/static/style.css 링크를 찾을 수 없다.")
+        self.assertLess(
+            style_link, head_end,
+            "<link rel=\"stylesheet\" href=\"/static/style.css\"> 태그가 <head> 바깥에 위치한다.",
+        )
+
+    def test_pane_html_no_inline_style(self) -> None:
+        """_render_pane_html HTML에도 인라인 <style> 블록이 없어야 한다."""
+        html = self._pane_html()
+        self.assertNotIn(
+            "<style>",
+            html,
+            "인라인 <style> 블록이 _render_pane_html HTML에 남아있다 — 제거해야 한다.",
+        )
+
+    def test_pane_html_link_tag(self) -> None:
+        """_render_pane_html HTML의 <head>에 <link rel=\"stylesheet\"> 태그가 포함되어야 한다."""
+        html = self._pane_html()
+        self.assertIn("/static/style.css", html, "_render_pane_html에 /static/style.css 링크가 없다.")
+
+    def test_css_version_query_param(self) -> None:
+        """<link> href에 ?v= 쿼리 파라미터가 포함되어야 한다."""
+        html = self._html()
+        import re
+        match = re.search(r'href=["\'][^"\']*style\.css\?v=([^"\'&\s]+)', html)
+        self.assertIsNotNone(match, "style.css href에 ?v= 쿼리 파라미터가 없다.")
+        version = match.group(1)
+        self.assertGreater(len(version), 0, "?v= 쿼리 파라미터 값이 비어있다.")
+
+
+class TestTsk0103ScriptExtraction(unittest.TestCase):
+    """TSK-01-03: 인라인 <script> 제거 + <script src="/static/app.js" defer> 주입 검증."""
+
+    def _html(self) -> str:
+        """render_dashboard 호출 결과 HTML 반환."""
+        return render_dashboard(_normal_model())
+
+    def test_no_inline_script_block(self) -> None:
+        """GET / 응답 HTML에 인라인 <script id="dashboard-js"> 및 <script id="task-panel-js"> 블록이 없어야 한다."""
+        html = self._html()
+        self.assertNotIn(
+            'id="dashboard-js"',
+            html,
+            "인라인 <script id=\"dashboard-js\"> 블록이 HTML에 남아있다 — 제거해야 한다.",
+        )
+        self.assertNotIn(
+            'id="task-panel-js"',
+            html,
+            "인라인 <script id=\"task-panel-js\"> 블록이 HTML에 남아있다 — 제거해야 한다.",
+        )
+
+    def test_script_tag_defer(self) -> None:
+        """GET / 응답 HTML에 <script src="/static/app.js" defer> 태그가 포함되어야 한다."""
+        import re
+
+        html = self._html()
+        # <script src="/static/app.js..." defer ...> 패턴 확인
+        self.assertIn(
+            "/static/app.js",
+            html,
+            "<script src=\"/static/app.js\"> 태그가 HTML에 없다.",
+        )
+        self.assertTrue(
+            re.search(r'<script[^>]+src=["\'][^"\']*app\.js[^"\']*["\'][^>]*defer', html),
+            "<script src=\"/static/app.js\" defer> 태그에 defer 속성이 없다.",
+        )
 
 
 if __name__ == "__main__":

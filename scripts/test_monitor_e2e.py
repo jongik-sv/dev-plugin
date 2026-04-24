@@ -759,26 +759,26 @@ class TaskRowSpinnerE2ETests(unittest.TestCase):
     def test_dashboard_css_has_spinner_rule(self) -> None:
         """대시보드 CSS에 .trow[data-running="true"] .spinner 규칙이 포함된다.
 
-        Reachability: GET / → 대시보드 루트 진입 → <style> 블록 내 CSS 규칙 확인.
+        Reachability: GET /static/style.css → TSK-01-02 이후 CSS 외부 파일 서빙.
         """
-        html = self._get_html("/")
+        css = self._get_html("/static/style.css")
         self.assertIn(
             '.trow[data-running="true"] .spinner',
-            html,
-            '.trow[data-running="true"] .spinner CSS rule not found in dashboard',
+            css,
+            '.trow[data-running="true"] .spinner CSS rule not found in /static/style.css',
         )
 
     def test_dashboard_css_has_keyframes_spin_once(self) -> None:
         """대시보드 CSS에 @keyframes spin 이 정확히 1회 존재한다 (중복 정의 금지).
 
-        Reachability: GET / → 대시보드 루트 진입 → <style> 블록 내 keyframes 확인.
+        Reachability: GET /static/style.css → TSK-01-02 이후 CSS 외부 파일 서빙.
         """
-        html = self._get_html("/")
-        count = html.count("@keyframes spin")
+        css = self._get_html("/static/style.css")
+        count = css.count("@keyframes spin")
         self.assertEqual(
             count,
             1,
-            f"@keyframes spin should appear exactly once in dashboard HTML, found {count}",
+            f"@keyframes spin should appear exactly once in /static/style.css, found {count}",
         )
 
     def test_trow_not_running_has_data_running_false(self) -> None:
@@ -952,19 +952,25 @@ class TaskExpandPanelE2ETests(unittest.TestCase):
         self.assertGreater(panel_pos, 0, "#task-panel should be present in HTML")
 
     def test_slide_panel_css_in_dashboard(self) -> None:
-        """슬라이드 패널 CSS (.slide-panel, transition) 포함."""
-        html = self._get_html("/")
-        self.assertIn(".slide-panel", html, ".slide-panel CSS not found")
-        self.assertIn("0.22s", html, "transition 0.22s not found")
-        self.assertIn("cubic-bezier", html, "cubic-bezier not found")
+        """슬라이드 패널 CSS (.slide-panel, transition) 포함.
+
+        TSK-01-02 이후 CSS는 /static/style.css에서 서빙됨.
+        """
+        css = self._get_html("/static/style.css")
+        self.assertIn(".slide-panel", css, ".slide-panel CSS not found in /static/style.css")
+        self.assertIn("0.22s", css, "transition 0.22s not found in /static/style.css")
+        self.assertIn("cubic-bezier", css, "cubic-bezier not found in /static/style.css")
 
     def test_task_panel_js_functions_in_dashboard(self) -> None:
-        """openTaskPanel / closeTaskPanel / renderWbsSection JS 함수 포함."""
-        html = self._get_html("/")
-        self.assertIn("openTaskPanel", html, "openTaskPanel JS not found")
-        self.assertIn("closeTaskPanel", html, "closeTaskPanel JS not found")
-        self.assertIn("renderWbsSection", html, "renderWbsSection JS not found")
-        self.assertIn("escapeHtml", html, "escapeHtml JS not found")
+        """openTaskPanel / closeTaskPanel / renderWbsSection JS 함수 포함.
+
+        TSK-01-02/TSK-01-03 이후 JS는 /static/app.js에서 서빙됨.
+        """
+        js = self._get_html("/static/app.js")
+        self.assertIn("openTaskPanel", js, "openTaskPanel JS not found in /static/app.js")
+        self.assertIn("closeTaskPanel", js, "closeTaskPanel JS not found in /static/app.js")
+        self.assertIn("renderWbsSection", js, "renderWbsSection JS not found in /static/app.js")
+        self.assertIn("escapeHtml", js, "escapeHtml JS not found in /static/app.js")
 
 
 @unittest.skipUnless(_SERVER_UP, f"monitor-server not reachable at {_E2E_URL}")
@@ -991,40 +997,36 @@ class TaskExpandLogsE2ETests(unittest.TestCase):
             return json.loads(resp.read())
 
     def test_slide_panel_logs_section(self) -> None:
-        """대시보드 HTML에 renderLogs JS 함수 + .log-tail CSS + .log-entry 클래스 포함 (AC-23).
+        """renderLogs JS 함수 + .log-tail CSS + .log-entry 클래스 포함 (AC-23).
 
-        Reachability: GET / → <script> 블록에서 renderLogs, .log-tail, .log-entry 확인.
-        패널을 실제로 열 수 없는 urllib 환경에서, JS 함수 존재와 CSS를 검증한다.
+        TSK-01-02/TSK-01-03 이후 JS는 /static/app.js, CSS는 /static/style.css에서 서빙됨.
         """
-        html = self._get_html("/")
-        self.assertIn("renderLogs", html, "renderLogs JS function not found in dashboard HTML")
-        self.assertIn("log-entry", html, ".log-entry class not found in dashboard HTML")
-        self.assertIn("log-tail", html, ".log-tail CSS class not found in dashboard HTML")
-        self.assertIn("보고서 없음", html, "placeholder '보고서 없음' not found in renderLogs JS")
+        js = self._get_html("/static/app.js")
+        self.assertIn("renderLogs", js, "renderLogs JS function not found in /static/app.js")
+        self.assertIn("log-entry", js, ".log-entry class not found in /static/app.js")
+        self.assertIn("log-tail", js, ".log-tail class not found in /static/app.js")
+        self.assertIn("보고서 없음", js, "placeholder '보고서 없음' not found in /static/app.js")
 
     def test_slide_panel_section_order(self) -> None:
         """openTaskPanel body 조립: wbs → state → artifacts → logs 순서 (AC-22).
 
-        Reachability: GET / → JS 소스에서 renderWbsSection / renderStateJson /
-        renderArtifacts / renderLogs 호출 순서가 올바른지 확인.
+        TSK-01-02/TSK-01-03 이후 JS는 /static/app.js에서 서빙됨.
         """
-        html = self._get_html("/")
-        pos_wbs = html.find("renderWbsSection")
-        pos_state = html.find("renderStateJson")
-        pos_artifacts = html.find("renderArtifacts")
-        pos_logs = html.find("renderLogs")
-        self.assertGreater(pos_wbs, 0, "renderWbsSection not found")
-        self.assertGreater(pos_state, 0, "renderStateJson not found")
-        self.assertGreater(pos_artifacts, 0, "renderArtifacts not found")
-        self.assertGreater(pos_logs, 0, "renderLogs not found")
+        js = self._get_html("/static/app.js")
+        pos_wbs = js.find("renderWbsSection")
+        pos_state = js.find("renderStateJson")
+        pos_artifacts = js.find("renderArtifacts")
+        pos_logs = js.find("renderLogs")
+        self.assertGreater(pos_wbs, 0, "renderWbsSection not found in /static/app.js")
+        self.assertGreater(pos_state, 0, "renderStateJson not found in /static/app.js")
+        self.assertGreater(pos_artifacts, 0, "renderArtifacts not found in /static/app.js")
+        self.assertGreater(pos_logs, 0, "renderLogs not found in /static/app.js")
         # openTaskPanel 내 body.innerHTML 조립부에서 호출 순서 확인
-        # 마지막 정의 위치가 아닌 innerHTML 조립부에서의 등장 순서를 검사하기 위해
-        # openTaskPanel 함수 본문 스코프를 추출
-        panel_fn_start = html.find("function openTaskPanel")
-        panel_fn_end = html.find("function closeTaskPanel")
-        self.assertGreater(panel_fn_start, 0, "openTaskPanel not found")
+        panel_fn_start = js.find("function openTaskPanel")
+        panel_fn_end = js.find("function closeTaskPanel")
+        self.assertGreater(panel_fn_start, 0, "openTaskPanel not found in /static/app.js")
         self.assertGreater(panel_fn_end, panel_fn_start, "closeTaskPanel not after openTaskPanel")
-        panel_fn = html[panel_fn_start:panel_fn_end]
+        panel_fn = js[panel_fn_start:panel_fn_end]
         # innerHTML 조립 라인에서 4개 함수가 모두 등장해야 함
         self.assertIn("renderWbsSection", panel_fn, "renderWbsSection not in openTaskPanel body")
         self.assertIn("renderStateJson", panel_fn, "renderStateJson not in openTaskPanel body")
@@ -1083,11 +1085,14 @@ class TaskExpandLogsE2ETests(unittest.TestCase):
                 self.assertIn(key, entry, f"logs entry missing key '{key}'")
 
     def test_log_tail_css_in_dashboard(self) -> None:
-        """.log-tail CSS max-height:300px + overflow:auto + font-size:11px 포함."""
-        html = self._get_html("/")
-        self.assertIn("max-height:300px", html, ".log-tail max-height:300px not found")
-        self.assertIn("overflow:auto", html, ".log-tail overflow:auto not found")
-        self.assertIn("font-size:11px", html, ".log-tail font-size:11px not found")
+        """.log-tail CSS max-height:300px + overflow:auto + font-size:11px 포함.
+
+        TSK-01-02 이후 CSS는 /static/style.css에서 서빙됨.
+        """
+        css = self._get_html("/static/style.css")
+        self.assertIn("max-height:300px", css, ".log-tail max-height:300px not found in /static/style.css")
+        self.assertIn("overflow:auto", css, ".log-tail overflow:auto not found in /static/style.css")
+        self.assertIn("font-size:11px", css, ".log-tail font-size:11px not found in /static/style.css")
 
     def test_panel_body_direct_child_isolation(self) -> None:
         """#task-panel が body 직계 자식으로 배치 (5초 auto-refresh 격리, AC-25).
@@ -1197,11 +1202,14 @@ class TskTooltipE2ETests(unittest.TestCase):
             self.assertEqual(count, 1, f"GET / 응답 {i}회차: #trow-tooltip 이 {count}회 발견")
 
     def test_task_tooltip_setupTaskTooltip_in_script(self) -> None:
-        """GET / 응답 HTML 의 <script> 블록에 setupTaskTooltip 이 포함된다."""
+        """setupTaskTooltip 이 /static/app.js 에 포함된다.
+
+        TSK-01-02/TSK-01-03 이후 JS는 /static/app.js에서 서빙됨.
+        """
         if not self._check_server():
             self.skipTest("monitor server not running — E2E skipped")
-        html = self._get_html("/")
-        self.assertIn("setupTaskTooltip", html, "setupTaskTooltip 이 HTML script 블록에 없음")
+        js = self._get_html("/static/app.js")
+        self.assertIn("setupTaskTooltip", js, "setupTaskTooltip 이 /static/app.js 에 없음")
 
 
 @unittest.skipUnless(_SERVER_UP, f"monitor-server not reachable at {_E2E_URL}")
@@ -1259,28 +1267,40 @@ class TaskModelChipE2ETests(unittest.TestCase):
             self.assertIn(pkey, pm, f"phase_models에 키 누락: {pkey}")
 
     def test_model_chip_css_in_response(self) -> None:
-        """GET / 응답 CSS에 .model-chip 규칙이 포함된다."""
-        html = self._get_html("/")
-        self.assertIn('.model-chip', html,
-                      ".model-chip CSS 규칙이 응답 HTML에 없음")
+        """/static/style.css에 .model-chip 규칙이 포함된다.
+
+        TSK-01-02 이후 CSS는 /static/style.css에서 서빙됨.
+        """
+        css = self._get_html("/static/style.css")
+        self.assertIn('.model-chip', css,
+                      ".model-chip CSS 규칙이 /static/style.css에 없음")
 
     def test_escalation_flag_css_in_response(self) -> None:
-        """GET / 응답 CSS에 .escalation-flag 규칙이 포함된다."""
-        html = self._get_html("/")
-        self.assertIn('.escalation-flag', html,
-                      ".escalation-flag CSS 규칙이 응답 HTML에 없음")
+        """/static/style.css에 .escalation-flag 규칙이 포함된다.
+
+        TSK-01-02 이후 CSS는 /static/style.css에서 서빙됨.
+        """
+        css = self._get_html("/static/style.css")
+        self.assertIn('.escalation-flag', css,
+                      ".escalation-flag CSS 규칙이 /static/style.css에 없음")
 
     def test_render_phase_models_js_in_script(self) -> None:
-        """GET / 응답 <script> 블록에 renderPhaseModels 함수가 포함된다."""
-        html = self._get_html("/")
-        self.assertIn('renderPhaseModels', html,
-                      "renderPhaseModels JS 함수가 응답 HTML에 없음")
+        """renderPhaseModels 함수가 /static/app.js에 포함된다.
+
+        TSK-01-02/TSK-01-03 이후 JS는 /static/app.js에서 서빙됨.
+        """
+        js = self._get_html("/static/app.js")
+        self.assertIn('renderPhaseModels', js,
+                      "renderPhaseModels JS 함수가 /static/app.js에 없음")
 
     def test_phase_models_dl_class_in_js(self) -> None:
-        """renderPhaseModels JS에 'phase-models' dl 클래스 설정이 포함된다."""
-        html = self._get_html("/")
-        self.assertIn('phase-models', html,
-                      "phase-models CSS 클래스가 응답 HTML에 없음")
+        """renderPhaseModels JS에 'phase-models' dl 클래스 설정이 /static/app.js에 포함된다.
+
+        TSK-01-02/TSK-01-03 이후 JS는 /static/app.js에서 서빙됨.
+        """
+        js = self._get_html("/static/app.js")
+        self.assertIn('phase-models', js,
+                      "phase-models CSS 클래스가 /static/app.js에 없음")
 
 
 if __name__ == "__main__":

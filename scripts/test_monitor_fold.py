@@ -8,12 +8,17 @@ import re
 import os
 import pytest
 
-# monitor-server.py를 import 하여 _DASHBOARD_JS 추출
+# TSK-01-03: JS가 app.js로 추출됨 — app.js를 직접 읽는다
 _SERVER_PATH = os.path.join(os.path.dirname(__file__), "monitor-server.py")
+_APP_JS_PATH = os.path.join(os.path.dirname(__file__), "monitor_server", "static", "app.js")
 
 
 def _load_dashboard_js():
-    """monitor-server 모듈에서 _DASHBOARD_JS 문자열을 추출한다."""
+    """app.js에서 dashboard JS 문자열을 읽는다 (TSK-01-03 추출 이후)."""
+    if os.path.exists(_APP_JS_PATH):
+        with open(_APP_JS_PATH, encoding="utf-8") as f:
+            return f.read()
+    # 폴백: monitor-server.py에서 _DASHBOARD_JS 추출 (레거시)
     with open(_SERVER_PATH, encoding="utf-8") as f:
         source = f.read()
     m = re.search(r'_DASHBOARD_JS\s*=\s*"""(.*?)"""', source, re.DOTALL)

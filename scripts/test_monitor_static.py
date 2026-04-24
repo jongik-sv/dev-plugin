@@ -154,7 +154,8 @@ class TestIsStaticPath(unittest.TestCase):
 
     def test_whitelist_constant_has_five_entries(self):
         # TSK-04-01: cytoscape-node-html-label.min.js 추가 후 5개
-        self.assertEqual(len(_get_static_whitelist()), 5)
+        # TSK-01-02/03: style.css + app.js 추가 후 7개
+        self.assertEqual(len(_get_static_whitelist()), 7)
 
     def test_prefix_constant(self):
         self.assertEqual(_get_static_prefix(), "/static/")
@@ -462,12 +463,12 @@ class TestNodeHtmlLabelStaticRoute(unittest.TestCase):
         )
 
     def test_whitelist_has_five_entries(self):
-        """TSK-04-01 추가 후 화이트리스트 항목이 5개여야 한다."""
+        """TSK-04-01 추가 후 5개 → TSK-01-02/03 style.css+app.js 추가 후 7개."""
         whitelist = _get_static_whitelist()
         self.assertEqual(
             len(whitelist),
-            5,
-            f"화이트리스트 항목 수가 5여야 한다 (현재: {len(whitelist)}): {whitelist}",
+            7,
+            f"화이트리스트 항목 수가 7여야 한다 (현재: {len(whitelist)}): {whitelist}",
         )
 
     def test_is_static_path_node_html_label(self):

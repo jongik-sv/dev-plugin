@@ -42,6 +42,11 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 from urllib.parse import parse_qs, quote, unquote, urlsplit
 
+# TRD R-H: 엔트리 파일명은 하이픈(monitor-server.py),
+# 패키지 이름은 언더스코어(monitor_server) — Python import 시스템 제약.
+# scripts/ 디렉토리를 sys.path 맨 앞에 추가하여 `import monitor_server` 가 동작하도록 한다.
+sys.path.insert(0, str(Path(__file__).parent))
+
 if not sys.pycache_prefix:
     sys.pycache_prefix = "/tmp/codex-pycache"
 
@@ -117,13 +122,25 @@ _STATIC_PATH_PREFIX = "/static/"
 
 # Whitelist of allowed vendor filenames under skills/dev-monitor/vendor/.
 # graph-client.js is a TSK-03-04 placeholder committed as an empty file.
+# style.css and app.js (TSK-01-02/03) are served from monitor_server/static/.
 _STATIC_WHITELIST: "frozenset[str]" = frozenset({
     "cytoscape.min.js",
     "dagre.min.js",
     "cytoscape-node-html-label.min.js",
     "cytoscape-dagre.min.js",
     "graph-client.js",
+    "style.css",
+    "app.js",
 })
+
+# Package-local static files served from monitor_server/static/ (not vendor/).
+_PACKAGE_STATIC_FILES: "frozenset[str]" = frozenset({"style.css", "app.js"})
+
+# MIME type map for package-local static files
+_STATIC_MIME: "dict[str, str]" = {
+    "css": "text/css; charset=utf-8",
+    "js": "application/javascript; charset=utf-8",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -2230,12 +2247,28 @@ body[data-filter="bypass"]  .trow:not([data-status="bypass"]) { display: none; }
 .filter-bar input{ min-width:140px; }
 """
 
-def _minify_css(css: str) -> str:
-    """Collapse verbose CSS into a compact single-line string for SSR tests."""
-    return re.sub(r"\n\s*", " ", css).strip()
+_PKG_VERSION = "5.0.0"
 
 
-DASHBOARD_CSS = _minify_css(DASHBOARD_CSS)
+def _css_version() -> str:
+    """Return a cache-busting version string for /static/style.css.
+
+    Resolution order:
+    1. ``monitor_server.__version__`` — set by TSK-01-01 package __init__.py.
+    2. Fallback: hex-encoded mtime of style.css for dev-mode instant invalidation.
+    """
+    try:
+        import monitor_server as _ms_pkg  # type: ignore[import]
+        ver = getattr(_ms_pkg, "__version__", None)
+        if ver:
+            return str(ver)
+    except Exception:
+        pass
+    try:
+        css_path = Path(__file__).parent / "monitor_server" / "static" / "style.css"
+        return format(int(css_path.stat().st_mtime), "x")
+    except Exception:
+        return "0"
 
 
 def _esc(value) -> str:
@@ -3894,495 +3927,6 @@ _DATA_SECTION_TAG_RE = re.compile(r'(<(?:section|header)(\s[^>]*)?>)', re.DOTALL
 
 
 # ---------------------------------------------------------------------------
-# WP-02: Client-side dashboard JS (filter chips, auto-refresh, drawer polling)
-# ---------------------------------------------------------------------------
-_DASHBOARD_JS = """\
-(function(){
-  'use strict';
-  /* shared state — dashboard poll + drawer poll are fully independent */
-  var state={
-    autoRefresh:true,activeFilter:'all',mainPollId:null,mainAbort:null,
-    drawerPaneId:null,drawerPollId:null,clockId:null
-  };
-  /* ---- clock (v3) ---- */
-  function startClock(){
-    var clock=document.getElementById('clock');
-    if(!clock)return;
-    state.clockId=setInterval(function(){
-      var now=new Date();
-      clock.textContent=now.toISOString().slice(0,19).replace('T',' ')+'Z';
-    },1000);
-  }
-  /* ---- fold persistence (TSK-00-01 generic + TSK-05-01/TSK-01-02 data-wp 호환) ---- */
-  var FOLD_KEY_PREFIX='dev-monitor:fold:';
-  function readFold(key, defaultOpen){
-    try{
-      var v=localStorage.getItem(FOLD_KEY_PREFIX+key);
-      if(v==='open')return true;
-      if(v==='closed')return false;
-      return defaultOpen===undefined?false:defaultOpen;
-    }catch(e){return defaultOpen===undefined?false:defaultOpen;}
-  }
-  function writeFold(key, open){
-    try{localStorage.setItem(FOLD_KEY_PREFIX+key,open?'open':'closed');}catch(e){}
-  }
-  function _foldKeyOf(el){
-    /* data-fold-key 우선, 하위 호환으로 data-wp도 지원 */
-    return el.getAttribute('data-fold-key')||el.getAttribute('data-wp');
-  }
-  function applyFoldStates(container){
-    container.querySelectorAll('[data-fold-key],[data-wp]').forEach(function(el){
-      var key=_foldKeyOf(el);
-      if(!key)return;
-      var defaultOpen=el.hasAttribute('data-fold-default-open');
-      var isOpen=readFold(key, defaultOpen);
-      if(isOpen){el.setAttribute('open','');}
-      else{el.removeAttribute('open');}
-    });
-  }
-  function bindFoldListeners(container){
-    container.querySelectorAll('[data-fold-key],[data-wp]').forEach(function(el){
-      if(el.__foldBound)return;
-      el.__foldBound=true;
-      el.addEventListener('toggle',function(){
-        var key=_foldKeyOf(el);
-        if(key)writeFold(key, el.open);
-      });
-    });
-  }
-  /* ---- body[data-filter] CSS-driven filter (v3) ---- */
-  function applyFilter(){
-    var f=state.activeFilter;
-    document.body.setAttribute('data-filter',f);
-    /* legacy: also patch chip aria-pressed */
-    document.querySelectorAll('.chip[data-filter]').forEach(function(c){
-      c.setAttribute('aria-pressed',c.dataset.filter===f?'true':'false');
-    });
-  }
-  /* ---- filter chips (TSK-02-02) — event delegation survives DOM replacement ---- */
-  document.addEventListener('click',function(e){
-    var chip=e.target.closest?e.target.closest('.chip'):null;
-    if(!chip)return;
-    state.activeFilter=chip.dataset.filter||'all';
-    applyFilter();
-  });
-  /* ---- auto-refresh toggle (TSK-02-02) ---- */
-  document.addEventListener('click',function(e){
-    var tog=e.target.closest?e.target.closest('.refresh-toggle'):null;
-    if(!tog)return;
-    state.autoRefresh=!state.autoRefresh;
-    tog.setAttribute('aria-pressed',String(state.autoRefresh));
-    tog.textContent=state.autoRefresh?'◐ auto':'○ paused';
-    if(!state.autoRefresh){stopMainPoll();}else{startMainPoll();}
-  });
-  /* ---- dashboard polling (TSK-02-01) ---- */
-  function stopMainPoll(){
-    if(state.mainPollId!==null){clearInterval(state.mainPollId);state.mainPollId=null;}
-    if(state.mainAbort){try{state.mainAbort.abort();}catch(e){} state.mainAbort=null;}
-  }
-  function startMainPoll(){
-    stopMainPoll();
-    tick();
-    state.mainPollId=setInterval(tick,5000);
-  }
-  function tick(){
-    if(!state.autoRefresh)return;
-    if(state.mainAbort){try{state.mainAbort.abort();}catch(e){}}
-    state.mainAbort=new AbortController();
-    fetchAndPatch(state.mainAbort.signal);
-  }
-  function fetchAndPatch(signal){
-    fetch(window.location.search?'/'+window.location.search:'/',{cache:'no-store',signal:signal})
-      .then(function(r){return r.ok?r.text():null;})
-      .then(function(text){
-        if(!text)return;
-        var parser=new DOMParser();
-        var newDoc=parser.parseFromString(text,'text/html');
-        var newSections=newDoc.querySelectorAll('[data-section]');
-        newSections.forEach(function(newEl){
-          var name=newEl.getAttribute('data-section');
-          patchSection(name,newEl.innerHTML);
-        });
-        /* TSK-02-02: DOM 교체 후 필터 재적용 */
-        applyFilter();
-      })
-      .catch(function(){/* silent: retry on next tick */});
-  }
-  function patchSection(name,newHtml){
-    var current=document.querySelector('[data-section="'+name+'"]');
-    if(!current)return;
-    /* dep-graph is managed autonomously by graph-client.js; skip DOM replacement
-       to prevent cytoscape canvas destruction on every 5-second dashboard poll. */
-    if(name==='dep-graph')return;
-    /* TSK-05-01: filter-bar controls must survive auto-refresh DOM replacement.
-       The filter-bar section is static SSR content — inputs hold client state.
-       Replacing its innerHTML would lose user-typed query/select values. */
-    if(name==='filter-bar')return;
-    if(name==='hdr'){
-      /* Preserve chip aria-pressed states and refresh-toggle visual state
-         across DOM replacement so client-side filter/toggle survive server push. */
-      var chipStates={};
-      current.querySelectorAll('.chip[data-filter]').forEach(function(c){
-        chipStates[c.dataset.filter]=c.getAttribute('aria-pressed');
-      });
-      var togEl=current.querySelector('.refresh-toggle');
-      var togPressed=togEl?togEl.getAttribute('aria-pressed'):null;
-      var togText=togEl?togEl.textContent:null;
-      if(current.innerHTML!==newHtml){current.innerHTML=newHtml;}
-      /* Restore chip states */
-      current.querySelectorAll('.chip[data-filter]').forEach(function(c){
-        var saved=chipStates[c.dataset.filter];
-        if(saved!==null&&saved!==undefined){c.setAttribute('aria-pressed',saved);}
-      });
-      /* Restore refresh-toggle state */
-      var tog2=current.querySelector('.refresh-toggle');
-      if(tog2&&togPressed!==null){
-        tog2.setAttribute('aria-pressed',togPressed);
-        if(togText){tog2.textContent=togText;}
-      }
-      return;
-    }
-    /* TSK-05-01 / TSK-01-02: fold 상태 복원이 필요한 섹션 집합.
-       새 섹션 추가 시 이 집합에만 추가하면 된다. */
-    var _FOLD_SECTIONS={'wp-cards':1,'live-activity':1};
-    if(_FOLD_SECTIONS[name]){
-      if(current.innerHTML!==newHtml){current.innerHTML=newHtml;}
-      applyFoldStates(current);
-      bindFoldListeners(current);
-      return;
-    }
-    if(current.innerHTML!==newHtml){current.innerHTML=newHtml;}
-  }
-  /* ---- drawer control (v3: aria-hidden="false" + focus trap) ---- */
-  function _setDrawerOpen(open){
-    var backdrop=document.querySelector('[data-drawer-backdrop]');
-    var panel=document.querySelector('[data-drawer]');
-    if(backdrop){backdrop.setAttribute('aria-hidden',open?'false':'true');}
-    if(panel){
-      panel.setAttribute('aria-hidden',open?'false':'true');
-      /* focus-trap: set tabindex=-1 on focusables when closed */
-      panel.querySelectorAll('[tabindex]').forEach(function(el){
-        el.setAttribute('tabindex',open?'0':'-1');
-      });
-      if(open){
-        var first=panel.querySelector('[tabindex="0"]');
-        /* preventScroll: drawer is position:fixed; without this Chromium will
-           scroll the page body to "reveal" the focused element, landing the
-           user at the very bottom of the dashboard with only one line visible. */
-        if(first){try{first.focus({preventScroll:true});}catch(_){first.focus();}}
-      }
-    }
-  }
-  function openDrawer(paneId){
-    state.drawerPaneId=paneId;
-    var titleEl=document.querySelector('[data-drawer-title]');
-    if(titleEl){titleEl.textContent='Pane: '+paneId;}
-    _setDrawerOpen(true);
-    startDrawerPoll();
-  }
-  function closeDrawer(){
-    state.drawerPaneId=null;
-    stopDrawerPoll();
-    _setDrawerOpen(false);
-  }
-  function stopDrawerPoll(){
-    if(state.drawerPollId!==null){clearInterval(state.drawerPollId);state.drawerPollId=null;}
-  }
-  function startDrawerPoll(){
-    stopDrawerPoll();
-    tickDrawer();
-    state.drawerPollId=setInterval(tickDrawer,2000);
-  }
-  function tickDrawer(){
-    var id=state.drawerPaneId;
-    if(!id)return;
-    fetch('/api/pane/'+encodeURIComponent(id),{cache:'no-store'})
-      .then(function(r){return r.ok?r.json():null;})
-      .then(function(j){if(j)updateDrawerBody(j);})
-      .catch(function(){/* silent: retry on next tick */});
-  }
-  function updateDrawerBody(j){
-    var pre=document.querySelector('[data-drawer-pre]');
-    if(!pre)return;
-    /* Preserve body scroll: some browsers reflow page scroll when a focused
-       element's scrollable content changes. Snapshot + restore is cheap. */
-    var prevBodyY=window.scrollY||0;
-    pre.textContent=(j.lines||[]).join('\\n');
-    /* rAF ensures layout has computed scrollHeight/clientHeight for the new
-       text before we seek. Clamp explicitly so we land at "bottom minus one
-       viewport" — the last clientHeight worth of lines stays visible. */
-    requestAnimationFrame(function(){
-      var sh=pre.scrollHeight||0;
-      var ch=pre.clientHeight||0;
-      pre.scrollTop=Math.max(0,sh-ch);
-      if(window.scrollY!==prevBodyY){window.scrollTo(0,prevBodyY);}
-    });
-    var meta=document.querySelector('[data-drawer-meta]');
-    if(meta){meta.textContent=j.captured_at||'';}
-  }
-  /* ---- event delegation (click + keydown) ---- */
-  function _hasAttr(el,attr){return el&&el.hasAttribute&&el.hasAttribute(attr);}
-  document.addEventListener('click',function(e){
-    var t=e.target;
-    var exp=t.closest?t.closest('[data-pane-expand]'):(_hasAttr(t,'data-pane-expand')?t:null);
-    if(exp){openDrawer(exp.getAttribute('data-pane-expand'));return;}
-    if(_hasAttr(t,'data-drawer-close')||_hasAttr(t,'data-drawer-backdrop')){closeDrawer();}
-  });
-  document.addEventListener('keydown',function(e){
-    if(e.key==='Escape'&&state.drawerPaneId){closeDrawer();}
-  });
-  /* ---- init ---- */
-  function init(){
-    /* v3: start clock */
-    startClock();
-    /* v3: apply initial body[data-filter] */
-    applyFilter();
-    /* TSK-02-02: refresh-toggle 버튼 초기 상태 동기화 */
-    var tog=document.querySelector('.refresh-toggle');
-    if(tog){
-      state.autoRefresh=(tog.getAttribute('aria-pressed')!=='false');
-      tog.textContent=state.autoRefresh?'◐ auto':'○ paused';
-    }
-    /* TSK-05-01: fold 상태 복원 (startMainPoll 직전) */
-    applyFoldStates(document);
-    bindFoldListeners(document);
-    startMainPoll();
-  }
-  if(document.readyState==='loading'){
-    document.addEventListener('DOMContentLoaded',init);
-  }else{
-    init();
-  }
-})();
-
-/* TSK-05-01: Filter bar — currentFilters / matchesRow / applyFilters / syncUrl / loadFiltersFromUrl */
-/* patchSection monkey-patch for filter survival across 5-second auto-refresh */
-(function setupFilterBar(){
-  'use strict';
-  /* ---- 5 core filter functions ---- */
-  function currentFilters(){
-    var q      =(document.getElementById('fb-q')||{value:''}).value.trim().toLowerCase();
-    var status =(document.getElementById('fb-status')||{value:''}).value;
-    var domain =(document.getElementById('fb-domain')||{value:''}).value;
-    var model  =(document.getElementById('fb-model')||{value:''}).value;
-    return {q:q,status:status,domain:domain,model:model};
-  }
-  function matchesRow(trow,f){
-    /* q: substring match on task-id OR .ttitle text, case-insensitive */
-    if(f.q){
-      var taskId=(trow.dataset.taskId||'').toLowerCase();
-      var titleEl=trow.querySelector('.ttitle');
-      var titleText=titleEl?titleEl.textContent.toLowerCase():'';
-      if(taskId.indexOf(f.q)===-1&&titleText.indexOf(f.q)===-1)return false;
-    }
-    /* status: exact match on data-status OR data-phase */
-    if(f.status){
-      var ds=trow.dataset.status||'';
-      var dp=trow.dataset.phase||'';
-      if(ds!==f.status&&dp!==f.status)return false;
-    }
-    /* domain: exact match on data-domain */
-    if(f.domain){
-      if((trow.dataset.domain||'')!==f.domain)return false;
-    }
-    /* model: exact match on .model-chip data-model */
-    if(f.model){
-      var chip=trow.querySelector('.model-chip');
-      if((chip?chip.dataset.model||'':'')!==f.model)return false;
-    }
-    return true;
-  }
-  function applyFilters(){
-    var f=currentFilters();
-    /* .trow[data-task-id] — Task rows only. Live-activity rows have no data-task-id. */
-    document.querySelectorAll('.trow[data-task-id]').forEach(function(trow){
-      trow.style.display=matchesRow(trow,f)?'':'none';
-    });
-    /* Dep-Graph filter — optional, guard for missing depGraph */
-    if(window.depGraph&&typeof window.depGraph.applyFilter==='function'){
-      window.depGraph.applyFilter(function(nodeId){
-        /* nodeId matches task id — show node if no q filter or task matches */
-        if(!f.q&&!f.domain&&!f.model&&!f.status)return true;
-        var trow=document.querySelector('.trow[data-task-id="'+nodeId+'"]');
-        if(!trow)return true;/* unknown node — keep visible */
-        return matchesRow(trow,f);
-      });
-    }
-  }
-  /* Apply filters and sync URL — shared by all event handlers */
-  function applyAndSync(){applyFilters();syncUrl(currentFilters());}
-  function syncUrl(f){
-    var url=new URL(window.location.href);
-    var sp=url.searchParams;
-    /* Set or delete each filter param; preserve subproject/lang/other params */
-    if(f.q){sp.set('q',f.q);}else{sp.delete('q');}
-    if(f.status){sp.set('status',f.status);}else{sp.delete('status');}
-    if(f.domain){sp.set('domain',f.domain);}else{sp.delete('domain');}
-    if(f.model){sp.set('model',f.model);}else{sp.delete('model');}
-    history.replaceState(null,'',url.toString());
-  }
-  /* Get the 4 filter control DOM elements */
-  function _fbEls(){
-    return {
-      q:document.getElementById('fb-q'),
-      st:document.getElementById('fb-status'),
-      dm:document.getElementById('fb-domain'),
-      md:document.getElementById('fb-model')
-    };
-  }
-  function loadFiltersFromUrl(){
-    var sp=new URLSearchParams(window.location.search);
-    var els=_fbEls();
-    if(els.q&&sp.has('q')){els.q.value=sp.get('q');}
-    if(els.st&&sp.has('status')){els.st.value=sp.get('status');}
-    if(els.dm&&sp.has('domain')){els.dm.value=sp.get('domain');}
-    if(els.md&&sp.has('model')){els.md.value=sp.get('model');}
-  }
-  /* ---- event bindings (document-level delegation — survives DOM replacement) ---- */
-  document.addEventListener('input',function(e){
-    if(e.target&&e.target.id==='fb-q'){applyAndSync();}
-  });
-  document.addEventListener('change',function(e){
-    var id=e.target&&e.target.id;
-    if(id==='fb-status'||id==='fb-domain'||id==='fb-model'){applyAndSync();}
-  });
-  document.addEventListener('click',function(e){
-    if(e.target&&e.target.id==='fb-reset'){
-      var els=_fbEls();
-      if(els.q)els.q.value='';
-      if(els.st)els.st.value='';
-      if(els.dm)els.dm.value='';
-      if(els.md)els.md.value='';
-      applyAndSync();
-    }
-  });
-  /* ---- patchSection monkey-patch — filter survival across auto-refresh ---- */
-  /* Extract helper: registers monkey-patch once (sentinel guard). */
-  function _registerPatchWrap(){
-    if(window.patchSection&&!window.patchSection.__filterWrapped){
-      var _orig=window.patchSection;
-      window.patchSection=function(name,html){
-        _orig.call(this,name,html);
-        /* wp-cards and live-activity may contain .trow[data-task-id] rows.
-           Live-activity rows have no data-task-id so applyFilters() is harmless. */
-        if(name==='wp-cards'||name==='live-activity'){applyFilters();}
-      };
-      window.patchSection.__filterWrapped=true;
-    }
-  }
-  _registerPatchWrap();
-  /* ---- initial load sequence (DOMContentLoaded) ---- */
-  function initFilterBar(){
-    loadFiltersFromUrl();
-    applyFilters();
-    /* Re-register monkey-patch here if patchSection was not yet available at IIFE run time. */
-    _registerPatchWrap();
-  }
-  if(document.readyState==='loading'){
-    document.addEventListener('DOMContentLoaded',initFilterBar);
-  }else{
-    initFilterBar();
-  }
-  /* Expose for external access (e.g. dev-test verification) */
-  window.filterBar={currentFilters:currentFilters,matchesRow:matchesRow,applyFilters:applyFilters,syncUrl:syncUrl,loadFiltersFromUrl:loadFiltersFromUrl};
-})();
-
-/* TSK-02-03: Task hover tooltip — setupTaskTooltip IIFE */
-/* TSK-02-05: renderPhaseModels 확장 추가 */
-(function setupTaskTooltip(){
-  var tip=document.getElementById('trow-tooltip');
-  if(!tip)return;
-  var _timer=null;
-  var _current=null;
-
-  /* TSK-02-05: phase model 4행 <dl> 렌더러 */
-  function renderPhaseModels(pm,escalated,retry_count){
-    if(!pm)return null;
-    var dl=document.createElement('dl');
-    dl.className='phase-models';
-    function pmrow(label,value){
-      var dt=document.createElement('dt');dt.textContent=label;
-      var dd=document.createElement('dd');dd.textContent=value||'—';
-      dl.appendChild(dt);dl.appendChild(dd);
-    }
-    pmrow('Design',pm.design);
-    pmrow('Build',pm.build);
-    var testLine=escalated
-      ?'haiku → '+pm.test+' (retry #'+retry_count+') ⚡'
-      :pm.test;
-    pmrow('Test',testLine);
-    pmrow('Refactor',pm.refactor);
-    return dl;
-  }
-
-  function renderTooltipHtml(data){
-    var dl=document.createElement('dl');
-    function row(label,value){
-      var dt=document.createElement('dt');dt.textContent=label;
-      var dd=document.createElement('dd');dd.textContent=(value===null||value===undefined)?'—':String(value);
-      dl.appendChild(dt);dl.appendChild(dd);
-    }
-    row('status',data.status);
-    row('last event',data.last_event);
-    row('at',data.last_event_at);
-    row('elapsed',data.elapsed!=null?data.elapsed+'s':null);
-    if(data.phase_tail&&data.phase_tail.length){
-      var dt2=document.createElement('dt');dt2.textContent='recent phases';
-      dl.appendChild(dt2);
-      data.phase_tail.forEach(function(p){
-        var dd2=document.createElement('dd');
-        dd2.textContent=(p.event||'')+(p.from?' '+p.from+' → ':'')+( p.to||'');
-        dl.appendChild(dd2);
-      });
-    }
-    /* TSK-02-05: phase models section */
-    var pmDl=renderPhaseModels(data.phase_models,data.escalated,data.retry_count);
-    var frag=document.createDocumentFragment();
-    frag.appendChild(dl);
-    if(pmDl){frag.appendChild(pmDl);}
-    return frag;
-  }
-
-  function show(el,data){
-    tip.innerHTML='';
-    tip.appendChild(renderTooltipHtml(data));
-    var r=el.getBoundingClientRect();
-    var left=r.right+8;
-    if(left+420>window.innerWidth){left=r.left-428;}
-    tip.style.top=(r.top+window.scrollY)+'px';
-    tip.style.left=left+'px';
-    tip.hidden=false;
-  }
-
-  function hide(){
-    clearTimeout(_timer);
-    _timer=null;
-    _current=null;
-    tip.hidden=true;
-  }
-
-  document.addEventListener('mouseenter',function(e){
-    var el=e.target&&e.target.closest?e.target.closest('.trow[data-state-summary]'):null;
-    if(!el){return;}
-    if(el===_current){return;}
-    clearTimeout(_timer);
-    _current=el;
-    _timer=setTimeout(function(){
-      var raw=el.getAttribute('data-state-summary');
-      if(!raw){return;}
-      try{var data=JSON.parse(raw);}catch(err){return;}
-      show(el,data);
-    },300);
-  },true);
-
-  document.addEventListener('mouseleave',function(e){
-    var el=e.target&&e.target.closest?e.target.closest('.trow[data-state-summary]'):null;
-    if(!el){return;}
-    hide();
-  },true);
-
-  window.addEventListener('scroll',function(){hide();},true);
-})();"""
 
 
 def _drawer_skeleton() -> str:
@@ -4729,19 +4273,17 @@ def render_dashboard(model: dict, lang: str = "ko", subproject: str = "all") -> 
         '<head>\n',
         '  <meta charset="utf-8">\n',
         '  <meta name="viewport" content="width=device-width, initial-scale=1">\n',
+        f'  <link rel="stylesheet" href="/static/style.css?v={_css_version()}">\n',
         '  <title>dev-plugin Monitor</title>\n',
         '  <link rel="preconnect" href="https://fonts.googleapis.com">\n',
         '  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>\n',
         '  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">\n',
-        f'  <style>{DASHBOARD_CSS}</style>\n',
         '</head>\n',
         '<body>\n',
         body, "\n",
         _drawer_skeleton(), "\n",
         _trow_tooltip_skeleton(), "\n",
-        f'<style>{_task_panel_css()}</style>\n',
-        f'<script id="dashboard-js">{_DASHBOARD_JS}</script>\n',
-        f'<script id="task-panel-js">{_task_panel_js()}</script>\n',
+        f'<script src="/static/app.js?v={_PKG_VERSION}" defer></script>\n',
         _task_panel_dom(), "\n",
         '</body>\n',
         '</html>\n',
@@ -4755,52 +4297,6 @@ def render_dashboard(model: dict, lang: str = "ko", subproject: str = "all") -> 
 _PANE_PATH_PREFIX = "/pane/"
 _API_PANE_PATH_PREFIX = "/api/pane/"
 _DEFAULT_MAX_PANE_LINES = 500
-
-# Inline vanilla JS for 2-second partial refresh of <pre class="pane-capture">.
-# No external src — fetch + setInterval are browser built-ins.
-_PANE_JS = """\
-(function(){
-  var pre = document.querySelector('pre.pane-capture');
-  var ftr = document.querySelector('.footer');
-  if (!pre) return;
-  var paneId = pre.getAttribute('data-pane');
-  function tick(){
-    fetch('/api/pane/' + encodeURIComponent(paneId), {cache:'no-store'})
-      .then(function(r){ return r.ok ? r.json() : null; })
-      .then(function(j){
-        if (!j) return;
-        pre.textContent = (j.lines || []).join('\\n');
-        if (ftr) ftr.textContent = 'captured at ' + j.captured_at;
-      })
-      .catch(function(){ /* silent: loop continues on next tick */ });
-  }
-  setInterval(tick, 2000);
-})();"""
-
-_PANE_CSS = """\
-:root {
-  --bg: #0d1117; --fg: #e6edf3; --muted: #8b949e; --border: #30363d;
-  --panel: #161b22; --accent: #58a6ff; --warn: #f85149;
-}
-* { box-sizing: border-box; }
-body {
-  margin: 0; padding: 1.25rem 1.5rem;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  background: var(--bg); color: var(--fg); line-height: 1.5;
-}
-h1 { font-size: 1.25rem; margin: 0 0 0.5rem; }
-nav.top-nav { margin: 0 0 1rem; padding: 0.25rem 0; border-bottom: 1px solid var(--border); }
-nav.top-nav a { color: var(--accent); text-decoration: none; }
-nav.top-nav a:hover { text-decoration: underline; }
-pre.pane-capture {
-  background: #0d1117; border: 1px solid var(--border); border-radius: 4px;
-  padding: 0.75rem; margin: 0.5rem 0;
-  white-space: pre-wrap; word-break: break-all;
-  max-height: 75vh; overflow: auto;
-  font-family: "SFMono-Regular", Consolas, monospace; font-size: 0.85rem;
-}
-.error { color: var(--warn); font-weight: 600; margin: 0.5rem 0; }
-.footer { color: var(--muted); font-size: 0.8rem; margin-top: 0.5rem; }"""
 
 
 # ---------------------------------------------------------------------------
@@ -4863,16 +4359,18 @@ def _is_static_path(path: str) -> bool:
 
 
 def _handle_static(handler: "BaseHTTPRequestHandler", path: str) -> None:
-    """Serve a static vendor JS file to *handler*.
+    """Serve a static asset file to *handler*.
 
     Protocol:
     - Extract filename from *path* after ``_STATIC_PATH_PREFIX``.
     - Re-validate whitelist + ``..`` guard (second defence line).
-    - Resolve absolute path under ``handler.server.plugin_root/skills/dev-monitor/vendor/``.
-    - Verify resolved path is still under ``vendor_dir`` (traversal post-resolve).
+    - Package-local assets (style.css, app.js): resolved from
+      ``monitor_server/static/`` alongside this file (TSK-01-02/03).
+    - Vendor assets: resolved from
+      ``handler.server.plugin_root/skills/dev-monitor/vendor/``.
+    - Verify resolved path stays within its base directory (traversal guard).
     - On any failure (whitelist miss, file missing, traversal) → 404.
-    - On success → 200 with ``Content-Type: application/javascript; charset=utf-8``
-      and ``Cache-Control: public, max-age=3600``.
+    - On success → 200 with appropriate Content-Type and Cache-Control.
     """
     # ── Guard 1: prefix + traversal + whitelist ──────────────────────────────
     if not isinstance(path, str) or not path.startswith(_STATIC_PATH_PREFIX):
@@ -4886,17 +4384,28 @@ def _handle_static(handler: "BaseHTTPRequestHandler", path: str) -> None:
         _send_plain_404(handler)
         return
 
-    # ── Resolve vendor directory via plugin_root ──────────────────────────────
-    plugin_root = _server_attr(handler, "plugin_root") or _resolve_plugin_root()
-    vendor_dir = Path(plugin_root) / "skills" / "dev-monitor" / "vendor"
-    target = vendor_dir / filename
+    # ── Resolve target directory ──────────────────────────────────────────────
+    if filename in _PACKAGE_STATIC_FILES:
+        # Package-local: scripts/monitor_server/static/
+        base_dir = Path(__file__).parent / "monitor_server" / "static"
+        ext = filename.rsplit(".", 1)[-1] if "." in filename else ""
+        content_type = _STATIC_MIME.get(ext, "application/octet-stream")
+        cache_control = "public, max-age=300"
+    else:
+        # Vendor assets: plugin_root/skills/dev-monitor/vendor/
+        plugin_root = _server_attr(handler, "plugin_root") or _resolve_plugin_root()
+        base_dir = Path(plugin_root) / "skills" / "dev-monitor" / "vendor"
+        content_type = "application/javascript; charset=utf-8"
+        cache_control = "public, max-age=3600"
+
+    target = base_dir / filename
 
     # ── Guard 2: post-resolve traversal check ────────────────────────────────
     try:
         resolved = target.resolve()
-        vendor_resolved = vendor_dir.resolve()
-        # resolved must be vendor_dir itself or a direct child
-        if vendor_resolved not in (resolved, *resolved.parents):
+        base_resolved = base_dir.resolve()
+        # resolved must be base_dir itself or a direct child
+        if base_resolved not in (resolved, *resolved.parents):
             _send_plain_404(handler)
             return
     except (OSError, ValueError):
@@ -4912,8 +4421,8 @@ def _handle_static(handler: "BaseHTTPRequestHandler", path: str) -> None:
 
     # ── Successful response ───────────────────────────────────────────────────
     handler.send_response(200)
-    handler.send_header("Content-Type", "application/javascript; charset=utf-8")
-    handler.send_header("Cache-Control", "public, max-age=3600")
+    handler.send_header("Content-Type", content_type)
+    handler.send_header("Cache-Control", cache_control)
     handler.send_header("Content-Length", str(len(data)))
     handler.end_headers()
     handler.wfile.write(data)
@@ -5020,8 +4529,8 @@ def _render_pane_html(
         '<html lang="en">\n'
         '<head>\n'
         '  <meta charset="utf-8">\n'
+        f'  <link rel="stylesheet" href="/static/style.css?v={_css_version()}">\n'
         f'  <title>pane {escaped_id}</title>\n'
-        f'  <style>{_PANE_CSS}</style>\n'
         '</head>\n'
         '<body>\n'
         '<nav class="top-nav"><a href="/">&#x2190; back to dashboard</a></nav>\n'
@@ -5029,7 +4538,7 @@ def _render_pane_html(
         f'{error_block}'
         f'<pre class="pane-capture" data-pane="{escaped_id}">{escaped_lines}</pre>\n'
         f'<div class="footer">captured at {escaped_ts}</div>\n'
-        f'<script>{_PANE_JS}</script>\n'
+        f'<script src="/static/app.js?v={_PKG_VERSION}" defer></script>\n'
         '</body>\n'
         '</html>\n'
     )
@@ -5808,208 +5317,6 @@ def _handle_api_merge_status(handler) -> None:
     except Exception as exc:
         sys.stderr.write(f"/api/merge-status error: {exc!r}\n")
         _json_error(handler, 500, str(exc))
-
-
-def _task_panel_css() -> str:
-    """CSS for task slide panel (TSK-02-04)."""
-    return (
-        ".slide-panel{position:fixed;top:0;right:-560px;bottom:0;width:560px;"
-        "background:var(--bg-2,#1e1e2e);border-left:1px solid var(--border,#313244);"
-        "overflow-y:auto;z-index:90;transition:right 0.22s cubic-bezier(.4,0,.2,1);"
-        "display:flex;flex-direction:column;}"
-        ".slide-panel.open{right:0;}"
-        "#task-panel-overlay{position:fixed;inset:0;background:rgba(0,0,0,.3);z-index:80;}"
-        "#task-panel header{display:flex;align-items:center;justify-content:space-between;"
-        "padding:12px 16px;border-bottom:1px solid var(--border,#313244);flex-shrink:0;}"
-        "#task-panel-body{flex:1;overflow-y:auto;padding:16px;}"
-        "#task-panel-close{background:none;border:none;cursor:pointer;font-size:18px;"
-        "color:var(--ink-3,#cdd6f4);opacity:.7;line-height:1;}"
-        "#task-panel-close:hover{opacity:1;}"
-        "#task-panel-body h4{margin:16px 0 8px;font-size:13px;color:var(--ink-3,#cdd6f4);}"
-        "#task-panel-body pre{background:var(--bg-1,#181825);border-radius:4px;padding:10px;"
-        "overflow-x:auto;font-size:12px;white-space:pre-wrap;word-break:break-word;}"
-        "#task-panel-body .disabled{color:var(--ink-3,#585b70);}"
-        "#task-panel-body .size{font-size:11px;color:var(--ink-3,#585b70);margin-left:6px;}"
-        "#task-panel-body ul{list-style:none;padding:0;margin:0;}"
-        "#task-panel-body li{padding:4px 0;font-size:12px;}"
-        ".expand-btn{font-size:14px;padding:2px 6px;opacity:.5;background:none;"
-        "border:none;cursor:pointer;color:inherit;}"
-        ".expand-btn:hover{opacity:1;}"
-        "#task-panel-body code{font-family:var(--font-mono,monospace);font-size:12px;}"
-        ".panel-logs{margin-top:4px;}"
-        ".log-entry{margin-bottom:8px;}"
-        ".log-entry summary{cursor:pointer;font-size:12px;color:var(--ink-3,#cdd6f4);padding:2px 0;user-select:none;}"
-        ".log-tail{max-height:300px;overflow:auto;font-size:11px;white-space:pre-wrap;"
-        "word-break:break-all;background:var(--bg-1,#181825);border-radius:4px;"
-        "padding:8px;margin:4px 0 0;font-family:var(--font-mono,monospace);}"
-        ".log-empty{font-size:12px;color:var(--ink-3,#585b70);padding:4px 0;}"
-        ".log-trunc{font-size:10px;color:var(--ink-3,#585b70);margin-left:8px;}"
-        # TSK-04-03: merge-badge + merge preview panel CSS
-        ".merge-badge{display:inline-flex;align-items:center;gap:4px;"
-        "padding:2px 8px;border-radius:12px;cursor:pointer;"
-        "font-size:11px;font-weight:600;border:1px solid transparent;"
-        "flex-shrink:0;white-space:nowrap;background:none;}"
-        ".merge-badge[data-state=\"ready\"]{background:var(--done,#22c55e20);color:var(--done,#22c55e);border-color:var(--done,#22c55e);}"
-        ".merge-badge[data-state=\"waiting\"]{background:var(--run,#eab30820);color:var(--run,#eab308);border-color:var(--run,#eab308);}"
-        ".merge-badge[data-state=\"conflict\"]{background:var(--fail,#ef444420);color:var(--fail,#ef4444);border-color:var(--fail,#ef4444);}"
-        ".merge-badge[data-state=\"stale\"]{background:transparent;color:var(--ink-3,#cdd6f4);border:1px dashed var(--ink-3,#cdd6f4);}"
-        ".merge-badge[data-state=\"unknown\"]{background:transparent;color:var(--ink-3,#585b70);border-color:var(--ink-3,#585b70);}"
-        ".merge-badge .stale{font-size:10px;opacity:.8;}"
-        ".merge-stale-banner{padding:6px 10px;background:var(--run,#eab30820);border:1px solid var(--run,#eab308);border-radius:4px;font-size:12px;margin-bottom:12px;}"
-        ".merge-ready-banner{padding:6px 10px;background:var(--done,#22c55e20);border:1px solid var(--done,#22c55e);border-radius:4px;font-size:12px;margin-bottom:12px;}"
-        ".merge-conflict-file li.disabled{color:var(--ink-3,#585b70);}"
-        ".merge-conflict-file li.disabled code{opacity:.6;}"
-        ".merge-hunk-preview{max-height:120px;overflow:auto;font-size:11px;font-family:var(--font-mono,monospace);background:var(--bg-1,#181825);border-radius:4px;padding:6px;white-space:pre-wrap;word-break:break-all;margin-top:4px;}"
-    )
-
-
-_TASK_PANEL_JS = r"""
-function escapeHtml(s){
-  if(s==null)return '';
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
-}
-function renderWbsSection(md){
-  if(!md)return '';
-  var lines=md.split('\n'),html='<h4>&sect; WBS</h4>',inCode=false,lang='';
-  for(var i=0;i<lines.length;i++){
-    var line=lines[i];
-    if(!inCode&&line.match(/^```/)){inCode=true;lang=line.slice(3).trim();html+='<pre><code'+(lang?' class="lang-'+escapeHtml(lang)+'"':'')+'>';continue;}
-    if(inCode){if(line.match(/^```/)){inCode=false;html+='</code></pre>\n';}else{html+=escapeHtml(line)+'\n';}continue;}
-    var m4=line.match(/^####\s+(.*)/),m3=line.match(/^###\s+(.*)/),m2=line.match(/^##\s+(.*)/),m1=line.match(/^#\s+(.*)/);
-    if(m4){html+='<h5>'+escapeHtml(m4[1])+'</h5>\n';continue;}
-    if(m3){html+='<h4>'+escapeHtml(m3[1])+'</h4>\n';continue;}
-    if(m2){html+='<h3>'+escapeHtml(m2[1])+'</h3>\n';continue;}
-    if(m1){html+='<h2>'+escapeHtml(m1[1])+'</h2>\n';continue;}
-    var li=line.match(/^\s*[-*]\s+(.*)/);
-    if(li){html+='<li>'+escapeHtml(li[1])+'</li>\n';continue;}
-    if(line.trim()===''){html+='<br>\n';continue;}
-    html+='<p>'+escapeHtml(line)+'</p>\n';
-  }
-  if(inCode)html+='</code></pre>\n';
-  return html;
-}
-function renderStateJson(state){return '<h4>&sect; state.json</h4><pre>'+escapeHtml(JSON.stringify(state,null,2))+'</pre>';}
-function renderArtifacts(arts){
-  var html='<h4>&sect; 아티팩트</h4>';
-  if(!arts||!arts.length)return html+'<p>-</p>';
-  html+='<ul>';
-  for(var i=0;i<arts.length;i++){
-    var a=arts[i];
-    if(a.exists)html+='<li><code>'+escapeHtml(a.path)+'</code><span class="size">'+escapeHtml((a.size/1024).toFixed(1))+'KB</span></li>';
-    else html+='<li class="disabled"><code>'+escapeHtml(a.path)+'</code></li>';
-  }
-  return html+'</ul>';
-}
-function renderLogs(logs){
-  var html='<h4>&sect; 로그</h4>';
-  if(!logs||!logs.length)return html+'<p>-</p>';
-  var sections='';
-  for(var i=0;i<logs.length;i++){
-    var log=logs[i];
-    if(!log.exists){
-      sections+='<div class="log-empty">'+escapeHtml(log.name)+' — 보고서 없음</div>';
-    }else{
-      var truncMsg=log.truncated?'<span class="log-trunc">마지막 200줄 / 전체 '+escapeHtml(String(log.lines_total))+'줄</span>':'';
-      sections+='<details class="log-entry" open><summary>'+escapeHtml(log.name)+truncMsg+'</summary>'
-        +'<pre class="log-tail">'+escapeHtml(log.tail)+'</pre></details>';
-    }
-  }
-  return html+'<section class="panel-logs">'+sections+'</section>';
-}
-function openTaskPanel(taskId){
-  var sp='all';try{var m=location.search.match(/[?&]subproject=([^&]+)/);if(m)sp=m[1];}catch(e){}
-  fetch('/api/task-detail?task='+encodeURIComponent(taskId)+'&subproject='+encodeURIComponent(sp))
-    .then(function(r){return r.json();}).then(function(data){
-      var t=document.getElementById('task-panel-title');if(t)t.textContent=data.title||taskId;
-      var b=document.getElementById('task-panel-body');
-      if(b)b.innerHTML=renderWbsSection(data.wbs_section_md||'')+renderStateJson(data.state||{})+renderArtifacts(data.artifacts||[])+renderLogs(data.logs||[]);
-      var p=document.getElementById('task-panel'),o=document.getElementById('task-panel-overlay');
-      if(p){p.classList.add('open');p.dataset.panelMode='task';}if(o)o.removeAttribute('hidden');
-    }).catch(function(e){console.error('task-panel error',e);});
-}
-function closeTaskPanel(){
-  var p=document.getElementById('task-panel'),o=document.getElementById('task-panel-overlay');
-  if(p)p.classList.remove('open');if(o)o.setAttribute('hidden','');
-}
-function renderMergePreview(ms){
-  var html='';
-  if(ms.stale){html+='<div class="merge-stale-banner">⚠ 스캔 결과가 30분 이상 경과 — 재스캔 필요</div>';}
-  var state=ms.state||'unknown';
-  if(state==='ready'){
-    html+='<div class="merge-ready-banner">✅ 모든 Task 완료 · 충돌 없음</div>';
-  }else if(state==='waiting'){
-    html+='<h4>§ 대기 중인 Task</h4><ul>';
-    var pts=ms.pending_tasks||[];
-    for(var i=0;i<pts.length;i++){html+='<li>'+escapeHtml(pts[i].id||'')+' ('+escapeHtml(pts[i].phase||'')+')</li>';}
-    html+='</ul>';
-  }else if(state==='conflict'){
-    html+='<h4>§ 충돌 파일</h4><ul class="merge-conflict-file">';
-    var conflicts=ms.conflicts||[];
-    var autoFiles=ms.auto_merge_files||[];
-    var hunkCount=0;
-    for(var i=0;i<conflicts.length;i++){
-      var c=conflicts[i];var fname=c.file||c.path||'';
-      var isAuto=autoFiles.indexOf(fname)>=0;
-      if(isAuto){
-        html+='<li class="disabled"><code>'+escapeHtml(fname)+'</code> <span>auto-merge 드라이버 적용 예정</span></li>';
-      }else{
-        html+='<li><code>'+escapeHtml(fname)+'</code>';
-        if(c.hunks&&hunkCount<5){
-          var hunks=c.hunks.slice(0,5-hunkCount);
-          for(var j=0;j<hunks.length;j++){
-            html+='<pre class="merge-hunk-preview">'+escapeHtml(hunks[j])+'</pre>';
-            hunkCount++;
-          }
-        }
-        html+='</li>';
-      }
-    }
-    html+='</ul>';
-  }else{
-    html+='<p>스캔 데이터 없음 — <code>scripts/merge-preview-scanner.py</code> 를 실행하세요.</p>';
-  }
-  return html;
-}
-function openMergePanel(wpId){
-  var sp='all';try{var m=location.search.match(/[?&]subproject=([^&]+)/);if(m)sp=m[1];}catch(e){}
-  var panel=document.getElementById('task-panel');
-  var title=document.getElementById('task-panel-title');
-  var body=document.getElementById('task-panel-body');
-  var overlay=document.getElementById('task-panel-overlay');
-  function _showPanel(contentHtml){
-    if(body)body.innerHTML=contentHtml;
-    if(panel){panel.dataset.panelMode='merge';panel.classList.add('open');}
-    if(overlay)overlay.removeAttribute('hidden');
-  }
-  fetch('/api/merge-status?wp='+encodeURIComponent(wpId)+'&subproject='+encodeURIComponent(sp))
-    .then(function(r){return r.json();})
-    .then(function(ms){
-      if(title)title.textContent=wpId+' — 머지 프리뷰';
-      _showPanel(renderMergePreview(ms));
-    })
-    .catch(function(err){
-      _showPanel('<p>머지 상태 로드 실패: '+escapeHtml(String(err))+'</p>');
-    });
-}
-document.addEventListener('click',function(e){
-  var badge=e.target.closest?e.target.closest('.merge-badge'):null;
-  if(!badge&&e.target.classList&&e.target.classList.contains('merge-badge'))badge=e.target;
-  if(badge){openMergePanel(badge.getAttribute('data-wp')||'');return;}
-  var btn=e.target.closest?e.target.closest('.expand-btn'):null;
-  if(!btn&&e.target.classList&&e.target.classList.contains('expand-btn'))btn=e.target;
-  if(btn){openTaskPanel(btn.getAttribute('data-task-id')||'');return;}
-  if(e.target.id==='task-panel-close'){closeTaskPanel();return;}
-  if(e.target.id==='task-panel-overlay'){closeTaskPanel();return;}
-});
-document.addEventListener('keydown',function(e){
-  if(e.key==='Escape'){var p=document.getElementById('task-panel');if(p&&p.classList.contains('open'))closeTaskPanel();}
-});
-"""
-
-
-def _task_panel_js() -> str:
-    """JS for task slide panel. Document-level delegation survives auto-refresh."""
-    return _TASK_PANEL_JS
 
 
 def _task_panel_dom() -> str:
