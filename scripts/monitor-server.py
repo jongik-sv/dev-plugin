@@ -1781,7 +1781,7 @@ body[data-filter="bypass"]  .trow:not([data-status="bypass"]) { display: none; }
   display: grid;
   grid-template-columns: auto 1fr auto auto;
   gap: 10px; align-items: center;
-  padding: 10px 14px 8px;
+  padding: 20px 14px 16px;
 }
 .pane-head .name{
   font-family: var(--mono);
@@ -1820,15 +1820,17 @@ body[data-filter="bypass"]  .trow:not([data-status="bypass"]) { display: none; }
   font-family: var(--mono); font-size: 11px; line-height: 1.5;
   color: var(--ink-2); white-space: pre-wrap; overflow-x: auto;
   position: relative;
-  max-height: 4.5em;
+  max-height: 9em;
+  overflow-y: auto;
 }
 .pane-preview.empty{ color: var(--ink-3); }
 .pane-preview::before{
-  content: "\\25B8 last 3 lines"; position: absolute; top: -8px; left: 10px;
+  content: "\\25B8 last 6 lines"; position: absolute; top: -8px; left: 10px;
   font-size: 9px; letter-spacing: .1em; text-transform: uppercase;
   background: var(--bg-1); padding: 0 5px;
   color: var(--ink-4);
 }
+[lang=ko] .pane-preview::before{ content: "\\25B8 최근 6줄"; }
 .pane-preview .prompt{ color: var(--done); }
 .pane-preview .dim{ color: var(--ink-4); }
 .pane-preview .err{ color: var(--fail); }
@@ -3331,7 +3333,10 @@ def _is_claude_cli_chrome(line: str) -> bool:
     return False
 
 
-def _pane_last_n_lines(pane_id: str, n: int = 3) -> str:
+_PANE_PREVIEW_LINES = 6
+
+
+def _pane_last_n_lines(pane_id: str, n: int = _PANE_PREVIEW_LINES) -> str:
     """Return the last *n* non-chrome lines from a tmux pane's scrollback.
 
     Calls ``capture_pane(pane_id)``, strips trailing Claude CLI chrome
@@ -5500,7 +5505,7 @@ def _extract_wbs_section(wbs_md: str, task_id: str) -> str:
 
 
 # Log file names to tail for the EXPAND panel § 로그 section (TSK-02-06).
-LOG_NAMES = ("build-report.md", "test-report.md")
+_LOG_NAMES = ("build-report.md", "test-report.md")
 
 _MAX_LOG_TAIL_LINES = 200
 
@@ -5513,11 +5518,12 @@ def _tail_report(path, max_lines=_MAX_LOG_TAIL_LINES) -> dict:
     - ANSI CSI escapes are stripped via _ANSI_RE.
     - UTF-8 decode errors are replaced (never raises).
     """
-    name = Path(path).name
-    if not Path(path).exists():
+    p = Path(path)
+    name = p.name
+    if not p.exists():
         return {"name": name, "tail": "", "truncated": False, "lines_total": 0, "exists": False}
     try:
-        raw = Path(path).read_text(encoding="utf-8", errors="replace")
+        raw = p.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return {"name": name, "tail": "", "truncated": False, "lines_total": 0, "exists": False}
     raw = _ANSI_RE.sub("", raw)
@@ -5536,8 +5542,8 @@ def _tail_report(path, max_lines=_MAX_LOG_TAIL_LINES) -> dict:
 
 
 def _collect_logs(task_dir) -> list:
-    """Return [{name, tail, truncated, lines_total, exists}] for LOG_NAMES."""
-    return [_tail_report(Path(task_dir) / name) for name in LOG_NAMES]
+    """Return [{name, tail, truncated, lines_total, exists}] for _LOG_NAMES."""
+    return [_tail_report(Path(task_dir) / name) for name in _LOG_NAMES]
 
 
 def _collect_artifacts(task_dir):
