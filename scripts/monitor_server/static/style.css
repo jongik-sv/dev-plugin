@@ -73,3 +73,99 @@
   --phase-pending: #6b7280;  /* gray     — Pending       WCAG AA 4.5:1 (경계) */
   --critical:      #f59e0b;  /* amber    — Critical Path WCAG AA 6.8:1 */
 }
+
+/* ---------- dep-node HTML 레이블 (TSK-03-03 / TSK-04-03) ---------- */
+/* cytoscape-node-html-label 플러그인이 각 노드 위에 오버레이하는 2줄 카드.
+   단서 1: border-left-color (상태별 스트립)
+   단서 2: .dep-node-id color override (상태별 ID 글자색)
+   단서 3: --_tint color-mix() 배경 틴트 (color-mix 미지원 시 transparent fallback) */
+.dep-node {
+  display: flex; flex-direction: column; align-items: flex-start;
+  width: 180px; padding: 10px 12px 10px 16px; box-sizing: border-box;
+  border-radius: 8px;
+  border: 1px solid var(--ink-4);
+  border-left: 4px solid var(--ink-4);
+  background: var(--bg-2);
+  background-image: linear-gradient(90deg, var(--_tint, transparent), transparent 45%);
+  transition: transform .15s ease, box-shadow .15s ease;
+  pointer-events: none;
+}
+.dep-node:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0,0,0,.45);
+}
+.dep-node-id {
+  font-family: var(--mono); font-size: 10px; font-weight: 700;
+  color: var(--ink-3);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
+}
+.dep-node-title {
+  font-family: var(--sans); font-size: 12.5px; font-weight: 400;
+  color: var(--ink);
+  overflow: hidden; text-overflow: ellipsis; max-width: 100%;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+}
+
+/* --- 상태 5종 (단서 1: 스트립, 단서 2: ID 글자색, 단서 3: 배경 틴트) --- */
+.dep-node.status-done {
+  border-left-color: var(--done);
+  --_tint: color-mix(in srgb, var(--done) 10%, transparent);
+}
+.dep-node.status-done .dep-node-id { color: var(--done); }
+
+.dep-node.status-running {
+  border-left-color: var(--run);
+  --_tint: color-mix(in srgb, var(--run) 10%, transparent);
+}
+.dep-node.status-running .dep-node-id { color: var(--run); }
+
+.dep-node.status-pending {
+  border-left-color: var(--ink-3);
+  --_tint: color-mix(in srgb, var(--ink-3) 8%, transparent);
+}
+.dep-node.status-pending .dep-node-id { color: var(--ink-3); }
+
+/* AC-FR05-b: .dep-node.status-failed — v4 빨강 유지 */
+.dep-node.status-failed {
+  border-left-color: var(--fail);
+  --_tint: color-mix(in srgb, var(--fail) 10%, transparent);
+}
+.dep-node.status-failed .dep-node-id { color: var(--fail); }
+
+.dep-node.status-bypassed {
+  border-left-color: var(--bypass);
+  --_tint: color-mix(in srgb, var(--bypass) 10%, transparent);
+}
+.dep-node.status-bypassed .dep-node-id { color: var(--bypass); }
+
+/* --- 모디파이어: critical — AC-FR05-a: var(--critical) 앰버 (v4 var(--fail) 교체) --- */
+.dep-node.critical {
+  border-color: var(--critical);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--critical) 35%, transparent);
+}
+
+/* --- 모디파이어: bottleneck (dashed border) --- */
+.dep-node.bottleneck {
+  border-style: dashed;
+}
+
+/* --- AC-FR05-c: 동시 적용 시 failed 우선 (specificity 0,3,0 > critical 0,2,0) --- */
+.dep-node.status-failed.critical {
+  border-color: var(--fail);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--fail) 35%, transparent);
+}
+
+/* ---------- dep-graph legend + wheel-zoom toggle ---------- */
+#dep-graph-legend {
+  list-style: none; margin: 0; padding: 0;
+  display: flex; flex-wrap: wrap; gap: 14px; align-items: center;
+  margin-top: 8px; font-size: 11px;
+}
+#dep-graph-legend .leg-item { font-family: var(--mono); }
+#dep-graph-legend .dep-graph-wheel {
+  margin-left: auto;
+  display: inline-flex; gap: 6px; align-items: center;
+  color: var(--ink-3); cursor: pointer; user-select: none;
+  font-size: 11px; letter-spacing: .02em;
+}
+#dep-graph-legend .dep-graph-wheel input { margin: 0; cursor: pointer; }
