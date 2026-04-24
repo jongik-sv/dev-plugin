@@ -6721,12 +6721,12 @@ def _json_response(handler, status: int, payload) -> None:
             handler.send_header("Cache-Control", "no-store")
             handler.end_headers()
             return
-        # 200 — ETag 헤더 추가 후 본문 전송
+        # 200 — ETag 헤더 추가 후 본문 전송 (헤더 순서: ETag → Content-Type → Content-Length → Cache-Control)
         handler.send_response(status)
+        handler.send_header("ETag", etag)
         handler.send_header("Content-Type", "application/json; charset=utf-8")
         handler.send_header("Content-Length", str(len(body)))
         handler.send_header("Cache-Control", "no-store")
-        handler.send_header("ETag", etag)
         handler.end_headers()
         handler.wfile.write(body)
         return

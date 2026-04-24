@@ -3,7 +3,10 @@
   /* shared state — dashboard poll + drawer poll are fully independent */
   var state={
     autoRefresh:true,activeFilter:'all',mainPollId:null,mainAbort:null,
-    drawerPaneId:null,drawerPollId:null,clockId:null
+    drawerPaneId:null,drawerPollId:null,clockId:null,
+    /* monitor-perf: visibility-aware polling */
+    visible:(document.visibilityState!=='hidden'),
+    mainEtag:'',drawerEtagByPane:{}
   };
   /* ---- clock (v3) ---- */
   function startClock(){
@@ -76,25 +79,38 @@
     tog.textContent=state.autoRefresh?'◐ auto':'○ paused';
     if(!state.autoRefresh){stopMainPoll();}else{startMainPoll();}
   });
-  /* ---- dashboard polling (TSK-02-01) ---- */
+  /* ---- dashboard polling (TSK-02-01, monitor-perf: visibility-aware) ---- */
   function stopMainPoll(){
     if(state.mainPollId!==null){clearInterval(state.mainPollId);state.mainPollId=null;}
     if(state.mainAbort){try{state.mainAbort.abort();}catch(e){} state.mainAbort=null;}
   }
   function startMainPoll(){
     stopMainPoll();
+    /* monitor-perf: hidden 탭에서는 폴링 시작 안 함 */
+    if(!state.visible)return;
     tick();
     state.mainPollId=setInterval(tick,5000);
   }
   function tick(){
     if(!state.autoRefresh)return;
+    /* monitor-perf: visibilityState hidden이면 폴링 스킵 */
+    if(!state.visible)return;
     if(state.mainAbort){try{state.mainAbort.abort();}catch(e){}}
     state.mainAbort=new AbortController();
     fetchAndPatch(state.mainAbort.signal);
   }
   function fetchAndPatch(signal){
-    fetch(window.location.search?'/'+window.location.search:'/',{cache:'no-store',signal:signal})
-      .then(function(r){return r.ok?r.text():null;})
+    /* monitor-perf: If-None-Match 헤더로 ETag 캐싱 — 304면 DOM 교체 스킵 */
+    var headers={'If-None-Match':state.mainEtag||''};
+    fetch(window.location.search?'/'+window.location.search:'/',{cache:'no-store',signal:signal,headers:headers})
+      .then(function(r){
+        /* 304: 서버 상태 미변경 — DOM 교체 불필요 */
+        if(r.status===304)return null;
+        /* 200: ETag 갱신 후 본문 파싱 */
+        var etag=r.headers.get('ETag');
+        if(etag)state.mainEtag=etag;
+        return r.ok?r.text():null;
+      })
       .then(function(text){
         if(!text)return;
         var parser=new DOMParser();
@@ -109,6 +125,19 @@
       })
       .catch(function(){/* silent: retry on next tick */});
   }
+  /* monitor-perf: visibility 변경 핸들러 */
+  function onVisibilityChange(){
+    state.visible=(document.visibilityState!=='hidden');
+    if(!state.visible){
+      /* 탭 hidden → 폴링 즉시 정지 */
+      stopMainPoll();
+      stopDrawerPoll();
+    }else if(state.autoRefresh){
+      /* 탭 visible 복귀 → startMainPoll이 내부적으로 tick() 즉시 호출 + interval 설정 */
+      startMainPoll();
+    }
+  }
+  document.addEventListener('visibilitychange',onVisibilityChange);
   function patchSection(name,newHtml){
     var current=document.querySelector('[data-section="'+name+'"]');
     if(!current)return;
@@ -197,8 +226,18 @@
   function tickDrawer(){
     var id=state.drawerPaneId;
     if(!id)return;
-    fetch('/api/pane/'+encodeURIComponent(id),{cache:'no-store'})
-      .then(function(r){return r.ok?r.json():null;})
+    /* monitor-perf: visibilityState hidden이면 drawer 폴링 스킵 */
+    if(!state.visible)return;
+    /* monitor-perf: per-pane ETag 캐싱 */
+    if(!state.drawerEtagByPane){state.drawerEtagByPane={};}
+    var drawerEtag=state.drawerEtagByPane[id]||'';
+    fetch('/api/pane/'+encodeURIComponent(id),{cache:'no-store',headers:{'If-None-Match':drawerEtag}})
+      .then(function(r){
+        if(r.status===304)return null;
+        var etag=r.headers.get('ETag');
+        if(etag)state.drawerEtagByPane[id]=etag;
+        return r.ok?r.json():null;
+      })
       .then(function(j){if(j)updateDrawerBody(j);})
       .catch(function(){/* silent: retry on next tick */});
   }
