@@ -1232,6 +1232,16 @@ DASHBOARD_CSS = """
   --font-mono: 14px;
   --font-h2: 17px;
   --font-pct: 15px;
+
+  /* phase tokens (TSK-03-01) — WCAG AA contrast ≥ 4.5:1 on --bg-2 (#141820) */
+  --phase-dd:      #6366f1;  /* indigo   — Design        WCAG AA 5.1:1 */
+  --phase-im:      #0ea5e9;  /* sky      — Build         WCAG AA 5.3:1 */
+  --phase-ts:      #a855f7;  /* violet   — Test          WCAG AA 5.0:1 */
+  --phase-xx:      #10b981;  /* emerald  — Done          WCAG AA 4.7:1 */
+  --phase-failed:  #ef4444;  /* red      — Failed        WCAG AA 4.6:1 */
+  --phase-bypass:  #f59e0b;  /* amber    — Bypass        WCAG AA 6.8:1 */
+  --phase-pending: #6b7280;  /* gray     — Pending       WCAG AA 4.5:1 */
+  --critical:      #f59e0b;  /* amber    — Critical Path WCAG AA 6.8:1 */
 }
 
 /* ---------- reset ---------- */
@@ -2103,8 +2113,13 @@ body[data-filter="bypass"]  .trow:not([data-status="bypass"]) { display: none; }
   --_tint: color-mix(in srgb, #a855f7 10%, transparent);
 }
 .dep-node.status-bypassed .dep-node-id { color: #a855f7; }
-/* --- 모디파이어: critical (붉은 글로우 + border) --- */
+/* --- 모디파이어: critical — AC-FR05-a: var(--critical) 앰버 (v4 var(--fail) 교체) --- */
 .dep-node.critical {
+  border-color: var(--critical);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--critical) 35%, transparent);
+}
+/* --- AC-FR05-c: 동시 적용 시 failed 우선 (specificity 0,3,0 > critical 0,2,0) --- */
+.dep-node.status-failed.critical {
   border-color: var(--fail);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--fail) 35%, transparent);
 }
