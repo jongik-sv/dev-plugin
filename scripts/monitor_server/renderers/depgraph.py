@@ -113,7 +113,7 @@ def _section_dep_graph(lang: str = "ko", subproject: str = "all") -> str:
         f'    {summary_html}\n'
         '  </div>\n'
         '  <div class="dep-graph-wrap">\n'
-        '    <div id="dep-graph-canvas" style="height:clamp(640px, 78vh, 1400px);"></div>\n'
+        '    <div id="dep-graph-canvas" style="min-height:640px; height:clamp(640px, 78vh, 1400px);"></div>\n'
         f'    {legend_html}\n'
         '  </div>\n'
         f'{scripts_html}\n'

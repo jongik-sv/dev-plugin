@@ -3025,81 +3025,12 @@ def _section_phase_history(tasks, features) -> str:
 # ---------------------------------------------------------------------------
 
 
+# moved to monitor_server.renderers.depgraph [core-renderer-split:C1-5]
 def _section_dep_graph(lang: str = "ko", subproject: str = "all") -> str:
-    """Render the Dependency Graph section SSR skeleton (TRD §3.9.5).
-
-    Returns a ``<section id="dep-graph">`` block containing:
-    - ``.section-head`` with i18n h2 + ``<aside id="dep-graph-summary">``
-    - ``.dep-graph-wrap``: canvas div (height 520px) + legend div
-    - 4 vendor ``<script>`` tags in load order:
-      dagre → cytoscape → cytoscape-dagre → graph-client
-
-    The ``subproject`` value is HTML-escaped and injected as
-    ``data-subproject="..."`` on the root ``<section>`` element so that
-    graph-client.js can read it without inline scripts.
-    """
-    sp_esc = html.escape(subproject or "all", quote=True)
-    heading = _t(lang, "dep_graph")
-
-    # SSR chip markup with i18n labels.
-    # graph-client.js:updateSummary uses [data-stat] selector — tag change
-    # (<span>→<b>) is intentional and selector-compatible.
-    _STAT_STATES = ("total", "done", "running", "pending", "failed", "bypassed")
-    chips = " ".join(
-        f'<span class="dep-stat dep-stat-{s}">'
-        f'<em>{html.escape(_t(lang, f"dep_stat_{s}"))}</em>'
-        f' <b data-stat="{s}">-</b></span>'
-        for s in _STAT_STATES
-    )
-    summary_html = f'<aside id="dep-graph-summary" class="dep-graph-summary">{chips}</aside>'
-
-    wheel_label = html.escape(_t(lang, "dep_wheel_zoom"))
-    # Critical Path 항목을 Failed 와 별도 <li>로 분리. <div>/<span> → <ul>/<li> 전환.
-    legend_html = (
-        '<ul id="dep-graph-legend" class="dep-graph-legend">'
-        '<li class="legend-done leg-item" style="color:#22c55e">&#9632; done</li>'
-        '<li class="legend-running leg-item" style="color:#eab308">&#9632; running</li>'
-        '<li class="legend-pending leg-item" style="color:#94a3b8">&#9632; pending</li>'
-        '<li class="legend-failed leg-item" style="color:#ef4444">&#9632; failed</li>'
-        '<li class="legend-bypassed leg-item" style="color:#a855f7">&#9632; bypassed</li>'
-        '<li class="legend-critical leg-item" style="color:#f59e0b">&#9632; critical path</li>'
-        '<label class="dep-graph-wheel" for="dep-graph-wheel-toggle">'
-        '<input type="checkbox" id="dep-graph-wheel-toggle">'
-        f'<span>{wheel_label}</span></label>'
-        '</ul>'
-    )
-
-    # graph-client.js는 개발 중 자주 바뀌므로 mtime 기반 cache-buster를 붙여 브라우저 캐시를 무효화한다.
-    try:
-        from pathlib import Path as _Path
-        _plugin_root = os.environ.get("CLAUDE_PLUGIN_ROOT") or str(_Path(__file__).resolve().parents[2])
-        _gc_path = _Path(_plugin_root) / "skills" / "dev-monitor" / "vendor" / "graph-client.js"
-        _gc_ver = str(int(_gc_path.stat().st_mtime))
-    except OSError:
-        _gc_ver = "0"
-
-    scripts_html = (
-        '<script src="/static/dagre.min.js"></script>\n'
-        '<script src="/static/cytoscape.min.js"></script>\n'
-        '<script src="/static/cytoscape-node-html-label.min.js"></script>\n'
-        '<script src="/static/cytoscape-dagre.min.js"></script>\n'
-        f'<script src="/static/graph-client.js?v={_gc_ver}"></script>'
-    )
-
-    return (
-        f'<section id="dep-graph" data-section="dep-graph"'
-        f' data-subproject="{sp_esc}">\n'
-        '  <div class="section-head">\n'
-        f'    <div><h2>{html.escape(heading)}</h2></div>\n'
-        f'    {summary_html}\n'
-        '  </div>\n'
-        '  <div class="dep-graph-wrap">\n'
-        '    <div id="dep-graph-canvas" style="min-height:640px; height:clamp(640px, 78vh, 1400px);"></div>\n'
-        f'    {legend_html}\n'
-        '  </div>\n'
-        f'{scripts_html}\n'
-        '</section>'
-    )
+    _dg_mod = _c2b_load_renderer("depgraph")
+    if _dg_mod is not None:
+        return _dg_mod._section_dep_graph(lang, subproject)
+    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -3900,73 +3831,12 @@ def _section_subproject_tabs(model: dict) -> str:
     return f'<nav class="subproject-tabs" data-section="subproject-tabs">{inner}</nav>\n'
 
 
+# moved to monitor_server.renderers.filterbar [core-renderer-split:C1-5]
 def _section_filter_bar(lang: str, distinct_domains: list) -> str:
-    """TSK-05-01: Render the sticky filter bar section HTML.
-
-    Renders a ``<div class="filter-bar" data-section="filter-bar" role="search">``
-    container with 4 filter controls + reset button:
-    - #fb-q: text input (search keyword, case-insensitive)
-    - #fb-status: select (running/done/failed/bypass/pending)
-    - #fb-domain: select (distinct domains from wbs.md)
-    - #fb-model: select (opus/sonnet/haiku)
-    - #fb-reset: reset button
-
-    i18n: lang 파라미터 기반 label 텍스트 분기 (ko / en).
-
-    Note: data-section="filter-bar" attribute lets patchSection identify this section,
-    but the JS monkey-patch skips filter-bar replacement so filter controls persist.
-    """
-    lang = _normalize_lang(lang)
-    is_ko = lang == "ko"
-
-    q_placeholder   = "🔍 검색 (ID / 제목)" if is_ko else "🔍 Search (ID / title)"
-    status_header   = "상태" if is_ko else "Status"
-    domain_header   = "도메인" if is_ko else "Domain"
-    model_header    = "모델" if is_ko else "Model"
-    reset_label     = "✕ 초기화" if is_ko else "✕ Reset"
-    reset_aria      = "초기화" if is_ko else "Reset"
-
-    # #fb-status 고정 options
-    status_options = "".join([
-        f'<option value="">{_esc(status_header)}</option>',
-        '<option value="running">running</option>',
-        '<option value="done">done</option>',
-        '<option value="failed">failed</option>',
-        '<option value="bypass">bypass</option>',
-        '<option value="pending">pending</option>',
-    ])
-
-    # #fb-domain dynamic options from distinct_domains
-    domain_options = "".join(
-        [f'<option value="">{_esc(domain_header)}</option>']
-        + [
-            f'<option value="{_esc(str(d))}">{_esc(str(d))}</option>'
-            for d in (distinct_domains or [])
-        ]
-    )
-
-    # #fb-model options
-    model_options = "".join([
-        f'<option value="">{_esc(model_header)}</option>',
-        '<option value="opus">opus</option>',
-        '<option value="sonnet">sonnet</option>',
-        '<option value="haiku">haiku</option>',
-    ])
-
-    return (
-        '<div class="filter-bar" data-section="filter-bar" role="search">\n'
-        f'  <input id="fb-q" type="search" placeholder="{_esc(q_placeholder)}"'
-        '   autocomplete="off" aria-label="Search">\n'
-        f'  <select id="fb-status" aria-label="{_esc(status_header)}">'
-        f'{status_options}</select>\n'
-        f'  <select id="fb-domain" aria-label="{_esc(domain_header)}">'
-        f'{domain_options}</select>\n'
-        f'  <select id="fb-model" aria-label="{_esc(model_header)}">'
-        f'{model_options}</select>\n'
-        f'  <button id="fb-reset" type="button" aria-label="{_esc(reset_aria)}">'
-        f'{_esc(reset_label)}</button>\n'
-        '</div>'
-    )
+    _fb_mod = _c2b_load_renderer("filterbar")
+    if _fb_mod is not None:
+        return _fb_mod._section_filter_bar(lang, distinct_domains)
+    return ""
 
 
 def _build_dashboard_body(s: dict) -> str:
@@ -6199,6 +6069,24 @@ except (ImportError, AttributeError):
             _arow_data_to = _c2b_act._arow_data_to  # type: ignore[assignment]
     except (ImportError, AttributeError):
         pass  # flat-load 컨텍스트 — thin wrapper 사용
+try:
+    from .renderers.depgraph import _section_dep_graph  # noqa: F401,E402
+except (ImportError, AttributeError):
+    try:
+        _c2b_dg = _c2b_load_renderer("depgraph")
+        if _c2b_dg is not None:
+            _section_dep_graph = _c2b_dg._section_dep_graph  # type: ignore[assignment]
+    except (ImportError, AttributeError):
+        pass
+try:
+    from .renderers.filterbar import _section_filter_bar  # noqa: F401,E402
+except (ImportError, AttributeError):
+    try:
+        _c2b_fb = _c2b_load_renderer("filterbar")
+        if _c2b_fb is not None:
+            _section_filter_bar = _c2b_fb._section_filter_bar  # type: ignore[assignment]
+    except (ImportError, AttributeError):
+        pass
 # === /renderer facade ===
 
 

@@ -537,13 +537,19 @@ class TestDepGraphCanvasHeight640(unittest.TestCase):
     def setUp(self):
         # TSK-02-03: _section_dep_graph가 monitor_server/core.py로 이전되었으므로
         # 두 파일을 합쳐 검색한다.
+        # core-renderer-split: SSOT가 renderers/depgraph.py로 이전되므로 이 파일도 포함한다.
+        _DEPGRAPH_PY = _CORE_PY.parent / "renderers" / "depgraph.py"
         src = _SERVER_PY.read_text(encoding="utf-8")
         if _CORE_PY.exists():
             src += "\n" + _CORE_PY.read_text(encoding="utf-8")
+        if _DEPGRAPH_PY.exists():
+            src += "\n" + _DEPGRAPH_PY.read_text(encoding="utf-8")
         # _section_dep_graph 함수에서 height 값을 직접 검증 (import 부작용 회피)
-        # 함수 정의 위치를 문자열 검색으로 찾은 후 블록을 추출
+        # 함수 정의 위치를 문자열 검색으로 찾은 후 블록을 추출.
+        # core-renderer-split 이후 core.py는 thin wrapper(본문 없음)이고 SSOT는
+        # renderers/depgraph.py에 있으므로 마지막(=SSOT) 정의를 rfind로 추출한다.
         marker = "def _section_dep_graph("
-        idx = src.find(marker)
+        idx = src.rfind(marker)
         if idx >= 0:
             start = idx
             # 다음 함수 정의까지의 블록을 추출
