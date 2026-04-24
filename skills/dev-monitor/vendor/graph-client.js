@@ -12,7 +12,7 @@
     pending:       "#94a3b8",
     failed:        "#ef4444",
     bypassed:      "#a855f7",
-    edge_default:  "#475569",
+    edge_default:  "#94a3b8",
     edge_critical: "#ef4444",
   };
   // 과축소 방지: 글자가 읽히지 않을 정도로 zoom-out 차단 + fit 시 maxZoom 캡
@@ -363,7 +363,7 @@
             "background-opacity": 0,
             "border-width": 0,
             "width": 180,
-            "height": 54,
+            "height": 72,
             "shape": "roundrectangle",
             "transition-property": "background-color border-color",
             "transition-duration": "400ms",
@@ -377,6 +377,8 @@
             "target-arrow-color": "data(color)",
             "target-arrow-shape": "triangle",
             "curve-style": "bezier",
+            "arrow-scale": 1.3,
+            "target-distance-from-node": 2,
           },
         },
         {

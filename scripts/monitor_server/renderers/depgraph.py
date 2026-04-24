@@ -9,6 +9,8 @@ monitor-server.py 대응: 원본 함수 제거 후 shim 라인으로 대체.
 from __future__ import annotations
 
 import html
+import os
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -66,12 +68,20 @@ def _section_dep_graph(lang: str = "ko", subproject: str = "all") -> str:
         '</div>'
     )
 
+    # graph-client.js는 개발 중 자주 바뀌므로 mtime 기반 cache-buster를 붙여 브라우저 캐시를 무효화한다.
+    plugin_root = os.environ.get("CLAUDE_PLUGIN_ROOT") or str(Path(__file__).resolve().parents[3])
+    gc_path = Path(plugin_root) / "skills" / "dev-monitor" / "vendor" / "graph-client.js"
+    try:
+        gc_ver = str(int(gc_path.stat().st_mtime))
+    except OSError:
+        gc_ver = "0"
+
     scripts_html = (
         '<script src="/static/dagre.min.js"></script>\n'
         '<script src="/static/cytoscape.min.js"></script>\n'
         '<script src="/static/cytoscape-node-html-label.min.js"></script>\n'
         '<script src="/static/cytoscape-dagre.min.js"></script>\n'
-        '<script src="/static/graph-client.js"></script>'
+        f'<script src="/static/graph-client.js?v={gc_ver}"></script>'
     )
 
     return (

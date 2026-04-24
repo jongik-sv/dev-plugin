@@ -1,3 +1,4 @@
+/* performance baseline: GPU layer properties absent — keep it that way (monitor-perf) */
 /* ===== Section 1: Dashboard CSS (DASHBOARD_CSS) ===== */
 
 /* ---------- v3 design system ---------- */
@@ -870,8 +871,8 @@ body[data-filter="bypass"]  .trow:not([data-status="bypass"]) { display: none; }
    단서 2: .dep-node-id color override (상태별 ID 글자색)
    단서 3: --_tint color-mix() 배경 틴트 (color-mix 미지원 시 transparent fallback → 단서 1/2만 유지) */
 .dep-node {
-  display: flex; flex-direction: column; align-items: flex-start;
-  width: 180px; padding: 10px 12px 10px 16px; box-sizing: border-box;
+  display: flex; flex-direction: column; align-items: flex-start; justify-content: center;
+  width: 180px; height: 72px; padding: 8px 12px 8px 16px; box-sizing: border-box;
   border-radius: 8px;
   border: 1px solid var(--ink-4);
   border-left: 4px solid var(--ink-4);
@@ -879,6 +880,7 @@ body[data-filter="bypass"]  .trow:not([data-status="bypass"]) { display: none; }
   background-image: linear-gradient(90deg, var(--_tint, transparent), transparent 45%);
   transition: transform .15s ease, box-shadow .15s ease;
   pointer-events: none;
+  overflow: hidden;
 }
 .dep-node:hover {
   transform: translateY(-1px);
