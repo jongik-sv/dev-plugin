@@ -1,0 +1,26 @@
+{
+  "name": "core-dashboard-asset-split",
+  "status": "[im]",
+  "last": {
+    "event": "build.ok",
+    "at": "2026-04-24T18:58:37Z"
+  },
+  "phase_history": [
+    {
+      "event": "design.ok",
+      "from": "[ ]",
+      "to": "[dd]",
+      "at": "2026-04-24T18:36:17Z",
+      "elapsed_seconds": 0
+    },
+    {
+      "event": "build.ok",
+      "from": "[dd]",
+      "to": "[im]",
+      "at": "2026-04-24T18:58:37Z",
+      "elapsed_seconds": 1340
+    }
+  ],
+  "updated": "2026-04-24T18:58:37Z",
+  "started_at": "2026-04-24T18:36:17Z"
+}
