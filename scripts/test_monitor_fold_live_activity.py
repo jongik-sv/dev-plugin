@@ -17,6 +17,7 @@ from pathlib import Path
 
 _THIS_DIR = Path(__file__).resolve().parent
 _MONITOR_PATH = _THIS_DIR / "monitor-server.py"
+_APP_JS_PATH = _THIS_DIR / "monitor_server" / "static" / "app.js"
 _spec = importlib.util.spec_from_file_location("monitor_server", _MONITOR_PATH)
 monitor_server = importlib.util.module_from_spec(_spec)
 sys.modules.setdefault("monitor_server", monitor_server)
@@ -24,6 +25,10 @@ _spec.loader.exec_module(monitor_server)
 
 WorkItem = monitor_server.WorkItem
 PhaseEntry = monitor_server.PhaseEntry
+
+# TSK-01-03: _DASHBOARD_JS가 app.js로 추출됨 — 속성 없는 경우 app.js를 읽어 호환
+if not hasattr(monitor_server, "_DASHBOARD_JS"):
+    monitor_server._DASHBOARD_JS = _APP_JS_PATH.read_text(encoding="utf-8") if _APP_JS_PATH.exists() else ""
 
 
 # ---------------------------------------------------------------------------

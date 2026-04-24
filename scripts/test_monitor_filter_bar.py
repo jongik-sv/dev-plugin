@@ -349,8 +349,12 @@ class TestFilterBarCssSticky(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # test_filter_bar_js_functions_present
 # ---------------------------------------------------------------------------
+_APP_JS_PATH = _THIS_DIR / "monitor_server" / "static" / "app.js"
+_APP_JS_CONTENT = _APP_JS_PATH.read_text(encoding="utf-8") if _APP_JS_PATH.exists() else ""
+
+
 class TestFilterBarJsFunctionsPresent(unittest.TestCase):
-    """_DASHBOARD_JS 또는 별도 script 블록에 필터 로직 5함수가 있어야 한다."""
+    """TSK-01-03: JS가 static/app.js로 이전됨 — app.js 파일 내용으로 필터 로직 함수 검증."""
 
     def setUp(self):
         task = _make_task()
@@ -358,108 +362,86 @@ class TestFilterBarJsFunctionsPresent(unittest.TestCase):
         self.html = render_dashboard(model, lang="ko")
 
     def test_current_filters_function_present(self):
-        """currentFilters 함수가 HTML에 있어야 한다."""
-        self.assertIn('currentFilters', self.html)
+        """currentFilters 함수가 app.js에 있어야 한다."""
+        self.assertIn('currentFilters', _APP_JS_CONTENT)
 
     def test_matches_row_function_present(self):
-        """matchesRow 함수가 HTML에 있어야 한다."""
-        self.assertIn('matchesRow', self.html)
+        """matchesRow 함수가 app.js에 있어야 한다."""
+        self.assertIn('matchesRow', _APP_JS_CONTENT)
 
     def test_apply_filters_function_present(self):
-        """applyFilters 함수가 HTML에 있어야 한다."""
-        self.assertIn('applyFilters', self.html)
+        """applyFilters 함수가 app.js에 있어야 한다."""
+        self.assertIn('applyFilters', _APP_JS_CONTENT)
 
     def test_sync_url_function_present(self):
-        """syncUrl 함수가 HTML에 있어야 한다."""
-        self.assertIn('syncUrl', self.html)
+        """syncUrl 함수가 app.js에 있어야 한다."""
+        self.assertIn('syncUrl', _APP_JS_CONTENT)
 
     def test_load_filters_from_url_function_present(self):
-        """loadFiltersFromUrl 함수가 HTML에 있어야 한다."""
-        self.assertIn('loadFiltersFromUrl', self.html)
+        """loadFiltersFromUrl 함수가 app.js에 있어야 한다."""
+        self.assertIn('loadFiltersFromUrl', _APP_JS_CONTENT)
 
     def test_patch_section_filter_wrapped_sentinel(self):
-        """patchSection monkey-patch sentinel(__filterWrapped)이 있어야 한다."""
-        self.assertIn('__filterWrapped', self.html)
+        """patchSection monkey-patch sentinel(__filterWrapped)이 app.js에 있어야 한다."""
+        self.assertIn('__filterWrapped', _APP_JS_CONTENT)
 
     def test_fb_reset_handler(self):
-        """fb-reset 버튼 핸들러 코드가 있어야 한다."""
-        self.assertIn('fb-reset', self.html)
+        """fb-reset 버튼 핸들러 코드가 app.js에 있어야 한다."""
+        self.assertIn('fb-reset', _APP_JS_CONTENT)
 
     def test_history_replace_state_present(self):
-        """history.replaceState 호출이 있어야 한다."""
-        self.assertIn('replaceState', self.html)
+        """history.replaceState 호출이 app.js에 있어야 한다."""
+        self.assertIn('replaceState', _APP_JS_CONTENT)
 
     def test_load_filters_on_domcontentloaded(self):
-        """DOMContentLoaded 에서 loadFiltersFromUrl이 호출되어야 한다."""
-        # DOMContentLoaded + loadFiltersFromUrl 양쪽이 있으면 충분
-        self.assertIn('DOMContentLoaded', self.html)
-        self.assertIn('loadFiltersFromUrl', self.html)
+        """DOMContentLoaded 에서 loadFiltersFromUrl이 app.js에 있어야 한다."""
+        self.assertIn('DOMContentLoaded', _APP_JS_CONTENT)
+        self.assertIn('loadFiltersFromUrl', _APP_JS_CONTENT)
 
     def test_depgraph_apply_filter_guard(self):
-        """window.depGraph.applyFilter 사용 시 guard가 있어야 한다."""
-        # depGraph 가 없는 환경에서 TypeError 방지
-        self.assertIn('depGraph', self.html)
+        """window.depGraph.applyFilter 사용 시 guard가 app.js에 있어야 한다."""
+        self.assertIn('depGraph', _APP_JS_CONTENT)
 
 
 # ---------------------------------------------------------------------------
-# test_filter_bar_url_state_roundtrip (JS logic — indirect via HTML presence)
+# test_filter_bar_url_state_roundtrip (JS logic — TSK-01-03: app.js)
 # ---------------------------------------------------------------------------
 class TestFilterBarUrlStateRoundtrip(unittest.TestCase):
-    """URL → DOM → URL 왕복 로직 — JS 구현 존재 확인."""
+    """URL → DOM → URL 왕복 로직 — JS 구현 존재 확인.
+    TSK-01-03: HTML 인라인이 아닌 app.js 파일에서 검증."""
 
     def test_url_search_params_used(self):
         """URLSearchParams 가 syncUrl/loadFiltersFromUrl 에서 사용되어야 한다."""
-        task = _make_task()
-        model = _make_model([task])
-        html_out = render_dashboard(model, lang="ko")
-        self.assertIn('URLSearchParams', html_out)
+        self.assertIn('URLSearchParams', _APP_JS_CONTENT)
 
     def test_preserves_existing_params(self):
-        """subproject, lang 파라미터를 보존하는 로직이 있어야 한다 (delete only fb params)."""
-        task = _make_task()
-        model = _make_model([task])
-        html_out = render_dashboard(model, lang="ko")
-        # syncUrl 함수는 q/status/domain/model만 set/delete하고 나머지는 보존
-        # 'subproject' 를 건드리지 않음을 확인 — delete 리스트에 없어야 함
-        # JS 코드에서 delete('subproject') 가 없어야 함
-        self.assertNotIn("delete('subproject')", html_out)
-        self.assertNotIn('delete("subproject")', html_out)
+        """subproject, lang 파라미터를 보존하는 로직이 있어야 한다."""
+        self.assertNotIn("delete('subproject')", _APP_JS_CONTENT)
+        self.assertNotIn('delete("subproject")', _APP_JS_CONTENT)
 
 
 # ---------------------------------------------------------------------------
-# test_filter_survives_refresh (JS monkey-patch 로직 — HTML presence)
+# test_filter_survives_refresh (JS monkey-patch 로직 — TSK-01-03: app.js)
 # ---------------------------------------------------------------------------
 class TestFilterSurvivesRefresh(unittest.TestCase):
-    """patchSection monkey-patch 후 필터 재적용 로직 확인."""
+    """patchSection monkey-patch 후 필터 재적용 로직 확인.
+    TSK-01-03: HTML 인라인이 아닌 app.js 파일에서 검증."""
 
     def test_patch_section_wrapping_code_present(self):
-        """monkey-patch 코드 블록이 HTML에 있어야 한다."""
-        task = _make_task()
-        model = _make_model([task])
-        html_out = render_dashboard(model, lang="ko")
-        # _registerPatchWrap helper + sentinel attribute are both present
-        self.assertIn('_registerPatchWrap', html_out)
-        self.assertIn('__filterWrapped', html_out)
+        """monkey-patch 코드 블록이 app.js에 있어야 한다."""
+        self.assertIn('_registerPatchWrap', _APP_JS_CONTENT)
+        self.assertIn('__filterWrapped', _APP_JS_CONTENT)
 
     def test_apply_filters_called_after_patch(self):
-        """monkey-patch 내에서 applyFilters()가 호출되어야 한다."""
-        task = _make_task()
-        model = _make_model([task])
-        html_out = render_dashboard(model, lang="ko")
-        # _registerPatchWrap function definition contains applyFilters() call
-        reg_pos = html_out.find('_registerPatchWrap')
-        apply_pos = html_out.find('applyFilters()', reg_pos)
+        """monkey-patch 내에서 applyFilters()가 app.js에 있어야 한다."""
+        reg_pos = _APP_JS_CONTENT.find('_registerPatchWrap')
+        apply_pos = _APP_JS_CONTENT.find('applyFilters()', reg_pos)
         self.assertGreater(reg_pos, -1)
         self.assertGreater(apply_pos, -1)
 
     def test_sentinel_prevents_double_wrap(self):
-        """__filterWrapped sentinel이 이중 wrapping을 방지한다."""
-        task = _make_task()
-        model = _make_model([task])
-        html_out = render_dashboard(model, lang="ko")
-        self.assertIn('__filterWrapped', html_out)
-        # sentinel 체크 패턴 (if !window.patchSection.__filterWrapped)
-        self.assertIn('__filterWrapped', html_out)
+        """__filterWrapped sentinel이 이중 wrapping 방지 코드가 app.js에 있어야 한다."""
+        self.assertIn('__filterWrapped', _APP_JS_CONTENT)
 
 
 # ---------------------------------------------------------------------------

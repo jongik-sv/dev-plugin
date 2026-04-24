@@ -201,9 +201,12 @@ class RenderPaneHtmlTests(unittest.TestCase):
         self.assertIn('<a href="/">', html_text)
 
     def test_inline_script_exactly_once(self):
+        # TSK-01-03: 인라인 <script> 제거 → <script src="/static/app.js" defer> 로 교체.
         html_text = monitor_server._render_pane_html("%1", self._payload())
-        # <script> 블록 1회 — 외부 src 없음
-        self.assertEqual(html_text.count("<script>"), 1)
+        # 인라인 <script> 블록(src 없음)은 0개여야 한다.
+        self.assertEqual(html_text.count("<script>"), 0)
+        # /static/app.js 를 로드하는 <script src> 태그가 존재해야 한다.
+        self.assertIn("/static/app.js", html_text)
 
     def test_no_external_resource_loading(self):
         """acceptance 4 — <script src=http...> / <link href=http...> 등 0건."""
