@@ -16,11 +16,16 @@ _APP_JS_PATH = os.path.join(os.path.dirname(__file__), "monitor_server", "static
 def _load_dashboard_js():
     """monitor-server 모듈 또는 monitor_server/core.py에서 _DASHBOARD_JS 문자열을 추출한다.
 
-    TSK-02-03 이후 monitor-server.py가 얇은 엔트리로 축소되었으므로,
-    _DASHBOARD_JS가 없으면 monitor_server/core.py에서 찾는다.
+    [core-dashboard-asset-split:C1-2] 외부 파일 우선, core.py regex-parse fallback.
     """
     _CORE_PATH = os.path.join(os.path.dirname(_SERVER_PATH), "monitor_server", "core.py")
+    # 외부 파일 우선
+    _static_js = os.path.join(os.path.dirname(_CORE_PATH), "static", "dashboard.js")
+    if os.path.exists(_static_js):
+        with open(_static_js, encoding="utf-8") as f:
+            return f.read()
 
+    # Legacy fallback (삼중 따옴표 블록)
     def _search_in_file(path):
         try:
             with open(path, encoding="utf-8") as f:

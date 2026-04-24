@@ -21,7 +21,16 @@ _CORE_PATH = os.path.join(os.path.dirname(_SERVER_PATH), "monitor_server", "core
 
 
 def _load_dashboard_js():
-    """monitor-server.py 또는 monitor_server/core.py에서 _DASHBOARD_JS를 추출한다."""
+    """monitor-server.py 또는 monitor_server/core.py에서 _DASHBOARD_JS를 추출한다.
+
+    [core-dashboard-asset-split:C1-2] 외부 파일 우선, regex-parse fallback.
+    """
+    # 외부 파일 우선
+    _static_js = os.path.join(os.path.dirname(_CORE_PATH), "static", "dashboard.js")
+    if os.path.exists(_static_js):
+        with open(_static_js, encoding="utf-8") as f:
+            return f.read()
+    # Legacy fallback
     for path in (_SERVER_PATH, _CORE_PATH):
         try:
             with open(path, encoding="utf-8") as f:
