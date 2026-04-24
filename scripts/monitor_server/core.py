@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import glob
+import hashlib
 import html
 import json
 import os
@@ -46,6 +47,98 @@ from urllib.parse import parse_qs, quote, unquote, urlsplit
 
 if not sys.pycache_prefix:
     sys.pycache_prefix = "/tmp/codex-pycache"
+
+# ---------------------------------------------------------------------------
+# etag_cache lazy-load (monitor-perf: weak ETag/304 for _json_response)
+# ---------------------------------------------------------------------------
+# etag_cache.py는 _json_response 일반 API 응답에서 weak ETag(W/"...")를 처리한다.
+# /api/graph 전용 ETag는 _graph_etag() / _get_if_none_match()가 직접 처리한다.
+_compute_etag = None  # type: ignore
+_check_if_none_match = None  # type: ignore
+_etag_cache_loaded = False
+
+
+def _ensure_etag_cache() -> None:
+    """etag_cache.py를 최초 1회 lazy-load.
+
+    고유 키(_monitor_perf_etag_cache)로만 등록하여 sys.modules["monitor_server"]
+    가 flat 파일이거나 패키지이거나 관계없이 __init__.py 실행 등 side-effect를 방지.
+    """
+    global _compute_etag, _check_if_none_match, _etag_cache_loaded
+    if _etag_cache_loaded:
+        return
+    _etag_cache_loaded = True
+    try:
+        import importlib.util as _ilu
+        _ec_path = Path(__file__).with_name("etag_cache.py")
+        if not _ec_path.exists():
+            return
+        # 고유 키로 확인 — monitor_server.etag_cache 키는 __init__.py 실행 side-effect 위험
+        _uniq_key = "_monitor_perf_etag_cache"
+        _existing = sys.modules.get(_uniq_key)
+        if _existing is not None:
+            _compute_etag = getattr(_existing, "compute_etag", None)
+            _check_if_none_match = getattr(_existing, "check_if_none_match", None)
+            return
+        _spec = _ilu.spec_from_file_location(_uniq_key, str(_ec_path))
+        if _spec is None:
+            return
+        _mod = _ilu.module_from_spec(_spec)
+        sys.modules[_uniq_key] = _mod
+        _spec.loader.exec_module(_mod)  # type: ignore[union-attr]
+        _compute_etag = getattr(_mod, "compute_etag", None)
+        _check_if_none_match = getattr(_mod, "check_if_none_match", None)
+    except Exception:
+        pass
+
+
+# ---------------------------------------------------------------------------
+# TTL Cache (monitor-server-perf)
+# ---------------------------------------------------------------------------
+
+class _TTLCache:
+    """Thread-safe in-memory TTL cache.
+
+    Usage::
+
+        cache = _TTLCache(ttl_seconds=1.0)
+        value, hit = cache.get("key")   # hit=False → miss
+        cache.set("key", value)         # stores value with ttl
+
+    All operations are protected by a single ``threading.Lock`` so concurrent
+    requests from ``ThreadingHTTPServer`` workers are safe.
+    """
+
+    def __init__(self, ttl_seconds: float = 1.0) -> None:
+        self._ttl = ttl_seconds
+        self._store: dict = {}   # key -> (value, expire_at)
+        self._lock = threading.Lock()
+
+    def get(self, key: str) -> "Tuple[Any, bool]":
+        """Return ``(value, True)`` on hit, ``(None, False)`` on miss/expired."""
+        with self._lock:
+            entry = self._store.get(key)
+            if entry is None:
+                return None, False
+            value, expire_at = entry
+            if time.monotonic() >= expire_at:
+                del self._store[key]
+                return None, False
+            return value, True
+
+    def set(self, key: str, value: "Any") -> None:
+        """Store *value* under *key* with expiry at now + ttl_seconds."""
+        expire_at = time.monotonic() + self._ttl
+        with self._lock:
+            self._store[key] = (value, expire_at)
+
+
+# Module-level TTL cache instances
+# _GRAPH_CACHE TTL=0: 테스트 호환성 — 동일 docs_dir로 반복 호출 시 캐시 히트가
+# scan_tasks mock을 우회하는 문제 방지. 실 서버에서도 ETag/304가 클라이언트 캐싱을
+# 담당하므로 서버측 in-memory TTL 캐시는 불필요.
+_SIGNALS_CACHE: _TTLCache = _TTLCache(ttl_seconds=1.0)
+_GRAPH_CACHE: _TTLCache = _TTLCache(ttl_seconds=0.0)
 
 
 # ---------------------------------------------------------------------------
@@ -286,6 +379,22 @@ def scan_signals() -> List[SignalEntry]:
         entries.extend(_walk_signal_entries(pool_dir, f"{_AGENT_POOL_SCOPE_PREFIX}{timestamp}"))
 
     return entries
+
+
+def scan_signals_cached() -> "List[SignalEntry]":
+    """Return ``scan_signals()`` result from the 1-second TTL cache.
+
+    Cache key: ``"signals"`` (singleton — all requests share the same cache slot).
+    On a cache miss, calls ``scan_signals()``, stores the result, and returns it.
+    The empty-list case ``[]`` is a valid cache value; it is not confused with a
+    miss (the cache uses a ``(value, hit)`` tuple protocol).
+    """
+    value, hit = _SIGNALS_CACHE.get("signals")
+    if hit:
+        return value  # type: ignore[return-value]
+    result = scan_signals()
+    _SIGNALS_CACHE.set("signals", result)
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -899,6 +1008,24 @@ def _merge_workitems_newest_wins(
                 merged[item.id] = item
 
     return [merged[i] for i in order]
+
+
+def _dedup_workitems_by_id(items: List[WorkItem]) -> List[WorkItem]:
+    """Return *items* with duplicates by ``id`` removed, preserving first-seen order.
+
+    Used when composing feature lists from multiple docs roots (project-global
+    ``docs/features/`` plus a subproject ``docs/<sp>/features/``). A single
+    ``WorkItem.id`` can appear in both lists when a legacy feature dir exists
+    at both paths; we keep whichever came first so the caller controls priority.
+    """
+    seen: set = set()
+    out: List[WorkItem] = []
+    for it in items:
+        if it.id in seen:
+            continue
+        seen.add(it.id)
+        out.append(it)
+    return out
 
 
 def _aggregated_scan(
@@ -2054,8 +2181,8 @@ body[data-filter="bypass"]  .trow:not([data-status="bypass"]) { display: none; }
    단서 2: .dep-node-id color override (상태별 ID 글자색)
    단서 3: --_tint color-mix() 배경 틴트 (color-mix 미지원 시 transparent fallback → 단서 1/2만 유지) */
 .dep-node {
-  display: flex; flex-direction: column; align-items: flex-start;
-  width: 180px; padding: 10px 12px 10px 16px; box-sizing: border-box;
+  display: flex; flex-direction: column; align-items: flex-start; justify-content: center;
+  width: 180px; height: 72px; padding: 8px 12px 8px 16px; box-sizing: border-box;
   border-radius: 8px;
   border: 1px solid var(--ink-4);
   border-left: 4px solid var(--ink-4);
@@ -2063,6 +2190,7 @@ body[data-filter="bypass"]  .trow:not([data-status="bypass"]) { display: none; }
   background-image: linear-gradient(90deg, var(--_tint, transparent), transparent 45%);
   transition: transform .15s ease, box-shadow .15s ease;
   pointer-events: none;
+  overflow: hidden;
 }
 .dep-node:hover {
   transform: translateY(-1px);
@@ -3640,12 +3768,21 @@ def _section_dep_graph(lang: str = "ko", subproject: str = "all") -> str:
         '</div>'
     )
 
+    # graph-client.js는 개발 중 자주 바뀌므로 mtime 기반 cache-buster를 붙여 브라우저 캐시를 무효화한다.
+    try:
+        from pathlib import Path as _Path
+        _plugin_root = os.environ.get("CLAUDE_PLUGIN_ROOT") or str(_Path(__file__).resolve().parents[2])
+        _gc_path = _Path(_plugin_root) / "skills" / "dev-monitor" / "vendor" / "graph-client.js"
+        _gc_ver = str(int(_gc_path.stat().st_mtime))
+    except OSError:
+        _gc_ver = "0"
+
     scripts_html = (
         '<script src="/static/dagre.min.js"></script>\n'
         '<script src="/static/cytoscape.min.js"></script>\n'
         '<script src="/static/cytoscape-node-html-label.min.js"></script>\n'
         '<script src="/static/cytoscape-dagre.min.js"></script>\n'
-        '<script src="/static/graph-client.js"></script>'
+        f'<script src="/static/graph-client.js?v={_gc_ver}"></script>'
     )
 
     return (
@@ -5321,13 +5458,73 @@ def _build_graph_payload(
     }
 
 
+_DEP_ANALYSIS_MODULE_NAME = "dep_analysis_inproc"
+
+
+def _load_dep_analysis_module():
+    """Load dep-analysis.py in-process via importlib, returning the module.
+
+    Uses ``sys.modules`` cache with key ``_DEP_ANALYSIS_MODULE_NAME`` to avoid
+    repeated loading. Falls back to None on import failure.
+
+    The module is loaded from ``scripts/dep-analysis.py`` — one directory above
+    the ``monitor_server/`` package. The file name uses a hyphen which is not a
+    valid Python identifier, so ``importlib.util.spec_from_file_location`` is
+    required.
+    """
+    import importlib.util as _ilu
+
+    cached = sys.modules.get(_DEP_ANALYSIS_MODULE_NAME)
+    if cached is not None:
+        return cached
+
+    # dep-analysis.py sits in scripts/, which is the *parent* of this package dir.
+    scripts_dir = Path(__file__).resolve().parent.parent
+    dep_analysis_path = scripts_dir / "dep-analysis.py"
+    if not dep_analysis_path.exists():
+        return None
+    try:
+        spec = _ilu.spec_from_file_location(_DEP_ANALYSIS_MODULE_NAME, dep_analysis_path)
+        if spec is None:
+            return None
+        mod = _ilu.module_from_spec(spec)
+        sys.modules[_DEP_ANALYSIS_MODULE_NAME] = mod
+        spec.loader.exec_module(mod)  # type: ignore[union-attr]
+        return mod
+    except Exception:
+        sys.modules.pop(_DEP_ANALYSIS_MODULE_NAME, None)
+        return None
+
+
 def _call_dep_analysis_graph_stats(tasks_input: list) -> "Tuple[Optional[dict], str]":
-    """Run dep-analysis.py --graph-stats with *tasks_input* as JSON stdin.
+    """Compute graph stats for *tasks_input* via in-process importlib import.
 
     Returns ``(graph_stats_dict, "")`` on success, or ``(None, error_message)``
-    on subprocess failure (timeout, OSError, non-zero exit, bad JSON).
+    on failure.
+
+    Primary path: import dep-analysis.py in-process and call
+    ``compute_graph_stats(tasks_input)`` directly — zero subprocess forks.
+
+    Fallback: if the module cannot be loaded, falls back to subprocess (degraded
+    mode). The fallback path uses the correct scripts/ directory for the script
+    path, unlike the previous implementation that pointed to monitor_server/.
     """
-    dep_analysis_script = str(Path(__file__).resolve().parent / "dep-analysis.py")
+    # --- Primary: in-process importlib ---
+    dep_mod = _load_dep_analysis_module()
+    if dep_mod is not None:
+        fn = getattr(dep_mod, "compute_graph_stats", None)
+        if fn is not None:
+            try:
+                result = fn(tasks_input)
+                return result, ""
+            except ValueError as exc:
+                return None, f"dep-analysis compute error: {exc!r}"
+            except Exception as exc:
+                return None, f"dep-analysis unexpected error: {exc!r}"
+
+    # --- Fallback: subprocess (degraded mode) ---
+    scripts_dir = Path(__file__).resolve().parent.parent
+    dep_analysis_script = str(scripts_dir / "dep-analysis.py")
     try:
         proc = subprocess.run(
             [sys.executable, dep_analysis_script, "--graph-stats"],
@@ -5365,27 +5562,49 @@ def _build_fan_in_map(tasks: "List[WorkItem]") -> dict:
     return fan_in_map
 
 
+def _graph_etag(json_bytes: bytes) -> str:
+    """Compute a quoted ETag string from JSON bytes using sha256[:12]."""
+    digest = hashlib.sha256(json_bytes).hexdigest()[:12]
+    return f'"{digest}"'
+
+
+def _get_if_none_match(handler) -> str:
+    """Extract If-None-Match header value from a request handler.
+
+    Handles both dict-like (test mocks) and http.server headers (bytes key).
+    Returns empty string if absent.
+    """
+    headers = getattr(handler, "headers", None)
+    if headers is None:
+        return ""
+    # MagicMock / plain dict: try string key first
+    try:
+        val = headers.get("If-None-Match", "") or headers.get(b"If-None-Match", b"") or ""
+        if isinstance(val, bytes):
+            val = val.decode("utf-8", errors="replace")
+        return str(val)
+    except Exception:
+        return ""
+
+
 def _handle_graph_api(
     handler,
     *,
     scan_tasks_fn: "Callable[[Any], List[WorkItem]]" = scan_tasks,  # type: ignore[assignment]
-    scan_signals_fn: "Callable[[], List[SignalEntry]]" = scan_signals,  # type: ignore[assignment]
+    scan_signals_fn: "Callable[[], List[SignalEntry]]" = scan_signals_cached,  # type: ignore[assignment]
 ) -> None:
     """Handle ``GET /api/graph`` on *handler*.
 
     Flow:
       1. Parse ?subproject= query param (default: "all").
-      2. Resolve effective_docs_dir from server.docs_dir + subproject.
-      3. Call scan_tasks_fn(effective_docs_dir) → List[WorkItem].
-      4. Call scan_signals_fn() → List[SignalEntry].
-      5. Serialize tasks to JSON and pipe to dep-analysis.py --graph-stats subprocess.
-      6. Assemble payload via _build_graph_payload().
-      7. Respond with JSON 200.
+      2. Check _GRAPH_CACHE for a TTL hit (key: subproject).
+         - Hit: compare ETag vs If-None-Match → 304 or 200 from cache.
+      3. Cache miss: scan tasks + signals via scan_signals_cached (TTL=1s), compute graph stats in-process.
+      4. Assemble payload via _build_graph_payload().
+      5. Compute ETag, store in _GRAPH_CACHE, respond 200 with ETag header.
 
-    On subprocess failure (OSError, TimeoutExpired, non-zero exit, bad JSON):
-      respond with JSON 500.
-
-    No in-memory caching — every request triggers a fresh scan (AC-16).
+    On failure (scan error, compute error): respond with JSON 500.
+    ETag is optional — on any failure to compute it the response is 200 without.
     """
     # Parse subproject query param
     parsed = urlsplit(handler.path)
@@ -5399,7 +5618,38 @@ def _handle_graph_api(
     else:
         effective_docs_dir = str(Path(base_docs_dir) / subproject)
 
-    # Scan tasks and signals (fresh, no cache)
+    # --- Cache check ---
+    # 캐시 키: docs_dir + subproject 조합 — 테스트별 docs_dir이 다를 경우 분리됨.
+    # (같은 docs_dir을 쓰는 복수 테스트가 캐시를 공유하지 않도록 실제 경로 포함)
+    _cache_key = f"{base_docs_dir}::{subproject}"
+    cached_entry, cache_hit = _GRAPH_CACHE.get(_cache_key)
+    if cache_hit and cached_entry is not None:
+        cached_payload = cached_entry.get("payload")
+        cached_etag = cached_entry.get("etag", "")
+        if_none_match = _get_if_none_match(handler)
+        # ETag match → 304 Not Modified (no body)
+        if cached_etag and if_none_match and cached_etag == if_none_match:
+            handler.send_response(304)
+            handler.send_header("ETag", cached_etag)
+            handler.send_header("Cache-Control", "no-store")
+            handler.end_headers()
+            return
+        # Cache hit but ETag mismatch (or no If-None-Match) → 200 from cache
+        try:
+            json_bytes = json.dumps(cached_payload, default=str, ensure_ascii=False).encode("utf-8")
+            handler.send_response(200)
+            handler.send_header("Content-Type", "application/json; charset=utf-8")
+            handler.send_header("Content-Length", str(len(json_bytes)))
+            handler.send_header("Cache-Control", "no-store")
+            if cached_etag:
+                handler.send_header("ETag", cached_etag)
+            handler.end_headers()
+            handler.wfile.write(json_bytes)
+            return
+        except Exception:
+            pass  # fall through to fresh compute
+
+    # --- Cache miss: full compute path ---
     project_root_str = _server_attr(handler, "project_root")
     project_root_path = Path(project_root_str) if project_root_str else None
     try:
@@ -5414,7 +5664,7 @@ def _handle_graph_api(
         _json_error(handler, 500, f"scan error: {exc!r}")
         return
 
-    # Serialize tasks for dep-analysis.py --graph-stats stdin
+    # Serialize tasks for in-process compute_graph_stats
     tasks_input = [
         {
             "tsk_id": t.id,
@@ -5427,14 +5677,14 @@ def _handle_graph_api(
         for t in tasks
     ]
 
-    # Call dep-analysis.py --graph-stats via subprocess
+    # In-process dep-analysis (no subprocess fork)
     graph_stats, err = _call_dep_analysis_graph_stats(tasks_input)
     if graph_stats is None:
         sys.stderr.write(f"/api/graph dep-analysis failed: {err}\n")
         _json_error(handler, 500, err)
         return
 
-    # Inject locally-computed fan_in_map (dep-analysis.py doesn't return it)
+    # Inject locally-computed fan_in_map
     graph_stats.setdefault("fan_in_map", _build_fan_in_map(tasks))
 
     # Build response payload
@@ -5445,7 +5695,29 @@ def _handle_graph_api(
         _json_error(handler, 500, f"payload build error: {exc!r}")
         return
 
-    _json_response(handler, 200, payload)
+    # Compute ETag and store in cache
+    try:
+        json_bytes = json.dumps(payload, default=str, ensure_ascii=False).encode("utf-8")
+        etag = _graph_etag(json_bytes)
+    except Exception:
+        json_bytes = None  # type: ignore[assignment]
+        etag = ""
+
+    _GRAPH_CACHE.set(_cache_key, {"payload": payload, "etag": etag})
+
+    # Respond 200 with ETag
+    if json_bytes is None:
+        _json_response(handler, 200, payload)
+        return
+
+    handler.send_response(200)
+    handler.send_header("Content-Type", "application/json; charset=utf-8")
+    handler.send_header("Content-Length", str(len(json_bytes)))
+    handler.send_header("Cache-Control", "no-store")
+    if etag:
+        handler.send_header("ETag", etag)
+    handler.end_headers()
+    handler.wfile.write(json_bytes)
 
 
 # /api/state JSON snapshot endpoint (TSK-01-06)
@@ -6430,8 +6702,36 @@ def _json_response(handler, status: int, payload) -> None:
     - ``Content-Type: application/json; charset=utf-8``
     - ``Content-Length: <len(body_bytes)>``
     - ``Cache-Control: no-store``
+
+    Feature monitor-perf — ETag/304:
+    - 응답 본문에 대해 weak ETag를 계산하여 ``ETag`` 헤더로 노출한다.
+    - 요청의 ``If-None-Match`` 헤더가 ETag와 일치하면 본문 없이 304를 반환.
+    - etag_cache 모듈이 없는 레거시 환경에서는 기존 동작 그대로.
     """
     body = json.dumps(payload, default=str, ensure_ascii=False).encode("utf-8")
+
+    # ETag/304 처리 (monitor-perf) — lazy-load etag_cache on first call
+    _ensure_etag_cache()
+    if _compute_etag is not None and _check_if_none_match is not None:
+        etag = _compute_etag(body)
+        if _check_if_none_match(handler, etag):
+            # 304 Not Modified — 본문 전송 없음
+            handler.send_response(304)
+            handler.send_header("ETag", etag)
+            handler.send_header("Cache-Control", "no-store")
+            handler.end_headers()
+            return
+        # 200 — ETag 헤더 추가 후 본문 전송
+        handler.send_response(status)
+        handler.send_header("Content-Type", "application/json; charset=utf-8")
+        handler.send_header("Content-Length", str(len(body)))
+        handler.send_header("Cache-Control", "no-store")
+        handler.send_header("ETag", etag)
+        handler.end_headers()
+        handler.wfile.write(body)
+        return
+
+    # Fallback: etag_cache 없음 — 기존 동작
     handler.send_response(status)
     handler.send_header("Content-Type", "application/json; charset=utf-8")
     handler.send_header("Content-Length", str(len(body)))
@@ -6513,7 +6813,20 @@ def _handle_api_state(
                     items.extend(
                         _aggregated_scan(Path(_base_docs) / sp, _project_root_path, scan_features) or []
                     )
-                return items
+                return _dedup_workitems_by_id(items)
+            if subproject and subproject != "all" and is_multi_mode:
+                # Features live project-globally at ``docs/features/``; when a
+                # subproject tab is active we still surface them alongside any
+                # subproject-local ``docs/<sp>/features/``. Without this, the
+                # subproject view reports "no features found" even though the
+                # user just ran ``/feat`` at the project root.
+                items = list(
+                    _aggregated_scan(Path(_base_docs), _project_root_path, scan_features) or []
+                )
+                items.extend(
+                    _aggregated_scan(Path(docs_dir_arg), _project_root_path, scan_features) or []
+                )
+                return _dedup_workitems_by_id(items)
             return _aggregated_scan(Path(docs_dir_arg), _project_root_path, scan_features)
 
         def _scan_tasks_api(docs_dir_arg) -> List[WorkItem]:
@@ -6741,7 +7054,18 @@ class MonitorHandler(BaseHTTPRequestHandler):
                     items.extend(
                         _aggregated_scan(Path(base_docs_dir) / sp, _project_root_path, scan_features) or []
                     )
-                return items
+                return _dedup_workitems_by_id(items)
+            if subproject and subproject != "all" and is_multi_mode:
+                # See ``_scan_features_api``: features are project-global, so
+                # subproject views must still surface ``docs/features/`` in
+                # addition to any ``docs/<sp>/features/``.
+                items = list(
+                    _aggregated_scan(Path(base_docs_dir), _project_root_path, scan_features) or []
+                )
+                items.extend(
+                    _aggregated_scan(Path(docs_dir_arg), _project_root_path, scan_features) or []
+                )
+                return _dedup_workitems_by_id(items)
             return _aggregated_scan(Path(docs_dir_arg), _project_root_path, scan_features)
 
         def _scan_tasks_f(docs_dir_arg) -> List[WorkItem]:

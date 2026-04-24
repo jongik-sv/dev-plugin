@@ -74,6 +74,35 @@ def window_exists(session: str, wt_name: str) -> bool:
     return wt_name in out.splitlines()
 
 
+def check_window_and_pane(session: str, wt_name: str) -> "tuple[bool, bool]":
+    """Check window existence and pane liveness in a single tmux call.
+
+    Replaces the previous ``window_exists()`` + ``pane_dead()`` two-call pattern
+    with a single ``list-windows -F "#{window_name}\t#{pane_dead}"`` invocation,
+    reducing tmux subprocess forks from 2 to 1 per poll cycle.
+
+    Args:
+        session: tmux session name.
+        wt_name: worktree window name to look up.
+
+    Returns:
+        ``(window_exists, pane_is_dead)`` — both False when tmux is unavailable
+        or the command fails (exception-safe).
+    """
+    fmt = "#{window_name}\t#{pane_dead}"
+    rc, out, _ = _run(["tmux", "list-windows", "-t", session, "-F", fmt])
+    if rc != 0:
+        return False, False
+    for line in out.splitlines():
+        parts = line.split("\t", 1)
+        if len(parts) != 2:
+            continue
+        name, dead_flag = parts
+        if name == wt_name:
+            return True, dead_flag.strip() == "1"
+    return False, False
+
+
 def terminal_signal_exists(signal_dir: pathlib.Path, wt_name: str) -> str | None:
     for suf in (".done", ".shutdown", ".failed", ".needs-restart"):
         if (signal_dir / f"{wt_name}{suf}").exists():
@@ -230,10 +259,11 @@ def main() -> int:
         if term:
             _log(log_path, f"terminal signal {term} — exiting")
             return 0
-        if not window_exists(args.session, args.wt_name):
+        win_exists, is_dead = check_window_and_pane(args.session, args.wt_name)
+        if not win_exists:
             _log(log_path, "window vanished — exiting")
             return 0
-        if pane_dead(args.session, args.wt_name):
+        if is_dead:
             dead_streak += 1
             _log(log_path, f"leader dead (streak={dead_streak}/{args.confirm_streak})")
             if dead_streak >= args.confirm_streak:
