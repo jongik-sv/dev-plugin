@@ -11,12 +11,17 @@ from __future__ import annotations
 
 import sys
 from monitor_server import core as _mod  # type: ignore[import]
+from monitor_server import api as _api_mod  # type: ignore[import]
 
 # 공용 유틸 재-export
 # 각 심볼은 renderers/* 서브모듈에서 `from ._util import X` 로 사용한다.
 _esc = _mod._esc
 _t = _mod._t
-_signal_set = _mod._signal_set
+# api.py가 SSOT인 4개 심볼 — core.py 중복 제거(C0-4) 선행 조건.
+_signal_set = _api_mod._signal_set
+_derive_node_status = _api_mod._derive_node_status
+_serialize_phase_history_tail_for_graph = _api_mod._serialize_phase_history_tail_for_graph
+_now_iso_z = _api_mod._now_iso_z
 _normalize_lang = _mod._normalize_lang
 _section_wrap = _mod._section_wrap
 _empty_section = _mod._empty_section
@@ -36,9 +41,6 @@ _SUBAGENT_INFO = _mod._SUBAGENT_INFO
 _live_activity_rows = _mod._live_activity_rows
 _render_arow = _mod._render_arow
 _live_activity_details_wrap = _mod._live_activity_details_wrap
-_derive_node_status = _mod._derive_node_status
-_serialize_phase_history_tail_for_graph = _mod._serialize_phase_history_tail_for_graph
-_now_iso_z = _mod._now_iso_z
 
 # taskrow.py 커밋 6(본문 이전) 이후 renderers/taskrow.py 로 이동 예정인 헬퍼들.
 _wrap_with_data_section = _mod._wrap_with_data_section
