@@ -1,0 +1,42 @@
+{
+  "name": "core-renderer-split",
+  "status": "[xx]",
+  "last": {
+    "event": "refactor.ok",
+    "at": "2026-04-24T18:24:00Z"
+  },
+  "phase_history": [
+    {
+      "event": "design.ok",
+      "from": "[ ]",
+      "to": "[dd]",
+      "at": "2026-04-24T16:28:53Z",
+      "elapsed_seconds": 0
+    },
+    {
+      "event": "build.ok",
+      "from": "[dd]",
+      "to": "[im]",
+      "at": "2026-04-24T18:04:48Z",
+      "elapsed_seconds": 5755
+    },
+    {
+      "event": "test.ok",
+      "from": "[im]",
+      "to": "[ts]",
+      "at": "2026-04-24T18:10:37Z",
+      "elapsed_seconds": 349
+    },
+    {
+      "event": "refactor.ok",
+      "from": "[ts]",
+      "to": "[xx]",
+      "at": "2026-04-24T18:24:00Z",
+      "elapsed_seconds": 803
+    }
+  ],
+  "updated": "2026-04-24T18:24:00Z",
+  "started_at": "2026-04-24T16:28:53Z",
+  "completed_at": "2026-04-24T18:24:00Z",
+  "elapsed_seconds": 6907
+}
