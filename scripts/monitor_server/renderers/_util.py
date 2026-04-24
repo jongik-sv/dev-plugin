@@ -56,5 +56,12 @@ _build_state_summary_json = _mod._build_state_summary_json
 
 _iter_flat_entry_modules = _mod._iter_flat_entry_modules
 
+# activity.py C1-4에서 필요한 헬퍼들
+_parse_iso_utc = _mod._parse_iso_utc
+_LIVE_ACTIVITY_LIMIT = _mod._LIVE_ACTIVITY_LIMIT
+_SECTION_EYEBROWS = _mod._SECTION_EYEBROWS
+_phase_of = _mod._phase_of
+_KNOWN_PHASES = _mod._KNOWN_PHASES
+
 # taskrow.py 선-shim이 _entry._phase_label 등에 접근할 수 있도록 _mod를 공개 심볼로 노출.
 # taskrow.py의 `from ._util import _mod as _entry` 에서 사용된다.
