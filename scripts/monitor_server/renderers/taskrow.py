@@ -11,7 +11,34 @@ TSK-02-01:
 
 from __future__ import annotations
 
-from ._util import _mod as _entry  # type: ignore[attr-defined]
+try:
+    from ._util import _mod as _entry  # type: ignore[attr-defined]
+except ImportError:
+    # Standalone load (spec_from_file_location without package linkage).
+    # Resolve _util.py by absolute path so `_entry` stays bound.
+    import importlib.util as _ilu
+    import pathlib as _pl
+    import sys as _sys
+
+    _here = _pl.Path(__file__).resolve().parent
+    # Make scripts/ importable so `from monitor_server import core` inside
+    # _util.py can resolve the real package.
+    _scripts_dir = _here.parent.parent
+    if str(_scripts_dir) not in _sys.path:
+        _sys.path.insert(0, str(_scripts_dir))
+    # Purge any flat `monitor_server` entry (monitor-server.py loaded via
+    # spec_from_file_location in other tests) so `from monitor_server import
+    # core` binds to the real package.
+    _existing = _sys.modules.get("monitor_server")
+    if _existing is not None and not hasattr(_existing, "__path__"):
+        del _sys.modules["monitor_server"]
+    _spec = _ilu.spec_from_file_location(
+        "monitor_server_renderers_util_standalone",
+        _here / "_util.py",
+    )
+    _u = _ilu.module_from_spec(_spec)
+    _spec.loader.exec_module(_u)  # type: ignore[union-attr]
+    _entry = _u._mod
 
 # 선-shim: monitor-server.py의 원본 함수를 그대로 재-export
 _phase_label = _entry._phase_label

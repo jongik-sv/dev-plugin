@@ -1301,6 +1301,12 @@ _PHASE_CODE_TO_ATTR: "dict[str, str]" = {
     "[im]": "im",
     "[ts]": "ts",
     "[xx]": "xx",
+    # Direct string aliases for override states (graph SSR emits these via
+    # _derive_node_status; test_monitor_phase_tokens.py also passes them raw).
+    # Bracket-less phase codes ("dd", "im", ...) intentionally stay unmapped.
+    "failed": "failed",
+    "bypass": "bypass",
+    "pending": "pending",
 }
 
 
@@ -1327,7 +1333,7 @@ def _phase_label(status_code: "Optional[str]", lang: str, *, failed: bool, bypas
     return _PHASE_LABELS["pending"].get(normalised) or _PHASE_LABELS["pending"]["ko"]
 
 
-def _phase_data_attr(status_code: "Optional[str]", *, failed: bool, bypassed: bool) -> str:
+def _phase_data_attr(status_code: "Optional[str]", *, failed: bool = False, bypassed: bool = False) -> str:
     """Return the data-phase attribute value for a Task row .trow element.
 
     Priority: bypassed > failed > status_code mapping > pending.
