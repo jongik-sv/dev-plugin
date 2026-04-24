@@ -88,7 +88,7 @@ if not sys.pycache_prefix:
 #   C1-3: _PANE_JS/_PANE_CSS → static/pane.{js,css}   (   42 LOC)
 #   C1-4: _task_panel_css    → static/task_panel.css   (  103 LOC)
 #   C1-5: _TASK_PANEL_JS     → static/task_panel.js    (  277 LOC)
-# Net core.py LOC: 5,418 → ~3,274 (−2,144 LOC)
+# Net core.py LOC: 5,418 → 3,284 (−2,134 LOC)  [실측: 2026-04-24]
 
 _STATIC_ROOT = Path(__file__).parent / "static"
 
