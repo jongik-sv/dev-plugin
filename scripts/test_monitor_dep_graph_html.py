@@ -538,10 +538,14 @@ class TestDepGraphCanvasHeight640(unittest.TestCase):
             self.fn_body = ""
 
     def test_dep_graph_canvas_height_640(self):
-        """_section_dep_graph 함수 바디에 height:640px 또는 height: 640px가 있다."""
+        """_section_dep_graph 함수 바디에 height:clamp(640px, ...) 또는 height:640px가 있다."""
         self.assertGreater(len(self.fn_body), 0, "_section_dep_graph 함수 추출 실패")
-        has_640 = ("height:640px" in self.fn_body or "height: 640px" in self.fn_body)
-        self.assertTrue(has_640, "_section_dep_graph에 height:640px 없음")
+        has_640 = (
+            "height:640px" in self.fn_body
+            or "height: 640px" in self.fn_body
+            or "height:clamp(640px" in self.fn_body
+        )
+        self.assertTrue(has_640, "_section_dep_graph에 640px 없음")
 
     def test_dep_graph_canvas_no_520(self):
         """_section_dep_graph 함수 바디에 height:520px가 없다 (이전 값 제거 확인)."""

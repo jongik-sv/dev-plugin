@@ -48,9 +48,10 @@
   }
 
   // -- 상태 키 정규화 헬퍼 --
-  // WBS 상태 코드([xx], [im], 등)를 COLOR/CSS 키(done/running/failed/bypassed/pending)로 변환.
-  // nodeHtmlTemplate과 nodeStyle이 공유한다.
-  // 상태 문자열 → 내부 키 lookup table
+  // WBS 상태 코드([xx], [im], 등)를 signal-based CSS 키(done/running/failed/bypassed/pending)로 변환.
+  // nodeHtmlTemplate(status-* 클래스)과 nodeStyle(border/색상) 두 곳에서 공유한다.
+  // 주의: data-phase 속성은 별도 API 필드 nd.phase에서 직접 읽는다 — getStatusKey()와 무관.
+  // 상태 문자열 → signal-key lookup table
   const _STATUS_MAP = {
     "[xx]": "done", "done": "done",
     "[im]": "running", "[ts]": "running", "[dd]": "running", "running": "running",

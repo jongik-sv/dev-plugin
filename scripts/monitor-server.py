@@ -1112,8 +1112,11 @@ def _t(lang: str, key: str) -> str:
 # TSK-02-01: DDTR phase badge helpers
 # ---------------------------------------------------------------------------
 
-# Maps status code / virtual keys → i18n key in _I18N.
-# Keys: DDTR status codes + virtual keys (failed / bypass / pending).
+# Human-readable badge labels per DDTR status code / virtual phase key.
+# Virtual keys (failed / bypass / pending) are not real status codes — they
+# are derived at render time from item flags (error, failed_ids, bypassed).
+# _PHASE_CODE_TO_ATTR shares the same [dd/im/ts/xx] key space for status codes;
+# the virtual keys are handled inline in _phase_data_attr() and _phase_label().
 _PHASE_LABELS: "dict[str, dict[str, str]]" = {
     "[dd]":    {"ko": "Design",  "en": "Design"},
     "[im]":    {"ko": "Build",   "en": "Build"},
@@ -1124,7 +1127,9 @@ _PHASE_LABELS: "dict[str, dict[str, str]]" = {
     "pending": {"ko": "Pending", "en": "Pending"},
 }
 
-# Maps status code → data-phase attribute value (raw string without brackets).
+# Maps DDTR status code → data-phase attribute value (strips brackets).
+# Virtual phases (failed / bypass / pending) are handled inline in
+# _phase_data_attr() because they depend on boolean flags, not status codes.
 _PHASE_CODE_TO_ATTR: "dict[str, str]" = {
     "[dd]": "dd",
     "[im]": "im",
@@ -3100,16 +3105,19 @@ def _trow_info_popover_skeleton() -> str:
 def _render_task_row_v2(item, running_ids: set, failed_ids: set, lang: str = "ko") -> str:
     """Render a v3 ``<div class="trow" data-status="{state}" data-phase="{phase}" data-running="{bool}">`` row.
 
-    Matches reference markup — 7 ``<div>`` children + spinner span:
-    ``statusbar / tid / badge / spinner / ttitle / elapsed / retry / flags``.
+    Children: ``statusbar / tid / badge / ttitle / elapsed / retry / flags / info-btn / expand-btn``.
 
     TSK-02-01: badge text is DDTR phase label (Design/Build/Test/Done/Failed/Bypass/Pending)
-    derived from state.json.status via _phase_label(). data-phase attribute added for CSS/test hooks.
+    derived from state.json.status via _phase_label(). data-phase attribute added on both
+    the .trow element and the .badge element for CSS/test hooks.
     data-status attribute (signal-based colour mapping) is unchanged.
 
     TSK-02-02: data-running reflects whether item.id is in running_ids (independent of
-    data-status priority). The .spinner span is always emitted as a badge sibling for all
-    trows; CSS controls visibility via .trow[data-running="true"] .spinner { display: inline-block }.
+    data-status priority).
+
+    TSK-04-01: spinner moved from a standalone .spinner sibling to a .spinner-inline span
+    inside the .badge element. CSS controls visibility via
+    .trow[data-running="true"] .badge .spinner-inline { display: inline-block }.
     """
     item_id = getattr(item, "id", None)
     bypassed = bool(getattr(item, "bypassed", False))
@@ -5408,7 +5416,7 @@ def _build_graph_payload(
             # TSK-05-02: filter predicate support fields
             "domain": task.domain if task.domain is not None else "-",
             "model": task.model if task.model is not None else "-",
-            # TSK-04-01: DDTR phase attribute for dep-graph node coloring
+            # TSK-04-01: DDTR phase for dep-graph node coloring (data-phase attribute in JS template)
             "phase": _phase_data_attr(
                 task.status,
                 failed=(node_status == "failed"),
