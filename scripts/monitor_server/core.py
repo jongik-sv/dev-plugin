@@ -2960,12 +2960,13 @@ def _kpi_counts(tasks, features, signals) -> dict:
                       if getattr(item, "status", None) == "[xx]" and getattr(item, "id", None)}
     raw_done = state_done_ids | _signal_set(signals, "done")
 
-    # Apply priority filter: each id is counted only in the highest-priority bucket.
-    # state.json is the source of truth — a task declared terminal ([xx] or bypassed)
-    # must not be counted as running/failed even if stale signal files linger. This
-    # defends against the worker path that creates `.done` without deleting `.running`.
-    failed_ids = (raw_failed & all_ids) - bypass_ids - state_done_ids
-    running_ids = (raw_running & all_ids) - bypass_ids - failed_ids - state_done_ids
+    # Apply priority filter: each id is counted only in the highest-priority
+    # bucket. Priority order (per docstring): bypass > failed > running > done
+    # > pending. A signal file present on a terminal ([xx]) task still wins over
+    # the state-derived done bucket — if a worker marks the task running/failed
+    # again while it was flagged [xx], that live signal takes precedence.
+    failed_ids = (raw_failed & all_ids) - bypass_ids
+    running_ids = (raw_running & all_ids) - bypass_ids - failed_ids
     done_ids = (raw_done & all_ids) - bypass_ids - failed_ids - running_ids
 
     n_bypass = len(bypass_ids)  # bypass_ids is already a subset of all_ids
@@ -4129,7 +4130,7 @@ def _section_dep_graph(lang: str = "ko", subproject: str = "all") -> str:
         f'    {summary_html}\n'
         '  </div>\n'
         '  <div class="dep-graph-wrap">\n'
-        '    <div id="dep-graph-canvas" style="height:clamp(640px, 78vh, 1400px);"></div>\n'
+        '    <div id="dep-graph-canvas" style="min-height:640px; height:clamp(640px, 78vh, 1400px);"></div>\n'
         f'    {legend_html}\n'
         '  </div>\n'
         f'{scripts_html}\n'
