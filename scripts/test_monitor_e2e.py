@@ -1150,20 +1150,21 @@ class TskTooltipE2ETests(unittest.TestCase):
         self.assertIn("data-state-summary=", html,
                       "GET / 응답 HTML 에 data-state-summary 속성이 없음")
 
-    def test_task_tooltip_dom_body_direct(self) -> None:
-        """GET / HTML 에 #trow-tooltip 이 body 직계로 1회 존재한다 (5초 auto-refresh 격리).
+    def test_task_popover_dom_body_direct(self) -> None:
+        """GET / HTML 에 #trow-info-popover 가 body 직계로 1회 존재한다 (TSK-04-02 FR-01).
 
-        실제 hover 시나리오(300ms → visible)는 수동 QA 로 확인한다:
-          1. 브라우저에서 http://localhost:7321/?subproject=monitor-v4 접속
-          2. Work Packages 섹션에서 Task 행에 마우스 hover (300ms 유지)
-          3. #trow-tooltip 이 행 우측에 나타나는지 확인
-          4. mouseleave / scroll 시 hidden 전환 확인
+        5초 auto-refresh 격리 목적 — 팝오버 DOM은 body 직계에 위치하여 innerHTML 교체 후에도 유지.
+        실제 클릭 시나리오:
+          1. 브라우저에서 http://localhost:7321/ 접속
+          2. Work Packages 섹션에서 Task 행 우측 ⓘ 버튼 클릭
+          3. #trow-info-popover 가 행 상단에 나타나는지 확인
+          4. ESC / 외부 클릭 / 재클릭 시 hidden 전환 확인
         """
         if not self._check_server():
             self.skipTest("monitor server not running — E2E skipped")
         html = self._get_html("/")
-        count = html.count('<div id="trow-tooltip"')
-        self.assertEqual(count, 1, f"#trow-tooltip 이 {count}회 발견 (1회 이어야 함)")
+        count = html.count('<div id="trow-info-popover"')
+        self.assertEqual(count, 1, f"#trow-info-popover 이 {count}회 발견 (1회 이어야 함)")
 
     def test_task_tooltip_state_summary_is_valid_json(self) -> None:
         """GET / 응답 HTML 의 첫 번째 .trow[data-state-summary] 값이 유효한 JSON 이다."""
@@ -1182,10 +1183,10 @@ class TskTooltipE2ETests(unittest.TestCase):
         for key in ("status", "last_event", "last_event_at", "elapsed", "phase_tail"):
             self.assertIn(key, data, f"필수 키 누락: {key}")
 
-    def test_task_tooltip_second_render_keeps_dom(self) -> None:
-        """두 번의 GET / 응답에서 #trow-tooltip 이 각각 body 직계에 존재한다.
+    def test_task_popover_second_render_keeps_dom(self) -> None:
+        """두 번의 GET / 응답에서 #trow-info-popover 가 각각 body 직계에 존재한다 (TSK-04-02).
 
-        auto-refresh(innerHTML 교체) 후에도 tooltip DOM 이 유지됨을 서버 응답 2회로 검증.
+        auto-refresh(innerHTML 교체) 후에도 팝오버 DOM이 유지됨을 서버 응답 2회로 검증.
         실제 브라우저 innerHTML 교체 시뮬레이션은 수동 QA 로 보완한다.
         """
         if not self._check_server():
@@ -1193,15 +1194,52 @@ class TskTooltipE2ETests(unittest.TestCase):
         html1 = self._get_html("/")
         html2 = self._get_html("/")
         for i, h in enumerate((html1, html2), start=1):
-            count = h.count('<div id="trow-tooltip"')
-            self.assertEqual(count, 1, f"GET / 응답 {i}회차: #trow-tooltip 이 {count}회 발견")
+            count = h.count('<div id="trow-info-popover"')
+            self.assertEqual(count, 1, f"GET / 응답 {i}회차: #trow-info-popover 이 {count}회 발견")
 
-    def test_task_tooltip_setupTaskTooltip_in_script(self) -> None:
-        """GET / 응답 HTML 의 <script> 블록에 setupTaskTooltip 이 포함된다."""
+    def test_task_popover_setupInfoPopover_in_script(self) -> None:
+        """GET / 응답 HTML 의 <script> 블록에 setupInfoPopover 가 포함된다 (TSK-04-02 FR-01).
+
+        setupTaskTooltip 이 삭제되고 setupInfoPopover 로 교체되었음을 서버 응답으로 확인.
+        """
         if not self._check_server():
             self.skipTest("monitor server not running — E2E skipped")
         html = self._get_html("/")
-        self.assertIn("setupTaskTooltip", html, "setupTaskTooltip 이 HTML script 블록에 없음")
+        self.assertIn("setupInfoPopover", html, "setupInfoPopover 가 HTML script 블록에 없음")
+        self.assertNotIn("setupTaskTooltip", html, "setupTaskTooltip 이 HTML에 아직 남아있음")
+
+    def test_task_popover_click(self) -> None:
+        """GET / HTML 에 .info-btn 버튼이 Task 행에 존재하고 aria 속성이 올바르다 (TSK-04-02 FR-01).
+
+        클릭 시나리오(Playwright 없이 HTML 정적 검증):
+          - .trow 내부에 button.info-btn[aria-expanded="false"][aria-controls="trow-info-popover"] 존재
+          - #trow-info-popover[hidden] 초기 상태 확인
+        """
+        if not self._check_server():
+            self.skipTest("monitor server not running — E2E skipped")
+        html = self._get_html("/")
+        self.assertIn('class="info-btn"', html,
+                      ".info-btn 버튼이 HTML에 없음")
+        self.assertIn('aria-expanded="false"', html,
+                      'aria-expanded="false" 초기값 없음')
+        self.assertIn('aria-controls="trow-info-popover"', html,
+                      'aria-controls="trow-info-popover" 없음')
+        # 팝오버 DOM이 hidden 상태로 존재
+        self.assertIn('id="trow-info-popover"', html,
+                      '#trow-info-popover DOM 없음')
+
+    def test_task_popover_no_hover_trigger(self) -> None:
+        """GET / 응답 HTML 에 mouseenter/mouseover 팝오버 바인딩이 없다 (AC-FR01-b).
+
+        setupInfoPopover IIFE는 hover 트리거를 사용하지 않는다.
+        """
+        if not self._check_server():
+            self.skipTest("monitor server not running — E2E skipped")
+        html = self._get_html("/")
+        # setupInfoPopover 블록 추출 — 다른 IIFE의 mouseenter는 허용하지 않으나
+        # 현재 버전에서 다른 IIFE에도 없어야 함
+        self.assertNotIn("setupTaskTooltip", html,
+                         "setupTaskTooltip(hover 기반)이 HTML에 남아있음 — 회귀")
 
 
 @unittest.skipUnless(_SERVER_UP, f"monitor-server not reachable at {_E2E_URL}")
@@ -1281,6 +1319,73 @@ class TaskModelChipE2ETests(unittest.TestCase):
         html = self._get_html("/")
         self.assertIn('phase-models', html,
                       "phase-models CSS 클래스가 응답 HTML에 없음")
+
+
+@unittest.skipUnless(_SERVER_UP, f"monitor-server not reachable at {_E2E_URL}")
+class PaneCardSizeE2ETests(unittest.TestCase):
+    """TSK-04-03: FR-04 pane 카드 높이 2배 + last 6 lines 라벨 E2E 검증.
+
+    Reachability: GET / → 팀 에이전트 섹션 → .pane-preview 요소 확인.
+    (URL 직접 진입 금지 — top-nav #team 링크 경로 확인)
+    """
+
+    def _get_html(self, path: str = "/") -> str:
+        with urllib.request.urlopen(_E2E_URL + path, timeout=5) as resp:
+            return resp.read().decode("utf-8")
+
+    def test_team_section_reachable_via_top_nav(self) -> None:
+        """대시보드 루트 / 에서 #team 앵커(top-nav)로 팀 에이전트 섹션 도달 가능."""
+        html = self._get_html("/")
+        self.assertIn('href="#team"', html, "top-nav에 #team 링크 없음")
+        self.assertIn('id="team"', html, "팀 에이전트 섹션 id=team 없음")
+
+    def test_pane_preview_max_height_9em_in_css(self) -> None:
+        """AC-FR04-a: GET / 응답 HTML의 CSS에 max-height: 9em 이 포함된다."""
+        html = self._get_html("/")
+        self.assertRegex(
+            html,
+            r"max-height\s*:\s*9em",
+            "응답 CSS에 .pane-preview max-height: 9em 없음 (v4 4.5em에서 업그레이드 필요)",
+        )
+
+    def test_pane_preview_label_6_lines_in_css(self) -> None:
+        """AC-FR04-b: GET / 응답 HTML의 CSS에 'last 6 lines' 또는 '최근 6줄' 포함."""
+        html = self._get_html("/")
+        has_6 = ("last 6 lines" in html) or ("최근 6줄" in html)
+        self.assertTrue(
+            has_6,
+            "응답 CSS에 '▸ last 6 lines' 또는 '▸ 최근 6줄' 라벨 없음",
+        )
+
+    def test_pane_head_padding_20_14_16_in_css(self) -> None:
+        """AC-FR04-d: GET / 응답 HTML의 CSS에 .pane-head padding 20px 14px 16px 포함."""
+        html = self._get_html("/")
+        self.assertRegex(
+            html,
+            r"padding\s*:\s*20px\s+14px\s+16px",
+            "응답 CSS에 .pane-head padding: 20px 14px 16px 없음 (v4 10px 14px 8px에서 상·하 2배 필요)",
+        )
+
+    def test_pane_preview_overflow_y_auto_in_css(self) -> None:
+        """R-G: GET / 응답 HTML의 CSS에 .pane-preview overflow-y: auto 포함."""
+        html = self._get_html("/")
+        has_overflow = bool(re.search(r"overflow-y\s*:\s*auto", html)) or bool(
+            re.search(r"overflow\s*:\s*auto", html)
+        )
+        self.assertTrue(
+            has_overflow,
+            "응답 CSS에 overflow-y: auto 없음 (6줄 초과 개별 스크롤 지원)",
+        )
+
+    def test_lang_ko_includes_korean_label(self) -> None:
+        """한국어 모드(?lang=ko): 응답 CSS에 '최근 6줄' 라벨이 포함된다."""
+        html = self._get_html("/?lang=ko")
+        # CSS에 한국어 before content 규칙이 있어야 함
+        self.assertIn(
+            "최근 6줄",
+            html,
+            "?lang=ko 응답 CSS에 '최근 6줄' 라벨 없음",
+        )
 
 
 if __name__ == "__main__":

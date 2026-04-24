@@ -2165,23 +2165,76 @@ body[data-filter="bypass"]  .trow:not([data-status="bypass"]) { display: none; }
   .drawer{ width: 100vw; }
 }
 
-/* ---------- TSK-02-03: trow tooltip ---------- */
-#trow-tooltip{
-  position:fixed;
-  z-index:100;
-  max-width:420px;
-  background:var(--bg-2);
-  border:1px solid var(--border);
-  border-radius:6px;
-  padding:10px 12px;
-  font:12px/1.4 var(--font-mono);
-  pointer-events:none;
-  box-shadow:0 4px 12px rgba(0,0,0,.3);
+/* ---------- TSK-04-02: info-btn + info-popover ---------- */
+.info-btn{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  width:18px;
+  height:18px;
+  padding:0;
+  margin-left:4px;
+  font:11px/1 var(--font-mono);
+  color:var(--ink-3);
+  background:transparent;
+  border:1px solid var(--line-2);
+  border-radius:50%;
+  cursor:pointer;
+  vertical-align:middle;
+  flex-shrink:0;
 }
-#trow-tooltip[hidden]{ display:none; }
-#trow-tooltip dl{ margin:0; }
-#trow-tooltip dt{ color:var(--ink-3); font-size:10px; margin-top:6px; }
-#trow-tooltip dd{ margin:0; color:var(--ink); }
+.info-btn:hover{ background:var(--bg-3); color:var(--ink); }
+.info-btn:focus-visible{ outline:2px solid var(--accent); outline-offset:2px; }
+.info-popover{
+  position:absolute;
+  z-index:100;
+  max-width:380px;
+  min-width:220px;
+  background:var(--bg-2);
+  border:1px solid var(--line-hi);
+  border-radius:6px;
+  padding:10px 12px 12px;
+  font:12px/1.5 var(--font-mono);
+  box-shadow:0 8px 24px rgba(0,0,0,0.18);
+}
+.info-popover[hidden]{ display:none; }
+.info-popover dl{ margin:0; }
+.info-popover dt{ color:var(--ink-3); font-size:10px; margin-top:6px; }
+.info-popover dd{ margin:0; color:var(--ink); }
+.info-popover .popover-title{ font-size:12px; font-weight:600; color:var(--ink); margin:0 0 4px; }
+/* phase-models dl in popover */
+.info-popover dl.phase-models dt{ color:var(--ink-3); font-size:10px; margin-top:4px; }
+.info-popover dl.phase-models dd{ margin:0; color:var(--ink); font-size:11px; }
+/* tail triangle — default: above row (tail points down) */
+.info-popover::before,.info-popover::after{
+  content:"";
+  position:absolute;
+  left:16px;
+  border-style:solid;
+}
+.info-popover::before{
+  bottom:-8px;
+  border-width:8px 6px 0;
+  border-color:var(--line-hi) transparent transparent;
+}
+.info-popover::after{
+  bottom:-7px;
+  border-width:7px 5px 0;
+  border-color:var(--bg-2) transparent transparent;
+}
+/* tail: below row (tail points up) */
+.info-popover[data-placement="below"]::before{
+  bottom:auto;
+  top:-8px;
+  border-width:0 6px 8px;
+  border-color:transparent transparent var(--line-hi);
+}
+.info-popover[data-placement="below"]::after{
+  bottom:auto;
+  top:-7px;
+  border-width:0 5px 7px;
+  border-color:transparent transparent var(--bg-2);
+}
 
 /* ---------- TSK-02-05: model chip + escalation flag ---------- */
 .model-chip{
@@ -2204,10 +2257,7 @@ body[data-filter="bypass"]  .trow:not([data-status="bypass"]) { display: none; }
   font-size:11px;
   vertical-align:middle;
 }
-/* phase-models dl in tooltip */
-#trow-tooltip dl.phase-models dt{ color:var(--ink-3); font-size:10px; margin-top:4px; }
-#trow-tooltip dl.phase-models dd{ margin:0; color:var(--ink); font-size:11px; }
-/* TSK-05-01: filter-bar — sticky top, z-index 70 (below slide-panel:90, trow-tooltip:100) */
+/* TSK-05-01: filter-bar — sticky top, z-index 70 (below slide-panel:90, info-popover:100) */
 .filter-bar{
   position:sticky;
   top:0;
@@ -3002,9 +3052,9 @@ def _encode_state_summary_attr(summary: dict) -> str:
     return html.escape(raw, quote=True)
 
 
-def _trow_tooltip_skeleton() -> str:
-    """body 직계에 1회 주입하는 trow 툴팁 DOM 스켈레톤 (TSK-02-03)."""
-    return '<div id="trow-tooltip" role="tooltip" hidden></div>'
+def _trow_info_popover_skeleton() -> str:
+    """body 직계에 1회 주입하는 싱글톤 팝오버 DOM 스켈레톤 (TSK-04-02)."""
+    return '<div id="trow-info-popover" class="info-popover" role="dialog" hidden></div>'
 
 
 def _render_task_row_v2(item, running_ids: set, failed_ids: set, lang: str = "ko") -> str:
@@ -3066,6 +3116,11 @@ def _render_task_row_v2(item, running_ids: set, failed_ids: set, lang: str = "ko
         ' aria-label="Expand" title="Expand">↗</button>'
     )
 
+    info_btn = (
+        '<button class="info-btn" type="button" aria-label="상세" aria-expanded="false"'
+        ' aria-controls="trow-info-popover">ⓘ</button>'
+    )
+
     _state_summary_encoded = _encode_state_summary_attr(_build_state_summary_json(item))
 
     return (
@@ -3080,6 +3135,7 @@ def _render_task_row_v2(item, running_ids: set, failed_ids: set, lang: str = "ko
         f'  <div class="elapsed">{_esc(elapsed_display)}</div>\n'
         f'  <div class="retry">×{rc}</div>\n'
         f'  <div class="flags">{flags_inner}</div>\n'
+        f'  {info_btn}\n'
         f'  {expand_btn}\n'
         '</div>'
     )
@@ -3376,7 +3432,6 @@ def _render_pane_row(pane, preview_lines: "Optional[str]" = "") -> str:
     pane_id_raw = _pane_attr(pane, "pane_id", "")
     pane_id_esc = _esc(pane_id_raw)
     pane_id_q = quote(pane_id_raw, safe="")
-    pane_idx = _esc(_pane_attr(pane, "pane_index", ""))
     cmd = _esc(_pane_attr(pane, "pane_current_command", ""))
     pid = _esc(_pane_attr(pane, "pane_pid", ""))
     window_name = _esc(_pane_attr(pane, "window_name", ""))
@@ -3443,7 +3498,7 @@ def _section_team(panes, heading: "Optional[str]" = None) -> str:
                 pane,
                 preview_lines=(
                     None if too_many
-                    else _pane_last_n_lines(_pane_attr(pane, "pane_id", ""))
+                    else _pane_last_n_lines(_pane_attr(pane, "pane_id", ""), n=_PANE_PREVIEW_LINES)
                 ),
             )
             for pane in groups[window_name]
@@ -4292,15 +4347,13 @@ _DASHBOARD_JS = """\
   window.filterBar={currentFilters:currentFilters,matchesRow:matchesRow,applyFilters:applyFilters,syncUrl:syncUrl,loadFiltersFromUrl:loadFiltersFromUrl};
 })();
 
-/* TSK-02-03: Task hover tooltip — setupTaskTooltip IIFE */
-/* TSK-02-05: renderPhaseModels 확장 추가 */
-(function setupTaskTooltip(){
-  var tip=document.getElementById('trow-tooltip');
-  if(!tip)return;
-  var _timer=null;
-  var _current=null;
+/* TSK-04-02: Task 팝오버 — setupInfoPopover IIFE (hover 제거 + ⓘ 클릭 + 위쪽 배치 + 폴백) */
+(function setupInfoPopover(){
+  var pop=document.getElementById('trow-info-popover');
+  if(!pop)return;
+  var openBtn=null;
 
-  /* TSK-02-05: phase model 4행 <dl> 렌더러 */
+  /* phase model 4행 <dl> 렌더러 */
   function renderPhaseModels(pm,escalated,retry_count){
     if(!pm)return null;
     var dl=document.createElement('dl');
@@ -4320,7 +4373,7 @@ _DASHBOARD_JS = """\
     return dl;
   }
 
-  function renderTooltipHtml(data){
+  function renderInfoPopoverHtml(data){
     var dl=document.createElement('dl');
     function row(label,value){
       var dt=document.createElement('dt');dt.textContent=label;
@@ -4340,7 +4393,6 @@ _DASHBOARD_JS = """\
         dl.appendChild(dd2);
       });
     }
-    /* TSK-02-05: phase models section */
     var pmDl=renderPhaseModels(data.phase_models,data.escalated,data.retry_count);
     var frag=document.createDocumentFragment();
     frag.appendChild(dl);
@@ -4348,45 +4400,76 @@ _DASHBOARD_JS = """\
     return frag;
   }
 
-  function show(el,data){
-    tip.innerHTML='';
-    tip.appendChild(renderTooltipHtml(data));
-    var r=el.getBoundingClientRect();
-    var left=r.right+8;
-    if(left+420>window.innerWidth){left=r.left-428;}
-    tip.style.top=(r.top+window.scrollY)+'px';
-    tip.style.left=left+'px';
-    tip.hidden=false;
+  function positionPopover(btn,pop){
+    pop.style.visibility='hidden';
+    pop.hidden=false;
+    var r=btn.getBoundingClientRect();
+    var pw=pop.offsetWidth;
+    var ph=pop.offsetHeight;
+    pop.hidden=true;
+    pop.style.visibility='';
+    var top=r.top+window.scrollY-ph-8;
+    var placement='above';
+    if(top<window.scrollY+8){
+      top=r.bottom+window.scrollY+8;
+      placement='below';
+    }
+    var left=r.left+window.scrollX;
+    left=Math.max(8,Math.min(left,window.innerWidth-pw-8));
+    pop.style.top=top+'px';
+    pop.style.left=left+'px';
+    pop.setAttribute('data-placement',placement);
   }
 
-  function hide(){
-    clearTimeout(_timer);
-    _timer=null;
-    _current=null;
-    tip.hidden=true;
+  function close(){
+    if(!openBtn)return;
+    openBtn.setAttribute('aria-expanded','false');
+    pop.hidden=true;
+    openBtn=null;
   }
 
-  document.addEventListener('mouseenter',function(e){
-    var el=e.target&&e.target.closest?e.target.closest('.trow[data-state-summary]'):null;
-    if(!el){return;}
-    if(el===_current){return;}
-    clearTimeout(_timer);
-    _current=el;
-    _timer=setTimeout(function(){
-      var raw=el.getAttribute('data-state-summary');
+  /* delegated click handler */
+  document.addEventListener('click',function(e){
+    var btn=e.target&&e.target.closest?e.target.closest('.info-btn'):null;
+    if(btn){
+      e.stopPropagation();
+      if(openBtn===btn){
+        close();
+        return;
+      }
+      if(openBtn){close();}
+      var trow=btn.closest('.trow[data-state-summary]');
+      if(!trow){return;}
+      var raw=trow.getAttribute('data-state-summary');
       if(!raw){return;}
-      try{var data=JSON.parse(raw);}catch(err){return;}
-      show(el,data);
-    },300);
-  },true);
+      var data;
+      try{data=JSON.parse(raw);}catch(err){console.warn('trow-info-popover: JSON parse failed',err);return;}
+      pop.innerHTML='';
+      pop.appendChild(renderInfoPopoverHtml(data));
+      openBtn=btn;
+      positionPopover(btn,pop);
+      pop.hidden=false;
+      btn.setAttribute('aria-expanded','true');
+      /* guard: if openBtn detached (5s poll), silently close */
+      if(!document.contains(openBtn)){pop.hidden=true;openBtn=null;return;}
+      return;
+    }
+    /* outside click */
+    if(openBtn&&!pop.contains(e.target)){close();}
+  },false);
 
-  document.addEventListener('mouseleave',function(e){
-    var el=e.target&&e.target.closest?e.target.closest('.trow[data-state-summary]'):null;
-    if(!el){return;}
-    hide();
-  },true);
+  /* ESC — focus restore */
+  document.addEventListener('keydown',function(e){
+    if(e.key==='Escape'&&openBtn){
+      var btn=openBtn;
+      close();
+      btn&&btn.focus();
+    }
+  },false);
 
-  window.addEventListener('scroll',function(){hide();},true);
+  /* scroll / resize — auto close */
+  window.addEventListener('scroll',function(){close();},true);
+  window.addEventListener('resize',function(){close();},false);
 })();"""
 
 
@@ -4743,7 +4826,7 @@ def render_dashboard(model: dict, lang: str = "ko", subproject: str = "all") -> 
         '<body>\n',
         body, "\n",
         _drawer_skeleton(), "\n",
-        _trow_tooltip_skeleton(), "\n",
+        _trow_info_popover_skeleton(), "\n",
         f'<style>{_task_panel_css()}</style>\n',
         f'<script id="dashboard-js">{_DASHBOARD_JS}</script>\n',
         f'<script id="task-panel-js">{_task_panel_js()}</script>\n',

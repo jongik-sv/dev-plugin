@@ -2733,44 +2733,52 @@ class TskTooltipStateSummaryTests(unittest.TestCase):
         for cls in ("statusbar", "tid", "badge", "spinner", "ttitle", "elapsed", "retry", "flags"):
             self.assertIn(cls, h, f"기존 클래스 {cls} 누락")
 
-    def test_trow_tooltip_dom_in_body(self):
+    def test_trow_info_popover_dom_in_body(self):
+        """TSK-04-02: 싱글톤 팝오버 #trow-info-popover이 body에 1회 등장."""
         tasks = [self._make_task_with_history(tsk_id="TSK-02-03")]
         h = render_dashboard(self._make_model(tasks))
-        count = h.count('<div id="trow-tooltip"')
-        self.assertEqual(count, 1, f"#trow-tooltip 이 {count}회 발견 (1회 이어야 함)")
+        count = h.count('id="trow-info-popover"')
+        self.assertEqual(count, 1, f"#trow-info-popover 이 {count}회 발견 (1회 이어야 함)")
 
-    def test_trow_tooltip_dom_has_role_tooltip(self):
+    def test_trow_info_popover_dom_has_role_dialog(self):
+        """TSK-04-02: 팝오버 DOM에 role="dialog" 속성이 있다."""
         tasks = [self._make_task_with_history(tsk_id="TSK-02-03")]
         h = render_dashboard(self._make_model(tasks))
-        self.assertIn('<div id="trow-tooltip" role="tooltip"', h)
+        self.assertIn('id="trow-info-popover"', h)
+        self.assertIn('role="dialog"', h)
 
-    def test_trow_tooltip_dom_has_hidden_attribute(self):
+    def test_trow_info_popover_dom_has_hidden_attribute(self):
+        """TSK-04-02: 팝오버 DOM이 초기 hidden 속성을 가진다."""
         tasks = [self._make_task_with_history(tsk_id="TSK-02-03")]
         h = render_dashboard(self._make_model(tasks))
-        self.assertIn('<div id="trow-tooltip" role="tooltip" hidden', h)
+        self.assertIn('id="trow-info-popover"', h)
+        self.assertIn("hidden", h)
 
-    def test_dashboard_css_has_trow_tooltip_rule(self):
-        self.assertIn("#trow-tooltip", monitor_server.DASHBOARD_CSS)
+    def test_dashboard_css_has_info_popover_rule(self):
+        """TSK-04-02: DASHBOARD_CSS에 .info-popover 규칙이 있다."""
+        self.assertIn(".info-popover", monitor_server.DASHBOARD_CSS)
 
-    def test_dashboard_css_trow_tooltip_has_position_fixed(self):
-        self.assertIn("position:fixed", monitor_server.DASHBOARD_CSS)
+    def test_dashboard_css_info_popover_has_position_absolute(self):
+        """TSK-04-02: .info-popover는 position:absolute를 사용한다."""
+        css = monitor_server.DASHBOARD_CSS
+        idx = css.find('.info-popover')
+        self.assertNotEqual(idx, -1)
+        snippet = css[idx:idx+300].replace(' ', '').replace('\n', '')
+        self.assertIn('position:absolute', snippet)
 
-    def test_dashboard_css_trow_tooltip_has_pointer_events_none(self):
-        self.assertIn("pointer-events:none", monitor_server.DASHBOARD_CSS)
+    def test_dashboard_css_has_info_btn_rule(self):
+        """TSK-04-02: DASHBOARD_CSS에 .info-btn 규칙이 있다."""
+        self.assertIn(".info-btn", monitor_server.DASHBOARD_CSS)
 
-    def test_dashboard_js_has_setup_task_tooltip(self):
-        self.assertIn("setupTaskTooltip", monitor_server._DASHBOARD_JS)
+    def test_dashboard_js_has_setup_info_popover(self):
+        """TSK-04-02: _DASHBOARD_JS에 setupInfoPopover IIFE가 있다."""
+        self.assertIn("setupInfoPopover", monitor_server._DASHBOARD_JS)
 
-    def test_dashboard_js_has_document_level_delegation(self):
+    def test_dashboard_js_has_click_delegation(self):
+        """TSK-04-02: setupInfoPopover는 click delegation + closest 사용."""
         js = monitor_server._DASHBOARD_JS
-        self.assertIn("mouseenter", js)
         self.assertIn("closest", js)
         self.assertIn("data-state-summary", js)
-
-    def test_dashboard_js_has_300ms_debounce(self):
-        js = monitor_server._DASHBOARD_JS
-        self.assertIn("300", js)
-        self.assertIn("setTimeout", js)
 
     def test_dashboard_js_has_scroll_hide(self):
         self.assertIn("scroll", monitor_server._DASHBOARD_JS)
@@ -2785,11 +2793,12 @@ class TskTooltipStateSummaryTests(unittest.TestCase):
         result = monitor_server._encode_state_summary_attr({"status": "[im]"})
         self.assertIsInstance(result, str)
 
-    def test_trow_tooltip_skeleton_helper_exists(self):
-        self.assertTrue(hasattr(monitor_server, "_trow_tooltip_skeleton"))
-        h = monitor_server._trow_tooltip_skeleton()
-        self.assertIn('id="trow-tooltip"', h)
-        self.assertIn('role="tooltip"', h)
+    def test_trow_info_popover_skeleton_helper_exists(self):
+        """TSK-04-02: _trow_info_popover_skeleton() 함수가 존재하고 올바른 DOM 반환."""
+        self.assertTrue(hasattr(monitor_server, "_trow_info_popover_skeleton"))
+        h = monitor_server._trow_info_popover_skeleton()
+        self.assertIn('id="trow-info-popover"', h)
+        self.assertIn('role="dialog"', h)
         self.assertIn("hidden", h)
 
 

@@ -60,11 +60,11 @@ class TestPaneLastNLines(unittest.TestCase):
         self.assertIsNotNone(fn, "_pane_last_n_lines 함수가 있어야 합니다.")
 
     def test_returns_last_3_lines(self):
-        """5줄 중 마지막 3줄을 반환해야 함"""
+        """5줄 중 마지막 3줄을 반환해야 함 (n=3 명시)"""
         fn = self._fn()
         output = "line1\nline2\nline3\nline4\nline5"
         with mock.patch.object(self.ms, "capture_pane", return_value=output):
-            result = fn("%1")
+            result = fn("%1", n=3)
         self.assertEqual(result, "line3\nline4\nline5")
 
     def test_returns_all_lines_when_less_than_n(self):
@@ -76,12 +76,12 @@ class TestPaneLastNLines(unittest.TestCase):
         self.assertEqual(result, "line1\nline2")
 
     def test_strips_trailing_blank_lines(self):
-        """뒤쪽 공백-only 줄을 제거한 뒤 tail n줄 반환"""
+        """뒤쪽 공백-only 줄을 제거한 뒤 tail n줄 반환 (n=3 명시)"""
         fn = self._fn()
         # line3, line4, line5 뒤에 공백 줄 3개
         output = "line1\nline2\nline3\nline4\nline5\n  \n\n "
         with mock.patch.object(self.ms, "capture_pane", return_value=output):
-            result = fn("%1")
+            result = fn("%1", n=3)
         # 공백 줄 제거 후 [line1..line5] 중 마지막 3줄
         self.assertEqual(result, "line3\nline4\nline5")
 
@@ -352,9 +352,9 @@ class TestPanePreviewCss(unittest.TestCase):
         self.assertIn(".pane-preview", css)
 
     def test_pane_preview_max_height(self):
-        """.pane-preview에 max-height: 4.5em 적용"""
+        """.pane-preview에 max-height: 9em 적용 (TSK-04-03: v4 4.5em → 9em)"""
         css = getattr(self.ms, "DASHBOARD_CSS", "")
-        self.assertIn("4.5em", css)
+        self.assertIn("9em", css)
 
     def test_pane_preview_empty_class_exists(self):
         """.pane-preview.empty 클래스가 CSS에 존재해야 함"""
