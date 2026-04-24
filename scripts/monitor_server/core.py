@@ -199,7 +199,7 @@ _ANSI_RE = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
 # tmux scrollback depth passed to ``capture-pane -S``. Negative = lines from bottom.
 _CAPTURE_PANE_SCROLLBACK = "-500"
 
-# TSK-04-03 / FR-04: pane-preview last-N lines — single source of truth shared by
+# pane-preview last-N lines — single source of truth shared by
 # ``_pane_last_n_lines`` default, ``_section_team`` call-site, CSS ``max-height``
 # (1.5em * 6 = 9em), and the ``::before`` "last 6 lines" label.
 _PANE_PREVIEW_LINES = 6
@@ -213,7 +213,7 @@ _CAPTURE_PANE_TIMEOUT = 3
 _AGENT_POOL_DIR_PREFIX = "agent-pool-signals-"
 _AGENT_POOL_SCOPE_PREFIX = "agent-pool:"
 
-# TSK-01-01: WP-scoped signal task_id prefix pattern (e.g. "WP-01-").
+# WP-scoped signal task_id prefix pattern (e.g. "WP-01-").
 _WP_SIGNAL_PREFIX_RE = re.compile(r"^WP-\d{2}-")
 
 # wp-progress-spinner: WP 레벨 busy 감지 패턴 (^WP-\d{2}$).
@@ -606,8 +606,8 @@ class WorkItem:
     wp_id: Optional[str] = None
     depends: List[str] = field(default_factory=list)
     error: Optional[str] = None
-    model: Optional[str] = None  # TSK-02-05: wbs.md `- model:` 필드
-    domain: Optional[str] = None  # TSK-05-01: wbs.md `- domain:` 필드
+    model: Optional[str] = None  # wbs.md `- model:` 필드
+    domain: Optional[str] = None  # wbs.md `- domain:` 필드
 
 
 def _cap_error(text: Optional[str]) -> str:
@@ -1229,7 +1229,7 @@ _I18N: dict[str, dict[str, str]] = {
         "subagents": "서브 에이전트 (agent-pool)",
         "live_activity": "실시간 활동",
         "dep_graph": "의존성 그래프",
-        # TSK-04-04: dep-graph summary chip labels
+        # dep-graph summary chip labels
         "dep_stat_total":    "총",
         "dep_stat_done":     "완료",
         "dep_stat_running":  "진행",
@@ -1237,7 +1237,7 @@ _I18N: dict[str, dict[str, str]] = {
         "dep_stat_failed":   "실패",
         "dep_stat_bypassed": "바이패스",
         "dep_wheel_zoom":    "휠 줌",
-        # TSK-02-01: DDTR phase badge labels (ko/en same label — keys separated for i18n extensibility)
+        # DDTR phase badge labels (ko/en same label — keys separated for i18n extensibility)
         "phase_design":  "Design",
         "phase_build":   "Build",
         "phase_test":    "Test",
@@ -1253,7 +1253,7 @@ _I18N: dict[str, dict[str, str]] = {
         "subagents": "Subagents (agent-pool)",
         "live_activity": "Live Activity",
         "dep_graph": "Dependency Graph",
-        # TSK-04-04: dep-graph summary chip labels
+        # dep-graph summary chip labels
         "dep_stat_total":    "Total",
         "dep_stat_done":     "Done",
         "dep_stat_running":  "Running",
@@ -1261,7 +1261,7 @@ _I18N: dict[str, dict[str, str]] = {
         "dep_stat_failed":   "Failed",
         "dep_stat_bypassed": "Bypassed",
         "dep_wheel_zoom":    "Wheel zoom",
-        # TSK-02-01: DDTR phase badge labels (ko/en same label — keys separated for i18n extensibility)
+        # DDTR phase badge labels (ko/en same label — keys separated for i18n extensibility)
         "phase_design":  "Design",
         "phase_build":   "Build",
         "phase_test":    "Test",
@@ -1292,7 +1292,7 @@ def _t(lang: str, key: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# TSK-02-01: DDTR phase badge helpers
+# DDTR phase badge helpers
 # ---------------------------------------------------------------------------
 
 # Maps status code / virtual keys → i18n key in _I18N.
@@ -2703,7 +2703,7 @@ def _retry_count(item) -> int:
 
 
 # ---------------------------------------------------------------------------
-# TSK-02-05: DDTR phase model helpers
+# DDTR phase model helpers
 # ---------------------------------------------------------------------------
 
 def _MAX_ESCALATION() -> int:
@@ -2933,7 +2933,7 @@ def _section_header(model: dict, lang: str = "ko", subproject: str = "") -> str:
 
 
 # ---------------------------------------------------------------------------
-# TSK-01-02: KPI helpers + sticky header + KPI section
+# KPI helpers + sticky header + KPI section
 # ---------------------------------------------------------------------------
 
 _SPARK_COLORS = {
@@ -3371,7 +3371,7 @@ def _build_state_summary_json(item) -> dict:
         }
         for e in history_tail[-3:]
     ]
-    # TSK-02-05: model chip + escalation badge fields
+    # model chip + escalation badge fields
     item_model = getattr(item, "model", None) or "sonnet"
     rc = _retry_count(item)
     escalated = rc >= _MAX_ESCALATION()
@@ -3450,7 +3450,7 @@ def _render_task_row_v2(item, running_ids: set, failed_ids: set, lang: str = "ko
     elapsed_raw = _format_elapsed(item, lang=lang)
     elapsed_display = elapsed_raw if elapsed_raw != "-" else "—"
 
-    # TSK-02-05: escalation flag (⚡) — prepend before bypass flag
+    # escalation flag (⚡) — prepend before bypass flag
     rc = _retry_count(item)
     escalated = rc >= _MAX_ESCALATION()
     escalation_span = (
@@ -3460,17 +3460,17 @@ def _render_task_row_v2(item, running_ids: set, failed_ids: set, lang: str = "ko
     bypass_span = '<span class="flag f-crit">bypass</span>' if bypassed else ""
     flags_inner = escalation_span + bypass_span
 
-    # TSK-02-05: model chip — inserted after clean_title in ttitle cell
+    # model chip — inserted after clean_title in ttitle cell
     item_model_raw = getattr(item, "model", None) or "sonnet"
     model_esc = _esc(item_model_raw)
     model_chip = f'<span class="model-chip" data-model="{model_esc}">{model_esc}</span>'
 
-    # TSK-05-01: data-domain attribute — used by client-side filter matchesRow()
+    # data-domain attribute — used by client-side filter matchesRow()
     domain_val = _esc(getattr(item, "domain", None) or "")
 
     clean_title = _esc(_clean_title(title))
 
-    # TSK-04-02 FR-01: ⓘ info button — opens singleton #trow-info-popover on click.
+    # ⓘ info button — opens singleton #trow-info-popover on click.
     info_btn = (
         '<button class="info-btn" type="button"'
         ' aria-label="상세"'
@@ -4088,7 +4088,7 @@ def _section_phase_history(tasks, features) -> str:
 
 
 # ---------------------------------------------------------------------------
-# TSK-03-04: Dependency Graph section (SSR skeleton + vendor scripts)
+# Dependency Graph section (SSR skeleton + vendor scripts)
 # ---------------------------------------------------------------------------
 
 
@@ -4108,7 +4108,7 @@ def _section_dep_graph(lang: str = "ko", subproject: str = "all") -> str:
     sp_esc = html.escape(subproject or "all", quote=True)
     heading = _t(lang, "dep_graph")
 
-    # TSK-04-04: SSR chip markup with i18n labels.
+    # SSR chip markup with i18n labels.
     # graph-client.js:updateSummary uses [data-stat] selector — tag change
     # (<span>→<b>) is intentional and selector-compatible.
     _STAT_STATES = ("total", "done", "running", "pending", "failed", "bypassed")
@@ -4121,7 +4121,7 @@ def _section_dep_graph(lang: str = "ko", subproject: str = "all") -> str:
     summary_html = f'<aside id="dep-graph-summary" class="dep-graph-summary">{chips}</aside>'
 
     wheel_label = html.escape(_t(lang, "dep_wheel_zoom"))
-    # TSK-03-03: Critical Path 항목을 Failed 와 별도 <li>로 분리. <div>/<span> → <ul>/<li> 전환.
+    # Critical Path 항목을 Failed 와 별도 <li>로 분리. <div>/<span> → <ul>/<li> 전환.
     legend_html = (
         '<ul id="dep-graph-legend" class="dep-graph-legend">'
         '<li class="legend-done leg-item" style="color:#22c55e">&#9632; done</li>'
@@ -4171,7 +4171,7 @@ def _section_dep_graph(lang: str = "ko", subproject: str = "all") -> str:
 
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
-# TSK-01-04: Live Activity render functions
+# Live Activity render functions
 # ---------------------------------------------------------------------------
 
 _KNOWN_PHASES = {"dd", "im", "ts", "xx"}
@@ -5018,7 +5018,7 @@ def _wrap_with_data_section(section_html: str, key: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# TSK-01-02: Subproject tabs nav section
+# Subproject tabs nav section
 # ---------------------------------------------------------------------------
 
 
@@ -5142,10 +5142,10 @@ def _build_dashboard_body(s: dict) -> str:
     sticky/backdrop effect aligns with the KPI strip and grid columns.
     """
     wbs_landing_pad = "<a id='wbs' aria-hidden='true' tabindex='-1'></a>\n"
-    # TSK-01-02: subproject-tabs is optional (empty string in legacy mode)
+    # subproject-tabs is optional (empty string in legacy mode)
     tabs_html = s.get("subproject-tabs", "")
 
-    # TSK-05-01: filter-bar — sticky header below tabs, above kpi
+    # filter-bar — sticky header below tabs, above kpi
     filter_bar_html = s.get("filter-bar", "")
 
     return "".join([
@@ -5232,7 +5232,7 @@ def render_dashboard(model: dict, lang: str = "ko", subproject: str = "all") -> 
 
     # Build each section HTML.  ``header`` is excluded from data-section
     # injection (it is nav metadata, not a JS partial-update target).
-    # TSK-01-02: subproject-tabs is also excluded from wrap (it has its own
+    # subproject-tabs is also excluded from wrap (it has its own
     # data-section already via _section_subproject_tabs).
     header_html = _section_header(model, lang=lang, subproject=subproject)
     sticky_header_html = (
@@ -5241,14 +5241,14 @@ def render_dashboard(model: dict, lang: str = "ko", subproject: str = "all") -> 
         '</div>'
     )
     tabs_html = _section_subproject_tabs(model)
-    # TSK-05-01: distinct_domains for filter-bar domain select options
+    # distinct_domains for filter-bar domain select options
     distinct_domains = sorted({
         getattr(t, "domain", None) or ""
         for t in tasks
         if getattr(t, "domain", None)
     })
     filter_bar_html = _section_filter_bar(lang, distinct_domains)
-    # TSK-04-03: docs_dir에서 WP별 merge-status 일괄 로드
+    # docs_dir에서 WP별 merge-status 일괄 로드
     _docs_dir = model.get("docs_dir") or model.get("subproject") or ""
     _wp_merge_state = _load_wp_merge_states(_docs_dir) if _docs_dir else {}
     # wp-progress-spinner: shared_signals에서 WP 레벨 busy 상태 추출
@@ -6410,7 +6410,7 @@ def _task_panel_css() -> str:
         "padding:8px;margin:4px 0 0;font-family:var(--font-mono,monospace);}"
         ".log-empty{font-size:12px;color:var(--ink-3,#585b70);padding:4px 0;}"
         ".log-trunc{font-size:10px;color:var(--ink-3,#585b70);margin-left:8px;}"
-        # TSK-04-03: merge-badge + merge preview panel CSS
+        # merge-badge + merge preview panel CSS
         ".merge-badge{display:inline-flex;align-items:center;gap:4px;"
         "padding:2px 8px;border-radius:12px;cursor:pointer;"
         "font-size:11px;font-weight:600;border:1px solid transparent;"
@@ -6426,7 +6426,7 @@ def _task_panel_css() -> str:
         ".merge-conflict-file li.disabled{color:var(--ink-3,#585b70);}"
         ".merge-conflict-file li.disabled code{opacity:.6;}"
         ".merge-hunk-preview{max-height:120px;overflow:auto;font-size:11px;font-family:var(--font-mono,monospace);background:var(--bg-1,#181825);border-radius:4px;padding:6px;white-space:pre-wrap;word-break:break-all;margin-top:4px;}"
-        # TSK-05-01 FR-02: EXPAND 패널 sticky progress header
+        # EXPAND 패널 sticky progress header
         ".progress-header{position:sticky;top:var(--panel-header-h,56px);z-index:20;"
         "background:var(--bg-2,#1e1e2e);"
         "border-bottom:1px solid var(--border,#313244);"
@@ -6910,7 +6910,7 @@ def _filter_signals_by_project(
 
 
 # ---------------------------------------------------------------------------
-# TSK-01-01: /api/state 쿼리 파라미터 헬퍼 (순수 함수 — 테스트 용이)
+# /api/state 쿼리 파라미터 헬퍼 (순수 함수 — 테스트 용이)
 # ---------------------------------------------------------------------------
 
 
@@ -7074,7 +7074,7 @@ def _build_render_state(
     )
     panes = list_tmux_panes()
 
-    # TSK-01-01 / TSK-01-02: discover subprojects from original docs_dir root
+    # discover subprojects from original docs_dir root
     # (docs_dir may already be narrowed to subproject; use project_root to
     # find the original docs root — but for discover we need the top-level
     # docs dir, which is stored in the server's docs_dir attribute).
@@ -7093,7 +7093,7 @@ def _build_render_state(
         "shared_signals": shared_signals,
         "agent_pool_signals": agent_pool_signals,
         "tmux_panes": panes,
-        # TSK-01-02: new fields
+        # new fields
         "project_name": project_name,
         "subproject": subproject,
         "available_subprojects": available_subprojects,
@@ -7311,7 +7311,7 @@ def _handle_api_state(
             or os.path.basename(project_root)
             or ""
         )
-        # TSK-05-01: distinct_domains for filter-bar domain select
+        # distinct_domains for filter-bar domain select
         _wbs_tasks: List[WorkItem] = payload.get("wbs_tasks") or []
         distinct_domains: List[str] = sorted({
             getattr(t, "domain", None) or ""
@@ -7398,15 +7398,15 @@ class MonitorHandler(BaseHTTPRequestHandler):
         elif _is_static_path(path):
             _handle_static(self, path)
         elif _is_api_graph_path(self.path):
-            from monitor_server import api as _api  # TSK-02-02
+            from monitor_server import api as _api
             _api.handle_graph(self, {}, None)
         elif _is_api_state_path(self.path):
             self._route_api_state()
         elif _is_api_task_detail_path(self.path):
-            from monitor_server import api as _api  # TSK-02-02
+            from monitor_server import api as _api
             _api.handle_task_detail(self, {}, None)
         elif _is_api_merge_status_path(self.path):
-            from monitor_server import api as _api  # TSK-02-02
+            from monitor_server import api as _api
             _api.handle_merge_status(self, {}, None)
         elif _is_pane_api_path(path):
             pane_id = _extract_pane_id(path, _API_PANE_PATH_PREFIX)
@@ -7559,7 +7559,7 @@ class MonitorHandler(BaseHTTPRequestHandler):
         server = getattr(self, "server", None)
         no_tmux = bool(getattr(server, "no_tmux", False))
         _tmux_fn = (lambda: None) if no_tmux else list_tmux_panes
-        from monitor_server import api as _api  # TSK-02-02
+        from monitor_server import api as _api
         _api.handle_state(self, {}, None, list_tmux_panes=_tmux_fn)
 
     def _route_not_found(self) -> None:
@@ -7710,7 +7710,7 @@ def main(argv: Optional[List[str]] = None) -> None:
     server.max_pane_lines = args.max_pane_lines
     server.refresh_seconds = args.refresh_seconds
     server.no_tmux = args.no_tmux
-    server.plugin_root = _resolve_plugin_root()  # TSK-03-03: static file serving
+    server.plugin_root = _resolve_plugin_root()  # static file serving
 
     _setup_signal_handler(server, pid_path)
 
