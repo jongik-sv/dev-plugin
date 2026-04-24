@@ -893,6 +893,75 @@ Some content.
 
 
 # ---------------------------------------------------------------------------
+# TSK-05-01: /api/task-detail schema regression test (AC-FR02-e / AC-13)
+# ---------------------------------------------------------------------------
+
+class TestApiTaskDetailSchemaUnchanged(unittest.TestCase):
+    """/api/task-detail 응답 필드 집합이 v4 기준 8개와 동일한지 확인 (AC-FR02-e / AC-13).
+
+    schema 계약: {task_id, title, wp_id, source, wbs_section_md, state, artifacts, logs}
+    신규 필드 추가 금지 — 이 테스트가 실패하면 /api/task-detail 스키마가 변경된 것이다.
+    """
+
+    _EXPECTED_KEYS = frozenset(
+        {"task_id", "title", "wp_id", "source", "wbs_section_md", "state", "artifacts", "logs"}
+    )
+
+    _WBS_MINIMAL = """\
+## WP-05: Monitor v5
+
+### TSK-05-01: FR-02 EXPAND 패널 sticky 헤더
+- category: development
+- domain: fullstack
+- status: [dd]
+Some content.
+
+### TSK-05-99: Sentinel
+- status: [ ]
+"""
+
+    def setUp(self):
+        if not hasattr(monitor_server, "_handle_api_task_detail"):
+            self.skipTest("_handle_api_task_detail not yet implemented")
+
+    def _call_api(self, task_id: str = "TSK-05-01") -> dict:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            docs_dir = os.path.join(tmpdir, "monitor-v5")
+            os.makedirs(docs_dir, exist_ok=True)
+            with open(os.path.join(docs_dir, "wbs.md"), "w", encoding="utf-8") as f:
+                f.write(self._WBS_MINIMAL)
+            handler = _FakeHandler(
+                path=f"/api/task-detail?task={task_id}&subproject=monitor-v5",
+                docs_dir=tmpdir,
+            )
+            monitor_server._handle_api_task_detail(handler)
+        self.assertEqual(handler._response_code, 200)
+        return handler.response_body()
+
+    def test_api_task_detail_schema_unchanged(self):
+        """응답 키 집합이 v4 기준 8개와 정확히 일치한다 — 신규/제거 필드 없음."""
+        body = self._call_api()
+        actual_keys = frozenset(body.keys())
+        self.assertEqual(
+            actual_keys,
+            self._EXPECTED_KEYS,
+            f"Schema mismatch!\n  extra keys:   {actual_keys - self._EXPECTED_KEYS}\n  missing keys: {self._EXPECTED_KEYS - actual_keys}",
+        )
+
+    def test_api_task_detail_no_extra_fields(self):
+        """신규 필드가 추가되지 않았다 (expected 이외의 key가 없다)."""
+        body = self._call_api()
+        extra = frozenset(body.keys()) - self._EXPECTED_KEYS
+        self.assertFalse(extra, f"Unexpected new fields in /api/task-detail response: {extra}")
+
+    def test_api_task_detail_no_missing_fields(self):
+        """기존 필드가 제거되지 않았다 (expected의 key가 모두 존재한다)."""
+        body = self._call_api()
+        missing = self._EXPECTED_KEYS - frozenset(body.keys())
+        self.assertFalse(missing, f"Missing fields in /api/task-detail response: {missing}")
+
+
+# ---------------------------------------------------------------------------
 # E2E placeholder — tests here require a live server (run in dev-test phase)
 # ---------------------------------------------------------------------------
 

@@ -5860,6 +5860,26 @@ def _task_panel_css() -> str:
         ".merge-conflict-file li.disabled{color:var(--ink-3,#585b70);}"
         ".merge-conflict-file li.disabled code{opacity:.6;}"
         ".merge-hunk-preview{max-height:120px;overflow:auto;font-size:11px;font-family:var(--font-mono,monospace);background:var(--bg-1,#181825);border-radius:4px;padding:6px;white-space:pre-wrap;word-break:break-all;margin-top:4px;}"
+        # TSK-05-01: progress-header sticky + ph-badge / ph-meta / ph-history
+        ".progress-header{position:sticky;top:0;z-index:2;background:var(--bg-2,#1e1e2e);"
+        "border-bottom:1px solid var(--ink-1,#313244);padding:10px 16px 8px;margin:-16px -16px 12px;}"
+        ".ph-badge{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;"
+        "border-radius:12px;font-size:12px;font-weight:700;border:1px solid transparent;"
+        "background:var(--bg-1,#181825);color:var(--ink-3,#cdd6f4);}"
+        ".ph-badge[data-phase='dd']{background:var(--phase-dd,#89b4fa20);color:var(--phase-dd,#89b4fa);border-color:var(--phase-dd,#89b4fa);}"
+        ".ph-badge[data-phase='im']{background:var(--phase-im,#cba6f720);color:var(--phase-im,#cba6f7);border-color:var(--phase-im,#cba6f7);}"
+        ".ph-badge[data-phase='ts']{background:var(--phase-ts,#a6e3a120);color:var(--phase-ts,#a6e3a1);border-color:var(--phase-ts,#a6e3a1);}"
+        ".ph-badge[data-phase='xx']{background:var(--phase-xx,#a6e3a120);color:var(--phase-xx,#a6e3a1);border-color:var(--phase-xx,#a6e3a1);}"
+        ".ph-badge[data-phase='failed']{background:var(--fail,#ef444420);color:var(--fail,#ef4444);border-color:var(--fail,#ef4444);}"
+        ".ph-badge[data-phase='bypass']{background:var(--run,#eab30820);color:var(--run,#eab308);border-color:var(--run,#eab308);}"
+        ".ph-badge[data-running='true'] .spinner{display:inline-block;}"
+        ".ph-meta{display:grid;grid-template-columns:auto 1fr;gap:2px 12px;font-size:11px;"
+        "color:var(--ink-3,#cdd6f4);margin:6px 0 0;padding:0;}"
+        ".ph-meta dt{color:var(--ink-3,#585b70);font-weight:600;white-space:nowrap;}"
+        ".ph-meta dd{margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}"
+        ".ph-history{list-style:none;padding:0;margin:6px 0 0;display:flex;gap:6px;flex-wrap:wrap;}"
+        ".ph-history li{font-size:10px;padding:2px 8px;border-radius:8px;background:var(--bg-1,#181825);"
+        "color:var(--ink-3,#585b70);border:1px solid var(--border,#313244);}"
     )
 
 
@@ -5916,13 +5936,46 @@ function renderLogs(logs){
   }
   return html+'<section class="panel-logs">'+sections+'</section>';
 }
+function renderTaskProgressHeader(state){
+  if(!state)return '';
+  var status=state.status||'';
+  var phase=status.replace(/[\[\]]/g,'').trim()||'pending';
+  var last=state.last||{};
+  var lastEvt=last.event||'';
+  var lastAt=last.at||'';
+  var elapsed=state.elapsed_seconds!=null?String(state.elapsed_seconds)+'s':'-';
+  var hist=state.phase_history||[];
+  var recent=hist.slice(-3).reverse();
+  var phaseCount=hist.length;
+  var isRunning=lastEvt&&/(_start|_running)$/.test(lastEvt);
+  var spinnerHtml=isRunning?'<span class="spinner" style="width:10px;height:10px;border-width:2px;"></span>':'';
+  var badgeHtml='<div class="ph-badge" data-phase="'+escapeHtml(phase)+'"'+(isRunning?' data-running="true"':'')+'>'+spinnerHtml+escapeHtml(status||'[ ]')+'</div>';
+  var metaHtml='<dl class="ph-meta">'
+    +'<dt>last event</dt><dd>'+escapeHtml(lastEvt||'-')+'</dd>'
+    +'<dt>at</dt><dd>'+escapeHtml(lastAt||'-')+'</dd>'
+    +'<dt>elapsed</dt><dd>'+escapeHtml(elapsed)+'</dd>'
+    +'<dt>phase steps</dt><dd>'+escapeHtml(String(phaseCount))+'</dd>'
+    +'</dl>';
+  var histHtml='';
+  if(recent.length>0){
+    histHtml='<ul class="ph-history">';
+    for(var i=0;i<recent.length;i++){
+      var h=recent[i];
+      var evtLabel=escapeHtml(h.event||'');
+      var evtAt=h.at?(' · '+escapeHtml(h.at.slice(0,16).replace('T',' '))):'';
+      histHtml+='<li>'+evtLabel+evtAt+'</li>';
+    }
+    histHtml+='</ul>';
+  }
+  return '<header class="progress-header">'+badgeHtml+metaHtml+histHtml+'</header>';
+}
 function openTaskPanel(taskId){
   var sp='all';try{var m=location.search.match(/[?&]subproject=([^&]+)/);if(m)sp=m[1];}catch(e){}
   fetch('/api/task-detail?task='+encodeURIComponent(taskId)+'&subproject='+encodeURIComponent(sp))
     .then(function(r){return r.json();}).then(function(data){
       var t=document.getElementById('task-panel-title');if(t)t.textContent=data.title||taskId;
       var b=document.getElementById('task-panel-body');
-      if(b)b.innerHTML=renderWbsSection(data.wbs_section_md||'')+renderStateJson(data.state||{})+renderArtifacts(data.artifacts||[])+renderLogs(data.logs||[]);
+      if(b)b.innerHTML=renderTaskProgressHeader(data.state||null)+renderWbsSection(data.wbs_section_md||'')+renderStateJson(data.state||{})+renderArtifacts(data.artifacts||[])+renderLogs(data.logs||[]);
       var p=document.getElementById('task-panel'),o=document.getElementById('task-panel-overlay');
       if(p){p.classList.add('open');p.dataset.panelMode='task';}if(o)o.removeAttribute('hidden');
     }).catch(function(e){console.error('task-panel error',e);});
