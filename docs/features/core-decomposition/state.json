@@ -1,0 +1,19 @@
+{
+  "name": "core-decomposition",
+  "status": "[dd]",
+  "last": {
+    "event": "design.ok",
+    "at": "2026-04-24T13:47:45Z"
+  },
+  "phase_history": [
+    {
+      "event": "design.ok",
+      "from": "[ ]",
+      "to": "[dd]",
+      "at": "2026-04-24T13:47:45Z",
+      "elapsed_seconds": 0
+    }
+  ],
+  "updated": "2026-04-24T13:47:45Z",
+  "started_at": "2026-04-24T13:47:45Z"
+}
