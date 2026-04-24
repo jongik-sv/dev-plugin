@@ -268,30 +268,31 @@ class TestRenderDashboardIncludesProgressHeader(unittest.TestCase):
     def _html(self) -> str:
         return monitor_server.render_dashboard(_empty_model(), lang="ko", subproject="all")
 
+    def _style_bundle(self) -> str:
+        return monitor_server.get_static_bundle("style.css").decode("utf-8")
+
+    def _app_bundle(self) -> str:
+        return monitor_server.get_static_bundle("app.js").decode("utf-8")
+
     def test_progress_header_css_in_dashboard(self):
-        """render_dashboard 출력에 .progress-header CSS 포함."""
-        html = self._html()
-        self.assertIn(".progress-header", html)
+        """TSK-01-02 후: style.css 번들에 .progress-header CSS 포함."""
+        self.assertIn(".progress-header", self._style_bundle())
 
     def test_render_task_progress_header_js_in_dashboard(self):
-        """render_dashboard 출력에 renderTaskProgressHeader JS 함수 포함."""
-        html = self._html()
-        self.assertIn("renderTaskProgressHeader", html)
+        """TSK-01-03 후: app.js 번들에 renderTaskProgressHeader 함수 포함."""
+        self.assertIn("renderTaskProgressHeader", self._app_bundle())
 
     def test_ph_badge_css_in_dashboard(self):
-        """render_dashboard 출력에 .ph-badge CSS 포함."""
-        html = self._html()
-        self.assertIn(".ph-badge", html)
+        """TSK-01-02 후: style.css 번들에 .ph-badge CSS 포함."""
+        self.assertIn(".ph-badge", self._style_bundle())
 
     def test_ph_meta_css_in_dashboard(self):
-        """render_dashboard 출력에 .ph-meta CSS 포함."""
-        html = self._html()
-        self.assertIn(".ph-meta", html)
+        """TSK-01-02 후: style.css 번들에 .ph-meta CSS 포함."""
+        self.assertIn(".ph-meta", self._style_bundle())
 
     def test_ph_history_in_dashboard(self):
-        """render_dashboard 출력에 ph-history 포함."""
-        html = self._html()
-        self.assertIn("ph-history", html)
+        """TSK-01-03 후: app.js 번들에 ph-history 참조 포함."""
+        self.assertIn("ph-history", self._app_bundle())
 
 
 # ---------------------------------------------------------------------------
