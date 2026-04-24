@@ -2907,6 +2907,7 @@ def _section_team(panes, heading: "Optional[str]" = None) -> str:
     return ""
 
 
+# moved to monitor_server.renderers.subagents [core-renderer-split:C1-3]
 _SUBAGENT_INFO = (
     '<p class="info">agent-pool subagents run inside the parent Claude session'
     ' — output capture is unavailable (signals only).</p>'
@@ -2914,20 +2915,14 @@ _SUBAGENT_INFO = (
 
 
 def _render_subagent_row(sig) -> str:
-    """Render a single agent-pool slot as a v3 .sub pill with data-state."""
+    _sub_mod = _c2b_load_renderer("subagents")
+    if _sub_mod is not None:
+        return _sub_mod._render_subagent_row(sig)
+    # fallback shim
     kind = getattr(sig, "kind", "")
     task_id = getattr(sig, "task_id", "")
-
-    # Map signal kind to data-state value.
-    # bypassed signals are semantically "done" (bypassed = completed with bypass)
-    state_map = {
-        "running": "running",
-        "done": "done",
-        "failed": "failed",
-        "bypassed": "done",
-    }
+    state_map = {"running": "running", "done": "done", "failed": "failed", "bypassed": "done"}
     data_state = state_map.get(kind, "pending")
-
     return (
         f'<span class="sub" data-state="{data_state}">'
         f'<span class="sw"></span>'
@@ -2938,24 +2933,10 @@ def _render_subagent_row(sig) -> str:
 
 
 def _section_subagents(signals, heading: "Optional[str]" = None) -> str:
-    """Subagent section: agent-pool signal slots grouped by scope.
-
-    TSK-02-02: heading 파라미터 추가 — i18n 지원.
-    """
-    heading = _resolve_heading("subagents", heading)
-    if not signals:
-        return _section_wrap(
-            "subagents",
-            heading,
-            f'  {_SUBAGENT_INFO}\n  <p class="empty">no agent-pool signals</p>',
-        )
-
-    pills = "\n".join(_render_subagent_row(sig) for sig in signals)
-    subs_body = (
-        f'  {_SUBAGENT_INFO}\n'
-        f'  <div class="panel"><div class="subs">\n{pills}\n  </div></div>'
-    )
-    return _section_wrap("subagents", heading, subs_body)
+    _sub_mod = _c2b_load_renderer("subagents")
+    if _sub_mod is not None:
+        return _sub_mod._section_subagents(signals, heading)
+    return ""
 
 
 def _status_class_for_phase(status_str: str) -> str:
@@ -6281,6 +6262,17 @@ except (ImportError, AttributeError):
             _render_pane_row = _c2b_team._render_pane_row  # type: ignore[assignment]
     except (ImportError, AttributeError):
         pass  # flat-load 컨텍스트에서 renderers 로드 불가 — thin wrapper 사용
+try:
+    from .renderers.subagents import _section_subagents, _render_subagent_row, _SUBAGENT_INFO  # noqa: F401,E402
+except (ImportError, AttributeError):
+    try:
+        _c2b_sub = _c2b_load_renderer("subagents")
+        if _c2b_sub is not None:
+            _section_subagents = _c2b_sub._section_subagents  # type: ignore[assignment]
+            _render_subagent_row = _c2b_sub._render_subagent_row  # type: ignore[assignment]
+            _SUBAGENT_INFO = _c2b_sub._SUBAGENT_INFO  # type: ignore[assignment]
+    except (ImportError, AttributeError):
+        pass  # flat-load 컨텍스트 — thin wrapper 사용
 # === /renderer facade ===
 
 

@@ -3,6 +3,8 @@
 TSK-02-01 커밋 3: _section_subagents 이전.
 monitor-server.py 대응: 원본 함수 제거 후 shim 라인으로 대체.
 
+core-renderer-split C1-3: _render_subagent_row + _SUBAGENT_INFO 본문 이전 (SSOT → 이 파일).
+
 순수 이전 — 동작 변경 0.
 """
 
@@ -11,12 +13,39 @@ from __future__ import annotations
 from typing import Optional
 
 from ._util import (
+    _esc,
     _section_wrap,
-    _empty_section,
     _resolve_heading,
-    _render_subagent_row,
-    _SUBAGENT_INFO,
 )
+
+_SUBAGENT_INFO = (
+    '<p class="info">agent-pool subagents run inside the parent Claude session'
+    ' — output capture is unavailable (signals only).</p>'
+)
+
+
+def _render_subagent_row(sig) -> str:
+    """Render a single agent-pool slot as a v3 .sub pill with data-state."""
+    kind = getattr(sig, "kind", "")
+    task_id = getattr(sig, "task_id", "")
+
+    # Map signal kind to data-state value.
+    # bypassed signals are semantically "done" (bypassed = completed with bypass)
+    state_map = {
+        "running": "running",
+        "done": "done",
+        "failed": "failed",
+        "bypassed": "done",
+    }
+    data_state = state_map.get(kind, "pending")
+
+    return (
+        f'<span class="sub" data-state="{data_state}">'
+        f'<span class="sw"></span>'
+        f'{_esc(task_id)}'
+        f'<span class="n">{_esc(kind if kind else "?")}</span>'
+        f'</span>'
+    )
 
 
 def _section_subagents(signals, heading: "Optional[str]" = None) -> str:
