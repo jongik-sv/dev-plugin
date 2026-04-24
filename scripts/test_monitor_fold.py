@@ -41,13 +41,26 @@ def _load_dashboard_js():
 
 
 def _load_server_source():
-    """monitor-server.py + monitor_server/core.py 전체 소스를 합쳐 반환한다.
+    """monitor-server.py + monitor_server/core.py + renderers/*.py 전체 소스를 합쳐 반환한다.
 
     TSK-02-03 이후 구현이 core.py로 이전되었으므로, 두 파일을 합친 소스로 검색해야
     기존 테스트가 함수 정의를 찾을 수 있다.
+    core-renderer-split 이후 일부 렌더러 함수가 renderers/ 하위 모듈로 이전되므로
+    renderers/*.py 도 포함한다.
     """
     _CORE_PATH = os.path.join(os.path.dirname(_SERVER_PATH), "monitor_server", "core.py")
+    _RENDERERS_DIR = os.path.join(os.path.dirname(_SERVER_PATH), "monitor_server", "renderers")
     parts = []
+    # renderers/*.py를 먼저 추가: 이관된 함수의 전체 본문이 core.py의 thin-wrapper보다
+    # 먼저 검색되도록 한다. (core-renderer-split 이후 SSOT는 renderers/*.py)
+    if os.path.isdir(_RENDERERS_DIR):
+        import glob as _glob
+        for rpath in sorted(_glob.glob(os.path.join(_RENDERERS_DIR, "*.py"))):
+            try:
+                with open(rpath, encoding="utf-8") as f:
+                    parts.append(f.read())
+            except OSError:
+                pass
     for path in (_SERVER_PATH, _CORE_PATH):
         try:
             with open(path, encoding="utf-8") as f:

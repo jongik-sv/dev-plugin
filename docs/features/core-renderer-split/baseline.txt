@@ -1,16 +1,18 @@
 # core-renderer-split baseline
 # 측정 일시: 2026-04-24
 # 서버: monitor-launcher.py --port 7321 --docs docs/monitor-v5
+# 측정 방법: rtk proxy curl -sS URL | md5sum (전체 바이트 기준)
 
 ## pytest baseline
 # 2 failed, 1997 passed, 176 skipped
 # FAILED scripts/test_monitor_task_expand_ui.py::TestTaskPanelCss::test_initial_right_negative
 # FAILED scripts/test_platform_smoke.py::SmokeTestBase::test_pane_polling_interval
 
-## HTML md5 baseline
-GET /                                 3aa4071bf0566ba88eca5651a0286da9
-GET /?subproject=all                  d8223ffda670bcac1357e273bb1e679f
+## HTML md5 baseline (rtk proxy curl 기준 — 전체 바이트)
+# 주의: GET / 과 GET /?subproject=all 은 동일 해시 (subproject 미지정 시 all 동일)
+GET /                                 d898b827f4bd1438dee8cff8151dde85
+GET /?subproject=all                  d898b827f4bd1438dee8cff8151dde85
 GET /?subproject=monitor-v5           0b1025063386e2b310a6c4cbfee4a1b5
 GET /?subproject=dev-plugin           a3472eb332b6019cf3338e318fefad16
-GET /api/state                        7662fb73ae9b45dbc33fa16706862442
-GET /api/graph                        df9db8e2f35521602237e9c92755153e
+GET /api/state                        f51a581badde1065ad527dbd0e107d68
+GET /api/graph                        7709edc8e45d63d99542681288a9316d
