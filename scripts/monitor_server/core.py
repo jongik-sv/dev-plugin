@@ -3443,43 +3443,12 @@ def _wrap_with_data_section(section_html: str, key: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+# moved to monitor_server.renderers.tabs [core-renderer-split:C2-5]
 def _section_subproject_tabs(model: dict) -> str:
-    """Render the subproject tabs nav bar (TSK-01-02).
-
-    Returns an empty string in legacy mode (``is_multi_mode=False``).
-    In multi mode returns a ``<nav class="subproject-tabs">`` element with
-    ``all`` + one link per subproject.
-
-    Current tab gets ``aria-current="page"`` and ``class="active"``.
-    Existing ``lang`` query parameter is preserved in each link.
-
-    Args:
-        model: render_state dict with ``is_multi_mode``, ``available_subprojects``,
-               ``subproject``, and optionally ``lang`` keys.
-
-    Returns:
-        HTML string (empty if legacy mode).
-    """
-    if not model.get("is_multi_mode"):
-        return ""
-
-    current_sp = model.get("subproject") or "all"
-    available = model.get("available_subprojects") or []
-    lang = model.get("lang") or ""
-    lang_qs = f"&lang={_esc(lang)}" if lang and lang != "ko" else ""
-
-    def _tab(sp: str) -> str:
-        href = f"?subproject={_esc(sp)}{lang_qs}"
-        if sp == current_sp:
-            return (
-                f'<a href="{href}" class="active" aria-current="page">'
-                f'{_esc(sp)}</a>'
-            )
-        return f'<a href="{href}">{_esc(sp)}</a>'
-
-    tabs = [_tab("all")] + [_tab(sp) for sp in available]
-    inner = " | ".join(tabs)
-    return f'<nav class="subproject-tabs" data-section="subproject-tabs">{inner}</nav>\n'
+    _tabs_mod = _c2b_load_renderer("tabs")
+    if _tabs_mod is not None:
+        return _tabs_mod._section_subproject_tabs(model)
+    return ""
 
 
 # moved to monitor_server.renderers.filterbar [core-renderer-split:C1-5]
@@ -5779,6 +5748,15 @@ except (ImportError, AttributeError):
         if _c2b_hist is not None:
             _section_phase_history = _c2b_hist._section_phase_history  # type: ignore[assignment]
             _status_class_for_phase = _c2b_hist._status_class_for_phase  # type: ignore[assignment]
+    except (ImportError, AttributeError):
+        pass
+try:
+    from .renderers.tabs import _section_subproject_tabs  # noqa: F401,E402
+except (ImportError, AttributeError):
+    try:
+        _c2b_tabs = _c2b_load_renderer("tabs")
+        if _c2b_tabs is not None:
+            _section_subproject_tabs = _c2b_tabs._section_subproject_tabs  # type: ignore[assignment]
     except (ImportError, AttributeError):
         pass
 # === /renderer facade ===
