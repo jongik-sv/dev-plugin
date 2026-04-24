@@ -416,18 +416,25 @@ class TestDepGraphUpdateSummaryPreserved(unittest.TestCase):
 _SERVER_PY = pathlib.Path(__file__).parent / "monitor-server.py"
 
 
-def _read_dashboard_css() -> str:
-    """monitor-server.py에서 DASHBOARD_CSS 원본 문자열을 추출한다.
+_CORE_PY = _SERVER_PY.parent / "monitor_server" / "core.py"
 
+
+def _read_dashboard_css() -> str:
+    """monitor-server.py 또는 monitor_server/core.py에서 DASHBOARD_CSS 원본 문자열을 추출한다.
+
+    TSK-02-03 이후 구현이 core.py로 이전되었으므로 두 파일을 모두 검색한다.
     _minify_css()로 압축되기 전 원본을 읽어 패턴 검증한다.
     삼중 따옴표 블록을 정규식으로 추출 — 첫 번째 DASHBOARD_CSS = \"\"\"...\"\"\".
     """
-    src = _SERVER_PY.read_text(encoding="utf-8")
-    # DASHBOARD_CSS = \"\"\"...\"\"\" 블록 추출
-    m = re.search(r'DASHBOARD_CSS\s*=\s*"""(.*?)"""', src, re.DOTALL)
-    if not m:
-        return ""
-    return m.group(1)
+    for path in (_SERVER_PY, _CORE_PY):
+        try:
+            src = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        m = re.search(r'DASHBOARD_CSS\s*=\s*"""(.*?)"""', src, re.DOTALL)
+        if m:
+            return m.group(1)
+    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -520,7 +527,11 @@ class TestDepGraphCanvasHeight640(unittest.TestCase):
     """
 
     def setUp(self):
+        # TSK-02-03: _section_dep_graph가 monitor_server/core.py로 이전되었으므로
+        # 두 파일을 합쳐 검색한다.
         src = _SERVER_PY.read_text(encoding="utf-8")
+        if _CORE_PY.exists():
+            src += "\n" + _CORE_PY.read_text(encoding="utf-8")
         # _section_dep_graph 함수에서 height 값을 직접 검증 (import 부작용 회피)
         # 함수 정의 위치를 문자열 검색으로 찾은 후 블록을 추출
         marker = "def _section_dep_graph("

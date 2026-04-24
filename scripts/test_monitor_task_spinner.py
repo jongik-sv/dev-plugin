@@ -274,11 +274,15 @@ class TestSpinnerPositionInJsSource(unittest.TestCase):
                       "graph-client.js에 node-spinner 관련 코드가 전혀 없음")
 
     def test_monitor_server_has_dep_node_spinner_css(self):
-        """monitor-server.py에 .dep-node .node-spinner CSS 위치 규칙이 있다."""
+        """monitor-server.py 또는 monitor_server/core.py에 .dep-node .node-spinner CSS 위치 규칙이 있다."""
         server_path = pathlib.Path(__file__).parent / "monitor-server.py"
-        if not server_path.exists():
-            self.skipTest("monitor-server.py 없음 — 건너뜀")
-        src = server_path.read_text(encoding="utf-8")
+        core_path = pathlib.Path(__file__).parent / "monitor_server" / "core.py"
+        src = ""
+        for path in (server_path, core_path):
+            if path.exists():
+                src += path.read_text(encoding="utf-8")
+        if not src:
+            self.skipTest("monitor-server.py / core.py 없음 — 건너뜀")
         # .dep-node .node-spinner 위치 규칙이 있어야 한다 (top:4px, right:4px)
         # 최소한 node-spinner에 position:absolute 또는 top/right 규칙이 있어야 함
         has_rule = (

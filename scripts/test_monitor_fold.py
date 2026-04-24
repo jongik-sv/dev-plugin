@@ -14,25 +14,47 @@ _APP_JS_PATH = os.path.join(os.path.dirname(__file__), "monitor_server", "static
 
 
 def _load_dashboard_js():
-    """app.js에서 dashboard JS 문자열을 읽는다 (TSK-01-03 추출 이후)."""
-    if os.path.exists(_APP_JS_PATH):
-        with open(_APP_JS_PATH, encoding="utf-8") as f:
-            return f.read()
-    # 폴백: monitor-server.py에서 _DASHBOARD_JS 추출 (레거시)
-    with open(_SERVER_PATH, encoding="utf-8") as f:
-        source = f.read()
-    m = re.search(r'_DASHBOARD_JS\s*=\s*"""(.*?)"""', source, re.DOTALL)
-    if not m:
-        m = re.search(r"_DASHBOARD_JS\s*=\s*'''(.*?)'''", source, re.DOTALL)
-    if not m:
-        pytest.fail("_DASHBOARD_JS 변수를 monitor-server.py에서 찾을 수 없습니다.")
-    return m.group(1)
+    """monitor-server 모듈 또는 monitor_server/core.py에서 _DASHBOARD_JS 문자열을 추출한다.
+
+    TSK-02-03 이후 monitor-server.py가 얇은 엔트리로 축소되었으므로,
+    _DASHBOARD_JS가 없으면 monitor_server/core.py에서 찾는다.
+    """
+    _CORE_PATH = os.path.join(os.path.dirname(_SERVER_PATH), "monitor_server", "core.py")
+
+    def _search_in_file(path):
+        try:
+            with open(path, encoding="utf-8") as f:
+                source = f.read()
+        except OSError:
+            return None
+        m = re.search(r'_DASHBOARD_JS\s*=\s*"""(.*?)"""', source, re.DOTALL)
+        if not m:
+            m = re.search(r"_DASHBOARD_JS\s*=\s*'''(.*?)'''", source, re.DOTALL)
+        return m.group(1) if m else None
+
+    result = _search_in_file(_SERVER_PATH)
+    if result is None:
+        result = _search_in_file(_CORE_PATH)
+    if result is None:
+        pytest.fail("_DASHBOARD_JS 변수를 monitor-server.py 또는 monitor_server/core.py에서 찾을 수 없습니다.")
+    return result
 
 
 def _load_server_source():
-    """monitor-server.py 전체 소스를 반환한다."""
-    with open(_SERVER_PATH, encoding="utf-8") as f:
-        return f.read()
+    """monitor-server.py + monitor_server/core.py 전체 소스를 합쳐 반환한다.
+
+    TSK-02-03 이후 구현이 core.py로 이전되었으므로, 두 파일을 합친 소스로 검색해야
+    기존 테스트가 함수 정의를 찾을 수 있다.
+    """
+    _CORE_PATH = os.path.join(os.path.dirname(_SERVER_PATH), "monitor_server", "core.py")
+    parts = []
+    for path in (_SERVER_PATH, _CORE_PATH):
+        try:
+            with open(path, encoding="utf-8") as f:
+                parts.append(f.read())
+        except OSError:
+            pass
+    return "\n".join(parts)
 
 
 def _extract_function_body(source, func_name, max_chars=4000):

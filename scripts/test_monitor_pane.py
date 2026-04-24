@@ -157,6 +157,10 @@ class PaneCapturePayloadTests(unittest.TestCase):
     def test_target_functions_are_defined(self):
         """본 Task 핸들러/헬퍼가 module 에 정의되어 있는지 확인."""
         source = _MONITOR_PATH.read_text(encoding="utf-8")
+        # TSK-02-03: 구현이 monitor_server/core.py로 이전되었으므로 두 파일을 합쳐 검색한다.
+        _core_path = _MONITOR_PATH.parent / "monitor_server" / "core.py"
+        if _core_path.exists():
+            source += "\n" + _core_path.read_text(encoding="utf-8")
         for fn_name in ("_pane_capture_payload", "_render_pane_html", "_render_pane_json",
                         "_handle_pane_html", "_handle_pane_api"):
             self.assertIn(f"def {fn_name}(", source, f"{fn_name} 가 정의되어야 한다")

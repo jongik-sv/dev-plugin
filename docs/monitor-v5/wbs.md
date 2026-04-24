@@ -47,7 +47,7 @@ monitor-server, monitor-launcher
 - category: infrastructure
 - domain: infra
 - model: sonnet
-- status: [im]
+- status: [ ]
 - priority: critical
 - assignee: -
 - schedule: 2026-04-24 ~ 2026-04-24
@@ -91,7 +91,7 @@ monitor-server, monitor-launcher
 - category: infrastructure
 - domain: backend
 - model: sonnet
-- status: [xx]
+- status: [ ]
 - priority: critical
 - assignee: -
 - schedule: 2026-04-25 ~ 2026-04-25
@@ -147,7 +147,7 @@ monitor-server, monitor-launcher
 - category: infrastructure
 - domain: frontend
 - model: sonnet
-- status: [xx]
+- status: [ ]
 - priority: critical
 - assignee: -
 - schedule: 2026-04-28 ~ 2026-04-29
@@ -197,7 +197,7 @@ monitor-server, monitor-launcher
 - category: infrastructure
 - domain: frontend
 - model: sonnet
-- status: [xx]
+- status: [ ]
 - priority: critical
 - assignee: -
 - schedule: 2026-04-30 ~ 2026-04-30
@@ -248,7 +248,7 @@ monitor-server, monitor-launcher
 - category: infrastructure
 - domain: backend
 - model: opus
-- status: [ ]
+- status: [xx]
 - priority: high
 - assignee: -
 - schedule: 2026-05-01 ~ 2026-05-05
@@ -315,7 +315,7 @@ monitor-server, monitor-launcher
 - category: infrastructure
 - domain: backend
 - model: sonnet
-- status: [ ]
+- status: [xx]
 - priority: high
 - assignee: -
 - schedule: 2026-05-06 ~ 2026-05-06
@@ -364,7 +364,7 @@ monitor-server, monitor-launcher
 - category: infrastructure
 - domain: backend
 - model: sonnet
-- status: [ ]
+- status: [xx]
 - priority: high
 - assignee: -
 - schedule: 2026-05-07 ~ 2026-05-07

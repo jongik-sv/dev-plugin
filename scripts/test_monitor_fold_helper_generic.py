@@ -17,25 +17,35 @@ _SERVER_PATH = os.path.join(os.path.dirname(__file__), "monitor-server.py")
 _APP_JS_PATH = os.path.join(os.path.dirname(__file__), "monitor_server", "static", "app.js")
 
 
+_CORE_PATH = os.path.join(os.path.dirname(_SERVER_PATH), "monitor_server", "core.py")
+
+
 def _load_dashboard_js():
-    """app.js에서 dashboard JS 문자열을 읽는다 (TSK-01-03 추출 이후)."""
-    if os.path.exists(_APP_JS_PATH):
-        with open(_APP_JS_PATH, encoding="utf-8") as f:
-            return f.read()
-    # 폴백: monitor-server.py에서 _DASHBOARD_JS 추출 (레거시)
-    with open(_SERVER_PATH, encoding="utf-8") as f:
-        source = f.read()
-    m = re.search(r'_DASHBOARD_JS\s*=\s*"""(.*?)"""', source, re.DOTALL)
-    if not m:
-        m = re.search(r"_DASHBOARD_JS\s*=\s*'''(.*?)'''", source, re.DOTALL)
-    if not m:
-        pytest.fail("_DASHBOARD_JS 변수를 monitor-server.py에서 찾을 수 없습니다.")
-    return m.group(1)
+    """monitor-server.py 또는 monitor_server/core.py에서 _DASHBOARD_JS를 추출한다."""
+    for path in (_SERVER_PATH, _CORE_PATH):
+        try:
+            with open(path, encoding="utf-8") as f:
+                source = f.read()
+        except OSError:
+            continue
+        m = re.search(r'_DASHBOARD_JS\s*=\s*"""(.*?)"""', source, re.DOTALL)
+        if not m:
+            m = re.search(r"_DASHBOARD_JS\s*=\s*'''(.*?)'''", source, re.DOTALL)
+        if m:
+            return m.group(1)
+    pytest.fail("_DASHBOARD_JS 변수를 monitor-server.py 또는 monitor_server/core.py에서 찾을 수 없습니다.")
 
 
 def _load_server_source():
-    with open(_SERVER_PATH, encoding="utf-8") as f:
-        return f.read()
+    """monitor-server.py + monitor_server/core.py 합산 소스를 반환한다."""
+    parts = []
+    for path in (_SERVER_PATH, _CORE_PATH):
+        try:
+            with open(path, encoding="utf-8") as f:
+                parts.append(f.read())
+        except OSError:
+            pass
+    return "\n".join(parts)
 
 
 def _extract_function_body(source, func_name, max_chars=1000):
