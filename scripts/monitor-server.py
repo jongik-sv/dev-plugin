@@ -122,13 +122,25 @@ _STATIC_PATH_PREFIX = "/static/"
 
 # Whitelist of allowed vendor filenames under skills/dev-monitor/vendor/.
 # graph-client.js is a TSK-03-04 placeholder committed as an empty file.
+# style.css and app.js (TSK-01-02/03) are served from monitor_server/static/.
 _STATIC_WHITELIST: "frozenset[str]" = frozenset({
     "cytoscape.min.js",
     "dagre.min.js",
     "cytoscape-node-html-label.min.js",
     "cytoscape-dagre.min.js",
     "graph-client.js",
+    "style.css",
+    "app.js",
 })
+
+# Package-local static files served from monitor_server/static/ (not vendor/).
+_PACKAGE_STATIC_FILES: "frozenset[str]" = frozenset({"style.css", "app.js"})
+
+# MIME type map for package-local static files
+_STATIC_MIME: "dict[str, str]" = {
+    "css": "text/css; charset=utf-8",
+    "js": "application/javascript; charset=utf-8",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -2241,6 +2253,29 @@ def _minify_css(css: str) -> str:
 
 
 DASHBOARD_CSS = _minify_css(DASHBOARD_CSS)
+
+_PKG_VERSION = "5.0.0"
+
+
+def _css_version() -> str:
+    """Return a cache-busting version string for /static/style.css.
+
+    Resolution order:
+    1. ``monitor_server.__version__`` — set by TSK-01-01 package __init__.py.
+    2. Fallback: hex-encoded mtime of style.css for dev-mode instant invalidation.
+    """
+    try:
+        import monitor_server as _ms_pkg  # type: ignore[import]
+        ver = getattr(_ms_pkg, "__version__", None)
+        if ver:
+            return str(ver)
+    except Exception:
+        pass
+    try:
+        css_path = Path(__file__).parent / "monitor_server" / "static" / "style.css"
+        return format(int(css_path.stat().st_mtime), "x")
+    except Exception:
+        return "0"
 
 
 def _esc(value) -> str:
@@ -4734,19 +4769,17 @@ def render_dashboard(model: dict, lang: str = "ko", subproject: str = "all") -> 
         '<head>\n',
         '  <meta charset="utf-8">\n',
         '  <meta name="viewport" content="width=device-width, initial-scale=1">\n',
+        f'  <link rel="stylesheet" href="/static/style.css?v={_css_version()}">\n',
         '  <title>dev-plugin Monitor</title>\n',
         '  <link rel="preconnect" href="https://fonts.googleapis.com">\n',
         '  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>\n',
         '  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">\n',
-        f'  <style>{DASHBOARD_CSS}</style>\n',
         '</head>\n',
         '<body>\n',
         body, "\n",
         _drawer_skeleton(), "\n",
         _trow_tooltip_skeleton(), "\n",
-        f'<style>{_task_panel_css()}</style>\n',
-        f'<script id="dashboard-js">{_DASHBOARD_JS}</script>\n',
-        f'<script id="task-panel-js">{_task_panel_js()}</script>\n',
+        f'<script src="/static/app.js?v={_PKG_VERSION}" defer></script>\n',
         _task_panel_dom(), "\n",
         '</body>\n',
         '</html>\n',
@@ -4868,16 +4901,18 @@ def _is_static_path(path: str) -> bool:
 
 
 def _handle_static(handler: "BaseHTTPRequestHandler", path: str) -> None:
-    """Serve a static vendor JS file to *handler*.
+    """Serve a static asset file to *handler*.
 
     Protocol:
     - Extract filename from *path* after ``_STATIC_PATH_PREFIX``.
     - Re-validate whitelist + ``..`` guard (second defence line).
-    - Resolve absolute path under ``handler.server.plugin_root/skills/dev-monitor/vendor/``.
-    - Verify resolved path is still under ``vendor_dir`` (traversal post-resolve).
+    - Package-local assets (style.css, app.js): resolved from
+      ``monitor_server/static/`` alongside this file (TSK-01-02/03).
+    - Vendor assets: resolved from
+      ``handler.server.plugin_root/skills/dev-monitor/vendor/``.
+    - Verify resolved path stays within its base directory (traversal guard).
     - On any failure (whitelist miss, file missing, traversal) → 404.
-    - On success → 200 with ``Content-Type: application/javascript; charset=utf-8``
-      and ``Cache-Control: public, max-age=3600``.
+    - On success → 200 with appropriate Content-Type and Cache-Control.
     """
     # ── Guard 1: prefix + traversal + whitelist ──────────────────────────────
     if not isinstance(path, str) or not path.startswith(_STATIC_PATH_PREFIX):
@@ -4891,17 +4926,28 @@ def _handle_static(handler: "BaseHTTPRequestHandler", path: str) -> None:
         _send_plain_404(handler)
         return
 
-    # ── Resolve vendor directory via plugin_root ──────────────────────────────
-    plugin_root = _server_attr(handler, "plugin_root") or _resolve_plugin_root()
-    vendor_dir = Path(plugin_root) / "skills" / "dev-monitor" / "vendor"
-    target = vendor_dir / filename
+    # ── Resolve target directory ──────────────────────────────────────────────
+    if filename in _PACKAGE_STATIC_FILES:
+        # Package-local: scripts/monitor_server/static/
+        base_dir = Path(__file__).parent / "monitor_server" / "static"
+        ext = filename.rsplit(".", 1)[-1] if "." in filename else ""
+        content_type = _STATIC_MIME.get(ext, "application/octet-stream")
+        cache_control = "public, max-age=300"
+    else:
+        # Vendor assets: plugin_root/skills/dev-monitor/vendor/
+        plugin_root = _server_attr(handler, "plugin_root") or _resolve_plugin_root()
+        base_dir = Path(plugin_root) / "skills" / "dev-monitor" / "vendor"
+        content_type = "application/javascript; charset=utf-8"
+        cache_control = "public, max-age=3600"
+
+    target = base_dir / filename
 
     # ── Guard 2: post-resolve traversal check ────────────────────────────────
     try:
         resolved = target.resolve()
-        vendor_resolved = vendor_dir.resolve()
-        # resolved must be vendor_dir itself or a direct child
-        if vendor_resolved not in (resolved, *resolved.parents):
+        base_resolved = base_dir.resolve()
+        # resolved must be base_dir itself or a direct child
+        if base_resolved not in (resolved, *resolved.parents):
             _send_plain_404(handler)
             return
     except (OSError, ValueError):
@@ -4917,8 +4963,8 @@ def _handle_static(handler: "BaseHTTPRequestHandler", path: str) -> None:
 
     # ── Successful response ───────────────────────────────────────────────────
     handler.send_response(200)
-    handler.send_header("Content-Type", "application/javascript; charset=utf-8")
-    handler.send_header("Cache-Control", "public, max-age=3600")
+    handler.send_header("Content-Type", content_type)
+    handler.send_header("Cache-Control", cache_control)
     handler.send_header("Content-Length", str(len(data)))
     handler.end_headers()
     handler.wfile.write(data)
@@ -5025,8 +5071,8 @@ def _render_pane_html(
         '<html lang="en">\n'
         '<head>\n'
         '  <meta charset="utf-8">\n'
+        f'  <link rel="stylesheet" href="/static/style.css?v={_css_version()}">\n'
         f'  <title>pane {escaped_id}</title>\n'
-        f'  <style>{_PANE_CSS}</style>\n'
         '</head>\n'
         '<body>\n'
         '<nav class="top-nav"><a href="/">&#x2190; back to dashboard</a></nav>\n'
@@ -5034,7 +5080,7 @@ def _render_pane_html(
         f'{error_block}'
         f'<pre class="pane-capture" data-pane="{escaped_id}">{escaped_lines}</pre>\n'
         f'<div class="footer">captured at {escaped_ts}</div>\n'
-        f'<script>{_PANE_JS}</script>\n'
+        f'<script src="/static/app.js?v={_PKG_VERSION}" defer></script>\n'
         '</body>\n'
         '</html>\n'
     )
@@ -6010,11 +6056,6 @@ document.addEventListener('keydown',function(e){
   if(e.key==='Escape'){var p=document.getElementById('task-panel');if(p&&p.classList.contains('open'))closeTaskPanel();}
 });
 """
-
-
-def _task_panel_js() -> str:
-    """JS for task slide panel. Document-level delegation survives auto-refresh."""
-    return _TASK_PANEL_JS
 
 
 def _task_panel_dom() -> str:
