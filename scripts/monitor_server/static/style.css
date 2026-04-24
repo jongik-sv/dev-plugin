@@ -38,6 +38,18 @@
   --pending: #f0c24a;
   --pending-glow: rgba(240,194,74,.16);
 
+  /* phase tokens (FR-06) — WCAG AA contrast on --bg-2 (#141820):
+     dd indigo ≈5.1:1, im sky ≈5.3:1, ts violet ≈5.0:1, xx emerald ≈4.7:1,
+     failed red ≈4.6:1, bypass amber ≈6.8:1, pending gray ≈4.5:1 */
+  --phase-dd: #6366f1;
+  --phase-im: #0ea5e9;
+  --phase-ts: #a855f7;
+  --phase-xx: #10b981;
+  --phase-failed: #ef4444;
+  --phase-bypass: #f59e0b;
+  --phase-pending: #6b7280;
+  --critical: #f59e0b;
+
   /* type */
   --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   --sans: "Space Grotesk", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -198,8 +210,19 @@ summary::-webkit-details-marker{ display:none; }
   animation: spin 1s linear infinite;
   vertical-align: middle;
 }
-.trow[data-running="true"] .spinner{ display: inline-block; }
 .badge .spinner{ margin-left: 4px; }
+/* TSK-04-01 (FR-06): inline spinner lives inside the badge; default hidden */
+.badge .spinner-inline{
+  display: none;
+  width: 8px; height: 8px;
+  border: 2px solid transparent;
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  vertical-align: middle;
+  margin-left: 4px;
+}
+.trow[data-running="true"] .badge .spinner-inline{ display: inline-block; }
 .dep-node[data-running="true"] .node-spinner{
   display:inline-block; position:absolute; top:4px; right:4px;
 }
@@ -557,6 +580,43 @@ summary::-webkit-details-marker{ display:none; }
 .trow[data-status="pending"] .badge{ color: var(--pending); border-color: rgba(240,194,74,.2); background: rgba(240,194,74,.04); }
 .trow[data-status="pending"] .badge::before{ background: var(--pending); }
 @keyframes breathe{ 0%,100%{ opacity:1; transform: scale(1);} 50%{ opacity: .55; transform: scale(.85);} }
+
+/* TSK-04-01 (FR-06): phase badge colors driven by data-phase attribute on .badge */
+.badge[data-phase="dd"]{
+  color: var(--phase-dd);
+  border-color: color-mix(in srgb, var(--phase-dd) 35%, transparent);
+  background: color-mix(in srgb, var(--phase-dd) 15%, transparent);
+}
+.badge[data-phase="im"]{
+  color: var(--phase-im);
+  border-color: color-mix(in srgb, var(--phase-im) 35%, transparent);
+  background: color-mix(in srgb, var(--phase-im) 15%, transparent);
+}
+.badge[data-phase="ts"]{
+  color: var(--phase-ts);
+  border-color: color-mix(in srgb, var(--phase-ts) 35%, transparent);
+  background: color-mix(in srgb, var(--phase-ts) 15%, transparent);
+}
+.badge[data-phase="xx"]{
+  color: var(--phase-xx);
+  border-color: color-mix(in srgb, var(--phase-xx) 35%, transparent);
+  background: color-mix(in srgb, var(--phase-xx) 15%, transparent);
+}
+.badge[data-phase="failed"]{
+  color: var(--phase-failed);
+  border-color: color-mix(in srgb, var(--phase-failed) 35%, transparent);
+  background: color-mix(in srgb, var(--phase-failed) 15%, transparent);
+}
+.badge[data-phase="bypass"]{
+  color: var(--phase-bypass);
+  border-color: color-mix(in srgb, var(--phase-bypass) 35%, transparent);
+  background: color-mix(in srgb, var(--phase-bypass) 15%, transparent);
+}
+.badge[data-phase="pending"]{
+  color: var(--phase-pending);
+  border-color: color-mix(in srgb, var(--phase-pending) 35%, transparent);
+  background: color-mix(in srgb, var(--phase-pending) 10%, transparent);
+}
 
 .trow .ttitle{
   color: var(--ink);
@@ -940,6 +1000,13 @@ body[data-filter="bypass"]  .trow:not([data-status="bypass"]) { display: none; }
   --_tint: color-mix(in srgb, #a855f7 10%, transparent);
 }
 .dep-node.status-bypassed .dep-node-id { color: #a855f7; }
+/* TSK-04-01 (FR-06): data-phase 기반 dep-node ID 글자색 — .status-* 규칙 이후에 배치하여 우선 적용 */
+.dep-node[data-phase="dd"] .dep-node-id { color: var(--phase-dd); }
+.dep-node[data-phase="im"] .dep-node-id { color: var(--phase-im); }
+.dep-node[data-phase="ts"] .dep-node-id { color: var(--phase-ts); }
+.dep-node[data-phase="xx"] .dep-node-id { color: var(--phase-xx); }
+.dep-node[data-phase="failed"] .dep-node-id { color: var(--phase-failed); }
+.dep-node[data-phase="bypass"] .dep-node-id { color: var(--phase-bypass); }
 /* --- 모디파이어: critical (붉은 글로우 + border) --- */
 .dep-node.critical {
   border-color: var(--fail);
