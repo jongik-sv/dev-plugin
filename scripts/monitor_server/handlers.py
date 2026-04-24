@@ -13,6 +13,10 @@ Handler(BaseHTTPRequestHandler) 에 do_GET 라우팅을 통합한다.
   non-GET 메서드  → 405
 
 Python 3 stdlib only — no pip dependencies.
+
+[core-http-split:C1-4]
+MonitorHandler 클래스 + _handle_static + _handle_api_merge_status 를 추가.
+core.py에서 이관. 순환 참조 회피: 모든 core 심볼은 함수 내부 지연 import.
 """
 
 from __future__ import annotations
@@ -364,3 +368,232 @@ def _delegate_core(handler, fn_name: str, *args):
         _get_api_module()._json_error(handler, 500, f"{fn_name} not available")
         return
     fn(handler, *args)
+
+
+# ---------------------------------------------------------------------------
+# [core-http-split:C1-4] MonitorHandler — core.py에서 이관
+# ---------------------------------------------------------------------------
+# 순환 참조 회피: C2-1에서 core.py가 `from .handlers import MonitorHandler`를
+# 추가하므로, MonitorHandler의 모든 core 심볼 참조는 함수 내부 지연 import.
+# ---------------------------------------------------------------------------
+
+# 로컬 상수 (core.py 값을 미러링 — 동기화 필수)
+_MH_DEFAULT_REFRESH_SECONDS = 3  # mirrors core._DEFAULT_REFRESH_SECONDS
+_MH_STATIC_PATH_PREFIX = "/static/"
+_MH_PANE_PATH_PREFIX = "/pane/"
+_MH_API_PANE_PATH_PREFIX = "/api/pane/"
+
+
+class MonitorHandler(BaseHTTPRequestHandler):
+    """HTTP request handler for the dev-plugin monitor server.
+
+    [core-http-split:C1-4] core.py MonitorHandler에서 handlers.py로 이관.
+
+    Routing:
+        GET /              → HTML dashboard (render_dashboard via core)
+        GET /api/state     → JSON snapshot (api.handle_state)
+        GET /pane/{id}     → HTML pane detail (core._handle_pane_html)
+        GET /api/pane/{id} → JSON pane payload (core._handle_pane_api)
+        GET /static/*      → static file serving
+        GET /api/graph     → api.handle_graph
+        GET /api/task-detail → api.handle_task_detail
+        GET /api/merge-status → api.handle_merge_status
+        GET <other>        → 404
+        non-GET methods    → 405 Method Not Allowed
+    """
+
+    def log_message(self, format: str, *args) -> None:  # noqa: A002
+        """Override: write request line to stderr only; leave stdout empty."""
+        sys.stderr.write(f"{self.requestline}\n")
+
+    # ------------------------------------------------------------------
+    # Non-GET methods → 405
+    # ------------------------------------------------------------------
+
+    def _send_405(self) -> None:
+        self.send_response(405)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def do_POST(self) -> None:  # noqa: N802
+        self._send_405()
+
+    def do_PUT(self) -> None:  # noqa: N802
+        self._send_405()
+
+    def do_DELETE(self) -> None:  # noqa: N802
+        self._send_405()
+
+    def do_PATCH(self) -> None:  # noqa: N802
+        self._send_405()
+
+    def do_HEAD(self) -> None:  # noqa: N802
+        self._send_405()
+
+    # ------------------------------------------------------------------
+    # GET routing
+    # ------------------------------------------------------------------
+
+    def do_GET(self) -> None:  # noqa: N802
+        from monitor_server import core as _core  # noqa: PLC0415
+        path = urlsplit(self.path).path
+
+        if path == "/":
+            self._route_root()
+        elif _core._is_static_path(path):
+            _core._handle_static(self, path)
+        elif _core._is_api_graph_path(self.path):
+            from monitor_server import api as _api  # noqa: PLC0415
+            _api.handle_graph(self, {}, None)
+        elif _core._is_api_state_path(self.path):
+            self._route_api_state()
+        elif _core._is_api_task_detail_path(self.path):
+            from monitor_server import api as _api  # noqa: PLC0415
+            _api.handle_task_detail(self, {}, None)
+        elif _core._is_api_merge_status_path(self.path):
+            from monitor_server import api as _api  # noqa: PLC0415
+            _api.handle_merge_status(self, {}, None)
+        elif _core._is_pane_api_path(path):
+            pane_id = _core._extract_pane_id(path, _core._API_PANE_PATH_PREFIX)
+            _core._handle_pane_api(self, pane_id)
+        elif _core._is_pane_html_path(path):
+            pane_id = _core._extract_pane_id(path, _core._PANE_PATH_PREFIX)
+            _core._handle_pane_html(self, pane_id)
+        else:
+            self._route_not_found()
+
+    # ------------------------------------------------------------------
+    # Route implementations
+    # ------------------------------------------------------------------
+
+    def _route_root(self) -> None:
+        """GET / — parse query, build model dict and render dashboard HTML.
+
+        순환 참조 회피: 모든 core/workitems/signals/panes 심볼은 지연 import.
+        """
+        from urllib.parse import parse_qs  # noqa: PLC0415
+        from monitor_server import core as _core  # noqa: PLC0415
+
+        server = getattr(self, "server", None)
+        refresh_seconds = int(getattr(server, "refresh_seconds", _MH_DEFAULT_REFRESH_SECONDS))
+
+        no_tmux = bool(getattr(server, "no_tmux", False))
+        _list_tmux_panes = _core.list_tmux_panes
+        _tmux_fn = (lambda: None) if no_tmux else _list_tmux_panes
+
+        project_root = _core._server_attr(self, "project_root")
+        base_docs_dir = _core._server_attr(self, "docs_dir")
+
+        # Query parsing
+        query_string = urlsplit(self.path).query or ""
+        qs = parse_qs(query_string, keep_blank_values=False)
+        raw_sp = (qs.get("subproject") or ["all"])[0] or "all"
+        lang = (qs.get("lang") or ["ko"])[0] or "ko"
+
+        # Discover available subprojects from base docs dir
+        available_subprojects = _core.discover_subprojects(base_docs_dir)
+        is_multi_mode = bool(available_subprojects)
+
+        # Validate subproject whitelist
+        if raw_sp != "all" and raw_sp not in available_subprojects:
+            sys.stderr.write(
+                f"[monitor] unknown subproject={raw_sp!r}, falling back to 'all'\n"
+            )
+            raw_sp = "all"
+        subproject = raw_sp
+
+        # Resolve effective docs dir
+        effective_docs_dir = _core._resolve_effective_docs_dir(base_docs_dir, subproject)
+
+        # Build project_name
+        project_name: str = (
+            getattr(server, "project_name", None)
+            or os.path.basename(os.path.normpath(project_root))
+            or ""
+        )
+
+        # Compose filter closures
+        def _scan_signals_f():
+            raw_sigs = _core.scan_signals()
+            if project_name:
+                raw_sigs = _core._filter_signals_by_project(raw_sigs, project_name)
+            if subproject != "all" and project_name:
+                filtered = _core._filter_by_subproject(
+                    {"signals": raw_sigs}, subproject, project_name
+                )
+                raw_sigs = filtered.get("signals") or []
+            return raw_sigs
+
+        def _list_panes_f():
+            raw_panes = _tmux_fn()
+            if raw_panes is None:
+                return None
+            if project_root and project_name:
+                raw_panes = _core._filter_panes_by_project(raw_panes, project_root, project_name)
+            if subproject != "all" and project_name:
+                filtered = _core._filter_by_subproject(
+                    {"tmux_panes": raw_panes}, subproject, project_name
+                )
+                raw_panes = filtered.get("tmux_panes") or []
+            return raw_panes
+
+        _project_root_path = Path(project_root) if project_root else None
+
+        def _scan_features_f(docs_dir_arg):
+            if subproject == "all" and is_multi_mode:
+                items = list(
+                    _core._aggregated_scan(Path(base_docs_dir), _project_root_path, _core.scan_features) or []
+                )
+                for sp in available_subprojects:
+                    items.extend(
+                        _core._aggregated_scan(Path(base_docs_dir) / sp, _project_root_path, _core.scan_features) or []
+                    )
+                return _core._dedup_workitems_by_id(items)
+            if subproject and subproject != "all" and is_multi_mode:
+                items = list(
+                    _core._aggregated_scan(Path(base_docs_dir), _project_root_path, _core.scan_features) or []
+                )
+                items.extend(
+                    _core._aggregated_scan(Path(docs_dir_arg), _project_root_path, _core.scan_features) or []
+                )
+                return _core._dedup_workitems_by_id(items)
+            return _core._aggregated_scan(Path(docs_dir_arg), _project_root_path, _core.scan_features)
+
+        def _scan_tasks_f(docs_dir_arg):
+            return _core._aggregated_scan(Path(docs_dir_arg), _project_root_path, _core.scan_tasks)
+
+        state = _core._build_render_state(
+            project_root=project_root,
+            docs_dir=effective_docs_dir,
+            scan_tasks=_scan_tasks_f,
+            scan_features=_scan_features_f,
+            scan_signals=_scan_signals_f,
+            list_tmux_panes=_list_panes_f,
+            subproject=subproject,
+            lang=lang,
+        )
+        state["available_subprojects"] = available_subprojects
+        state["is_multi_mode"] = is_multi_mode
+        model = {**state, "refresh_seconds": refresh_seconds}
+
+        # Re-parse for normalization (TSK-02-02)
+        query_string = urlsplit(self.path).query or ""
+        query_params = parse_qs(query_string)
+        lang = _core._normalize_lang((query_params.get("lang") or ["ko"])[0])
+        subproject = (query_params.get("subproject") or [""])[0]
+
+        html_body = _core.render_dashboard(model, lang=lang, subproject=subproject)
+        _core._send_html_response(self, 200, html_body)
+
+    def _route_api_state(self) -> None:
+        """GET /api/state — delegate to api.handle_state."""
+        from monitor_server import core as _core  # noqa: PLC0415
+        from monitor_server import api as _api  # noqa: PLC0415
+        server = getattr(self, "server", None)
+        no_tmux = bool(getattr(server, "no_tmux", False))
+        _tmux_fn = (lambda: None) if no_tmux else _core.list_tmux_panes
+        _api.handle_state(self, {}, None, list_tmux_panes=_tmux_fn)
+
+    def _route_not_found(self) -> None:
+        """Unmatched GET path → 404."""
+        _send_plain_404(self)
