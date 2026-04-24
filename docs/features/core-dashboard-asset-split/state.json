@@ -1,9 +1,9 @@
 {
   "name": "core-dashboard-asset-split",
-  "status": "[im]",
+  "status": "[xx]",
   "last": {
-    "event": "build.ok",
-    "at": "2026-04-24T18:58:37Z"
+    "event": "refactor.ok",
+    "at": "2026-04-24T19:11:07Z"
   },
   "phase_history": [
     {
@@ -19,8 +19,24 @@
       "to": "[im]",
       "at": "2026-04-24T18:58:37Z",
       "elapsed_seconds": 1340
+    },
+    {
+      "event": "test.ok",
+      "from": "[im]",
+      "to": "[ts]",
+      "at": "2026-04-24T19:03:08Z",
+      "elapsed_seconds": 271
+    },
+    {
+      "event": "refactor.ok",
+      "from": "[ts]",
+      "to": "[xx]",
+      "at": "2026-04-24T19:11:07Z",
+      "elapsed_seconds": 479
     }
   ],
-  "updated": "2026-04-24T18:58:37Z",
-  "started_at": "2026-04-24T18:36:17Z"
+  "updated": "2026-04-24T19:11:07Z",
+  "started_at": "2026-04-24T18:36:17Z",
+  "completed_at": "2026-04-24T19:11:07Z",
+  "elapsed_seconds": 2090
 }
