@@ -1,9 +1,9 @@
 {
-  "status": "[dd]",
+  "status": "[im]",
   "started_at": "2026-04-24T02:02:19Z",
   "last": {
-    "event": "build.fail",
-    "at": "2026-04-24T02:23:42Z"
+    "event": "bypass",
+    "at": "2026-04-24T02:32:54Z"
   },
   "phase_history": [
     {
@@ -26,7 +26,30 @@
       "to": "[dd]",
       "at": "2026-04-24T02:23:42Z",
       "elapsed_seconds": 729
+    },
+    {
+      "event": "build.ok",
+      "from": "[dd]",
+      "to": "[im]",
+      "at": "2026-04-24T02:29:57Z",
+      "elapsed_seconds": 375
+    },
+    {
+      "event": "test.fail",
+      "from": "[im]",
+      "to": "[im]",
+      "at": "2026-04-24T02:31:45Z",
+      "elapsed_seconds": 108
+    },
+    {
+      "event": "bypass",
+      "from": "[im]",
+      "to": "[im]",
+      "at": "2026-04-24T02:32:54Z",
+      "elapsed_seconds": 69
     }
   ],
-  "updated": "2026-04-24T02:23:42Z"
+  "updated": "2026-04-24T02:32:54Z",
+  "bypassed": true,
+  "bypassed_reason": "--reason"
 }
