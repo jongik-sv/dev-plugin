@@ -253,9 +253,13 @@ class TestDashboardIncludesPanelAssets(unittest.TestCase):
         return render_dashboard(_empty_model(), lang="ko", subproject="all")
 
     def test_task_panel_css_in_output(self):
-        """슬라이드 패널 CSS가 전체 HTML에 포함."""
-        html = self._render()
-        self.assertIn(".slide-panel", html)
+        """슬라이드 패널 CSS가 style.css 또는 HTML에 포함 (TSK-01-02: CSS 파일 이전)."""
+        style_css = _THIS_DIR / "monitor_server" / "static" / "style.css"
+        if style_css.exists():
+            self.assertIn(".slide-panel", style_css.read_text(encoding="utf-8"))
+        else:
+            html = self._render()
+            self.assertIn(".slide-panel", html)
 
     def test_task_panel_js_in_output(self):
         """슬라이드 패널 JS가 전체 HTML에 포함."""

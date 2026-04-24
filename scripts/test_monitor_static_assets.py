@@ -102,6 +102,43 @@ class TestStaticRoute(unittest.TestCase):
             f"Expected 404 for traversal attempt, got {resp.status}",
         )
 
+    def test_js_content_non_empty(self) -> None:
+        """GET /static/app.js 응답 body가 비어있지 않아야 한다 (TSK-01-03 AC)."""
+        conn = http.client.HTTPConnection("127.0.0.1", self._port, timeout=5)
+        conn.request("GET", "/static/app.js")
+        resp = conn.getresponse()
+        body = resp.read()
+        conn.close()
+        self.assertEqual(resp.status, 200, f"Expected 200, got {resp.status}")
+        self.assertGreater(
+            len(body),
+            0,
+            "GET /static/app.js 응답 body가 비어있다 — app.js에 JS 내용이 없다.",
+        )
+
+    def test_css_content_non_empty(self) -> None:
+        """GET /static/style.css 응답 body가 비어있지 않아야 한다 (TSK-01-02 AC)."""
+        conn = http.client.HTTPConnection("127.0.0.1", self._port, timeout=5)
+        conn.request("GET", "/static/style.css")
+        resp = conn.getresponse()
+        body = resp.read()
+        conn.close()
+        self.assertEqual(resp.status, 200, f"Expected 200, got {resp.status}")
+        self.assertGreater(
+            len(body),
+            0,
+            "GET /static/style.css 응답 body가 비어있다 — style.css에 CSS 내용이 없다.",
+        )
+
+    def test_css_served_with_query_param(self) -> None:
+        """GET /static/style.css?v=5.0.0 → 200 (쿼리 파라미터 무시)."""
+        conn = http.client.HTTPConnection("127.0.0.1", self._port, timeout=5)
+        conn.request("GET", "/static/style.css?v=5.0.0")
+        resp = conn.getresponse()
+        resp.read()
+        conn.close()
+        self.assertEqual(resp.status, 200, f"Expected 200 for query param URL, got {resp.status}")
+
 
 if __name__ == "__main__":
     unittest.main()

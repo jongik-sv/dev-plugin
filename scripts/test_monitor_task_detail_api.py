@@ -466,33 +466,49 @@ class TestSlidePanelDomInBody(unittest.TestCase):
         self.assertIn('id="task-panel"', html)
 
     def test_slide_panel_css_included(self):
-        """슬라이드 패널 CSS(.slide-panel) 포함."""
-        html = self._render()
-        self.assertIn(".slide-panel", html)
+        """슬라이드 패널 CSS(.slide-panel)가 style.css 또는 HTML에 포함 (TSK-01-02: CSS 파일 이전)."""
+        # TSK-01-02: CSS가 /static/style.css로 이전됨 — style.css 파일 내용으로 검증
+        style_css = _THIS_DIR / "monitor_server" / "static" / "style.css"
+        if style_css.exists():
+            self.assertIn(".slide-panel", style_css.read_text(encoding="utf-8"))
+        else:
+            # fallback: 파일 없으면 _task_panel_css() 함수 반환값 검증
+            self.assertIn(".slide-panel", monitor_server._task_panel_css())
 
     def test_slide_panel_transition_css(self):
-        """transition: right 0.22s cubic-bezier 포함."""
-        html = self._render()
-        self.assertIn("0.22s", html)
-        self.assertIn("cubic-bezier", html)
+        """transition: right 0.22s cubic-bezier 포함 (style.css 또는 _task_panel_css)."""
+        style_css = _THIS_DIR / "monitor_server" / "static" / "style.css"
+        if style_css.exists():
+            css_content = style_css.read_text(encoding="utf-8")
+        else:
+            css_content = monitor_server._task_panel_css()
+        self.assertIn("0.22s", css_content)
+        self.assertIn("cubic-bezier", css_content)
 
     def test_slide_panel_zindex_overlay(self):
-        """overlay z-index:80 포함."""
-        html = self._render()
-        # z-index:80 또는 z-index: 80
+        """overlay z-index:80 포함 (style.css 또는 _task_panel_css)."""
         import re
+        style_css = _THIS_DIR / "monitor_server" / "static" / "style.css"
+        if style_css.exists():
+            content = style_css.read_text(encoding="utf-8")
+        else:
+            content = monitor_server._task_panel_css()
         self.assertTrue(
-            re.search(r"z-index\s*:\s*80", html) is not None,
-            "overlay z-index 80 not found in HTML"
+            re.search(r"z-index\s*:\s*80", content) is not None,
+            "overlay z-index 80 not found in CSS"
         )
 
     def test_slide_panel_zindex_panel(self):
-        """panel z-index:90 포함."""
-        html = self._render()
+        """panel z-index:90 포함 (style.css 또는 _task_panel_css)."""
         import re
+        style_css = _THIS_DIR / "monitor_server" / "static" / "style.css"
+        if style_css.exists():
+            content = style_css.read_text(encoding="utf-8")
+        else:
+            content = monitor_server._task_panel_css()
         self.assertTrue(
-            re.search(r"z-index\s*:\s*90", html) is not None,
-            "panel z-index 90 not found in HTML"
+            re.search(r"z-index\s*:\s*90", content) is not None,
+            "panel z-index 90 not found in CSS"
         )
 
     def test_panel_close_button_exists(self):
