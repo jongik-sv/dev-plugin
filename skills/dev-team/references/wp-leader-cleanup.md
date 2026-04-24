@@ -2,6 +2,41 @@
 
 이 파일은 모든 Task 완료/실패/스킵 처리 후에 실행한다.
 
+## WP 레벨 busy 시그널 (monitor 대시보드용)
+
+머지 또는 WP 단위 테스트 **시작 직전** — `.running` 파일을 직접 생성한다:
+
+```python
+# busy 시작 (머지 전)
+python3 -c "
+import pathlib
+p = pathlib.Path('{SHARED_SIGNAL_DIR}/{WT_NAME}.running')
+p.write_text('merge', encoding='utf-8')
+"
+# busy 시작 (테스트 전)
+python3 -c "
+import pathlib
+p = pathlib.Path('{SHARED_SIGNAL_DIR}/{WT_NAME}.running')
+p.write_text('test', encoding='utf-8')
+"
+```
+
+머지 또는 테스트 **완료 직후** (성공/실패 무관) — `.running` 파일을 삭제한다:
+
+```python
+# busy 종료 (머지/테스트 완료 후)
+python3 -c "
+import pathlib
+p = pathlib.Path('{SHARED_SIGNAL_DIR}/{WT_NAME}.running')
+p.unlink(missing_ok=True)
+"
+```
+
+> **주의**: 이 `.running` 파일은 dev-monitor 대시보드 스피너 표시용이다.
+> `_wp_busy_set()` 헬퍼가 `^WP-\\d{2}$` 패턴으로 이 파일을 감지하여 해당 WP 카드에 스피너를 표시한다.
+> WP 리더 최종 완료 시에는 별도로 `{WT_NAME}.done` 시그널을 생성해야 한다 (아래 단계 4 참조).
+> 삭제(unlink, missing_ok=True)는 파일이 없어도 오류 없이 진행된다.
+
 ```
 ⚠️ **필수**: 아래 순서대로 실행하라. 대기하거나 사용자 입력을 기다리지 마라.
 

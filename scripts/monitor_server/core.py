@@ -204,6 +204,10 @@ _AGENT_POOL_SCOPE_PREFIX = "agent-pool:"
 # TSK-01-01: WP-scoped signal task_id prefix pattern (e.g. "WP-01-").
 _WP_SIGNAL_PREFIX_RE = re.compile(r"^WP-\d{2}-")
 
+# wp-progress-spinner: WP 레벨 busy 감지 패턴 (^WP-\d{2}$).
+# _WP_SIGNAL_PREFIX_RE (^WP-\d{2}-)는 Task 레벨 신호 감지용이므로 별도 패턴 사용.
+_WP_ID_RE = re.compile(r"^WP-\d{2}$")
+
 # ---------------------------------------------------------------------------
 # Static file serving constants (TSK-03-03)
 # ---------------------------------------------------------------------------
@@ -394,6 +398,35 @@ def scan_signals_cached() -> "List[SignalEntry]":
         return value  # type: ignore[return-value]
     result = scan_signals()
     _SIGNALS_CACHE.set("signals", result)
+    return result
+
+
+def _wp_busy_set(signals: "List[SignalEntry]") -> "dict[str, str]":
+    """WP 레벨 busy 상태를 {wp_id: label} 딕셔너리로 반환한다.
+
+    kind="running" AND task_id가 ^WP-\\d{2}$ 패턴인 시그널만 추출.
+    content 첫 줄 키워드로 레이블 결정:
+      - "merge" 포함 → "통합 중"
+      - "test" 포함 → "테스트 중"
+      - 그 외 → "처리 중"
+
+    wp-progress-spinner feature: 기존 _WP_SIGNAL_PREFIX_RE(^WP-\\d{2}-)는
+    Task 레벨 신호 감지용이므로 WP 레벨 감지에는 별도 _WP_ID_RE(^WP-\\d{2}$) 사용.
+    """
+    result: "dict[str, str]" = {}
+    for sig in signals:
+        if sig.kind != "running":
+            continue
+        if not _WP_ID_RE.match(sig.task_id):
+            continue
+        content_lower = sig.content.lower()
+        if "merge" in content_lower:
+            label = "통합 중"
+        elif "test" in content_lower:
+            label = "테스트 중"
+        else:
+            label = "처리 중"
+        result[sig.task_id] = label
     return result
 
 
@@ -3283,6 +3316,22 @@ def _load_wp_merge_states(docs_dir: str) -> dict:
     return result
 
 
+def _wp_busy_indicator_html(busy_label: "Optional[str]") -> str:
+    """WP busy 상태 스피너 indicator HTML 조각을 반환한다.
+
+    busy_label이 None이면 빈 문자열 반환 (indicator 렌더하지 않음).
+    busy_label이 있으면 aria-live 컨테이너 + 스피너 + 레이블 HTML을 반환.
+    """
+    if busy_label is None:
+        return ""
+    return (
+        '<div class="wp-busy-indicator" aria-live="polite">\n'
+        f'  <span class="wp-busy-spinner" aria-hidden="true"></span>\n'
+        f'  <span class="wp-busy-label">{_esc(busy_label)}</span>\n'
+        '</div>'
+    )
+
+
 def _section_wp_cards(
     tasks,
     running_ids: set,
@@ -3291,6 +3340,7 @@ def _section_wp_cards(
     wp_titles: "Optional[dict]" = None,
     lang: str = "ko",
     wp_merge_state: "Optional[dict]" = None,
+    wp_busy_set: "Optional[dict]" = None,
 ) -> str:
     """WP card section: tasks grouped by wp_id, each WP as a v3 .wp card.
 
@@ -3308,6 +3358,10 @@ def _section_wp_cards(
     없으면 WP-ID 를 그대로 fallback 으로 사용한다 (design.html 대비 동작 유지).
 
     TSK-02-02: heading 파라미터 추가 — i18n 지원.
+
+    wp-progress-spinner: wp_busy_set ({wp_id: label}) 이 주어지면 해당 WP 카드에
+    data-busy="true" 속성 + .wp-busy-indicator 스피너 HTML을 삽입한다.
+    None(기본값)이면 기존 동작 그대로 유지 (하위 호환).
     """
     heading = _resolve_heading("wp-cards", heading)
     if not tasks:
@@ -3317,6 +3371,7 @@ def _section_wp_cards(
         tasks, lambda item: getattr(item, "wp_id", None) or "WP-unknown"
     )
     wp_titles = wp_titles or {}
+    _busy = wp_busy_set or {}
 
     blocks: List[str] = []
     for wp in order:
@@ -3374,7 +3429,16 @@ def _section_wp_cards(
             '</div>'
         )
 
-        wp_meta_html = f'<div class="wp-meta"><span class="big">{total} tasks</span></div>'
+        # wp-progress-spinner: busy WP에 스피너 indicator 추가
+        busy_label = _busy.get(wp)
+        busy_indicator_html = _wp_busy_indicator_html(busy_label)
+
+        wp_meta_html = (
+            f'<div class="wp-meta">'
+            f'<span class="big">{total} tasks</span>'
+            f'{busy_indicator_html}'
+            f'</div>'
+        )
 
         wp_head_html = (
             '<div class="wp-head wp-card-header">\n'
@@ -3384,11 +3448,14 @@ def _section_wp_cards(
             '</div>'
         )
 
+        # wp-progress-spinner: busy WP에 data-busy="true" 속성 추가
+        data_busy_attr = ' data-busy="true"' if busy_label is not None else ""
+
         task_rows = "\n".join(
             _render_task_row_v2(item, running_ids, failed_ids, lang=lang) for item in wp_tasks
         )
         card_body_html = (
-            f'<details class="wp wp-tasks" data-wp="{_esc(wp)}" data-fold-key="{_esc(wp)}" data-fold-default-open open>\n'
+            f'<details class="wp wp-tasks" data-wp="{_esc(wp)}" data-fold-key="{_esc(wp)}" data-fold-default-open open{data_busy_attr}>\n'
             f'  <summary>{wp_head_html}<span class="ct">({total})</span></summary>\n'
             f'  <div class="task-list">\n{task_rows}\n  </div>\n'
             '</details>'
@@ -4825,13 +4892,16 @@ def render_dashboard(model: dict, lang: str = "ko", subproject: str = "all") -> 
     # TSK-04-03: docs_dir에서 WP별 merge-status 일괄 로드
     _docs_dir = model.get("docs_dir") or model.get("subproject") or ""
     _wp_merge_state = _load_wp_merge_states(_docs_dir) if _docs_dir else {}
+    # wp-progress-spinner: shared_signals에서 WP 레벨 busy 상태 추출
+    _wp_busy = _wp_busy_set(shared_signals)
     sections: dict = {
         "kpi":            _section_kpi(model),
         "wp-cards":       _section_wp_cards(tasks, running_ids, failed_ids,
                                             heading=_t(lang, "work_packages"),
                                             wp_titles=model.get("wp_titles") or {},
                                             lang=lang,
-                                            wp_merge_state=_wp_merge_state),
+                                            wp_merge_state=_wp_merge_state,
+                                            wp_busy_set=_wp_busy),
         "features":       _section_features(features, running_ids, failed_ids,
                                             heading=_t(lang, "features"),
                                             lang=lang),

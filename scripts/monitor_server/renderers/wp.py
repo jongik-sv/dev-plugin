@@ -25,6 +25,22 @@ from ._util import (
 from .taskrow import _render_task_row_v2
 
 
+def _wp_busy_indicator_html(busy_label: "Optional[str]") -> str:
+    """WP busy 상태 스피너 indicator HTML 조각을 반환한다.
+
+    busy_label이 None이면 빈 문자열 반환 (indicator 렌더하지 않음).
+    busy_label이 있으면 aria-live 컨테이너 + 스피너 + 레이블 HTML을 반환.
+    """
+    if busy_label is None:
+        return ""
+    return (
+        '<div class="wp-busy-indicator" aria-live="polite">\n'
+        f'  <span class="wp-busy-spinner" aria-hidden="true"></span>\n'
+        f'  <span class="wp-busy-label">{_esc(busy_label)}</span>\n'
+        '</div>'
+    )
+
+
 def _section_wp_cards(
     tasks,
     running_ids: set,
@@ -33,6 +49,7 @@ def _section_wp_cards(
     wp_titles: "Optional[dict]" = None,
     lang: str = "ko",
     wp_merge_state: "Optional[dict]" = None,
+    wp_busy_set: "Optional[dict]" = None,
 ) -> str:
     """WP card section: tasks grouped by wp_id, each WP as a v3 .wp card.
 
@@ -50,6 +67,10 @@ def _section_wp_cards(
     없으면 WP-ID 를 그대로 fallback 으로 사용한다 (design.html 대비 동작 유지).
 
     TSK-02-02: heading 파라미터 추가 — i18n 지원.
+
+    wp-progress-spinner: wp_busy_set ({wp_id: label}) 이 주어지면 해당 WP 카드에
+    data-busy="true" 속성 + .wp-busy-indicator 스피너 HTML을 삽입한다.
+    None(기본값)이면 기존 동작 그대로 유지 (하위 호환).
     """
     heading = _resolve_heading("wp-cards", heading)
     if not tasks:
@@ -59,6 +80,7 @@ def _section_wp_cards(
         tasks, lambda item: getattr(item, "wp_id", None) or "WP-unknown"
     )
     wp_titles = wp_titles or {}
+    _busy = wp_busy_set or {}
 
     blocks: List[str] = []
     for wp in order:
@@ -116,7 +138,16 @@ def _section_wp_cards(
             '</div>'
         )
 
-        wp_meta_html = f'<div class="wp-meta"><span class="big">{total} tasks</span></div>'
+        # wp-progress-spinner: busy WP에 스피너 indicator 추가
+        busy_label = _busy.get(wp)
+        busy_indicator_html = _wp_busy_indicator_html(busy_label)
+
+        wp_meta_html = (
+            f'<div class="wp-meta">'
+            f'<span class="big">{total} tasks</span>'
+            f'{busy_indicator_html}'
+            f'</div>'
+        )
 
         wp_head_html = (
             '<div class="wp-head wp-card-header">\n'
@@ -126,11 +157,14 @@ def _section_wp_cards(
             '</div>'
         )
 
+        # wp-progress-spinner: busy WP에 data-busy="true" 속성 추가
+        data_busy_attr = ' data-busy="true"' if busy_label is not None else ""
+
         task_rows = "\n".join(
             _render_task_row_v2(item, running_ids, failed_ids, lang=lang) for item in wp_tasks
         )
         card_body_html = (
-            f'<details class="wp wp-tasks" data-wp="{_esc(wp)}" data-fold-key="{_esc(wp)}" data-fold-default-open open>\n'
+            f'<details class="wp wp-tasks" data-wp="{_esc(wp)}" data-fold-key="{_esc(wp)}" data-fold-default-open open{data_busy_attr}>\n'
             f'  <summary>{wp_head_html}<span class="ct">({total})</span></summary>\n'
             f'  <div class="task-list">\n{task_rows}\n  </div>\n'
             '</details>'

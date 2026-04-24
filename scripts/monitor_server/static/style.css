@@ -203,6 +203,23 @@ summary::-webkit-details-marker{ display:none; }
 .dep-node[data-running="true"] .node-spinner{
   display:inline-block; position:absolute; top:4px; right:4px;
 }
+/* wp-progress-spinner: WP 레벨 busy 스피너 — 기존 .spinner(Task 행용 10px)와 분리 */
+.wp-busy-spinner{
+  display: inline-block;
+  width: 16px; height: 16px;
+  border: 2px solid transparent;
+  border-top-color: var(--run);
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+  vertical-align: middle;
+}
+.wp-busy-indicator{
+  display: none;
+  align-items: center; gap: 6px;
+  font-size: 11px; color: var(--run);
+}
+.wp[data-busy="true"] .wp-busy-indicator{ display: inline-flex; }
+.wp-busy-label{ font-weight: 600; letter-spacing: .04em; }
 @keyframes pulse{
   0%   { box-shadow: 0 0 0 0 rgba(78,208,138,.55); }
   70%  { box-shadow: 0 0 0 10px rgba(78,208,138,0);  }
