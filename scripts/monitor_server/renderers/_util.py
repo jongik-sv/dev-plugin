@@ -63,5 +63,10 @@ _SECTION_EYEBROWS = _mod._SECTION_EYEBROWS
 _phase_of = _mod._phase_of
 _KNOWN_PHASES = _mod._KNOWN_PHASES
 
+# taskrow.py C2-6 body-transfer에 필요한 추가 심볼
+_ERROR_TITLE_CAP = _mod._ERROR_TITLE_CAP
+_phase_models_for = _mod._phase_models_for
+_trow_data_status = _mod._trow_data_status
+
 # taskrow.py 선-shim이 _entry._phase_label 등에 접근할 수 있도록 _mod를 공개 심볼로 노출.
 # taskrow.py의 `from ._util import _mod as _entry` 에서 사용된다.

@@ -469,17 +469,12 @@ _PHASE_CODE_TO_ATTR: "dict[str, str]" = {
 }
 
 
+# moved to monitor_server.renderers.taskrow [core-renderer-split:C2-6]
 def _phase_label(status_code: "Optional[str]", lang: str, *, failed: bool, bypassed: bool) -> str:  # type: ignore[override]  # noqa: F811
-    """Return human-readable badge label for a Task row.
-
-    Priority: bypassed > failed > status_code mapping > pending.
-    lang is normalised via _normalize_lang (unknown → 'ko').
-
-    Note: there is a legacy _phase_label(status_str) function defined later
-    (used for task-detail history rows). This function shadows it at module
-    level for badge usage; the legacy function is renamed internally and not
-    exposed as a public helper.
-    """
+    _tr_mod = _c2b_load_renderer("taskrow")
+    if _tr_mod is not None:
+        return _tr_mod._phase_label(status_code, lang, failed=failed, bypassed=bypassed)
+    # inline fallback
     normalised = _normalize_lang(lang)
     if bypassed:
         return _PHASE_LABELS["bypass"].get(normalised) or _PHASE_LABELS["bypass"]["ko"]
@@ -492,11 +487,12 @@ def _phase_label(status_code: "Optional[str]", lang: str, *, failed: bool, bypas
     return _PHASE_LABELS["pending"].get(normalised) or _PHASE_LABELS["pending"]["ko"]
 
 
+# moved to monitor_server.renderers.taskrow [core-renderer-split:C2-6]
 def _phase_data_attr(status_code: "Optional[str]", *, failed: bool = False, bypassed: bool = False) -> str:
-    """Return the data-phase attribute value for a Task row .trow element.
-
-    Priority: bypassed > failed > status_code mapping > pending.
-    """
+    _tr_mod = _c2b_load_renderer("taskrow")
+    if _tr_mod is not None:
+        return _tr_mod._phase_data_attr(status_code, failed=failed, bypassed=bypassed)
+    # inline fallback
     if bypassed:
         return "bypass"
     if failed:
@@ -2155,13 +2151,9 @@ def _wp_donut_svg(counts: dict) -> str:
     )
 
 
+# moved to monitor_server.renderers.taskrow [core-renderer-split:C2-6]
 def _trow_data_status(item, running_ids: set, failed_ids: set) -> str:
-    """Return the data-status attribute value for a .trow element.
-
-    Priority: bypass > failed > running > done > pending
-    Maps _row_state_class output (which uses 'bypass'/'failed'/'running'/'done'/'pending')
-    to the same strings used in data-status.
-    """
+    """Return the data-status attribute value for a .trow element."""
     return _row_state_class(item, running_ids, failed_ids)
 
 
@@ -2287,94 +2279,12 @@ def _trow_tooltip_skeleton() -> str:
     return _trow_info_popover_skeleton()
 
 
+# moved to monitor_server.renderers.taskrow [core-renderer-split:C2-6]
 def _render_task_row_v2(item, running_ids: set, failed_ids: set, lang: str = "ko") -> str:
-    """Render a v3 ``<div class="trow" data-status="{state}" data-phase="{phase}" data-running="{bool}">`` row.
-
-    Matches reference markup — 7 ``<div>`` children + spinner span:
-    ``statusbar / tid / badge / spinner / ttitle / elapsed / retry / flags``.
-
-    TSK-02-01: badge text is DDTR phase label (Design/Build/Test/Done/Failed/Bypass/Pending)
-    derived from state.json.status via _phase_label(). data-phase attribute added for CSS/test hooks.
-    data-status attribute (signal-based colour mapping) is unchanged.
-
-    TSK-02-02: data-running reflects whether item.id is in running_ids (independent of
-    data-status priority). The .spinner span is always emitted as a badge sibling for all
-    trows; CSS controls visibility via .trow[data-running="true"] .spinner { display: inline-block }.
-    """
-    item_id = getattr(item, "id", None)
-    bypassed = bool(getattr(item, "bypassed", False))
-    error = getattr(item, "error", None)
-    title = getattr(item, "title", None)
-    status_code = getattr(item, "status", None)
-    data_status = _trow_data_status(item, running_ids, failed_ids)
-    data_running = "true" if (item_id and item_id in running_ids) else "false"
-
-    # badge text: error counts as failed (same bucket as .failed signal).
-    is_failed = bool(error) or (item_id is not None and item_id in failed_ids)
-    badge_text = _phase_label(status_code, lang, failed=is_failed, bypassed=bypassed)
-    data_phase = _phase_data_attr(status_code, failed=is_failed, bypassed=bypassed)
-
-    badge_title_attr = (
-        f' title="{_esc(str(error)[:_ERROR_TITLE_CAP])}"' if error else ""
-    )
-
-    elapsed_raw = _format_elapsed(item, lang=lang)
-    elapsed_display = elapsed_raw if elapsed_raw != "-" else "—"
-
-    # escalation flag (⚡) — prepend before bypass flag
-    rc = _retry_count(item)
-    escalated = rc >= _MAX_ESCALATION()
-    escalation_span = (
-        '<span class="escalation-flag" aria-label="escalated">⚡</span>'
-        if escalated else ""
-    )
-    bypass_span = '<span class="flag f-crit">bypass</span>' if bypassed else ""
-    flags_inner = escalation_span + bypass_span
-
-    # model chip — inserted after clean_title in ttitle cell
-    item_model_raw = getattr(item, "model", None) or "sonnet"
-    model_esc = _esc(item_model_raw)
-    model_chip = f'<span class="model-chip" data-model="{model_esc}">{model_esc}</span>'
-
-    # data-domain attribute — used by client-side filter matchesRow()
-    domain_val = _esc(getattr(item, "domain", None) or "")
-
-    clean_title = _esc(_clean_title(title))
-
-    # ⓘ info button — opens singleton #trow-info-popover on click.
-    info_btn = (
-        '<button class="info-btn" type="button"'
-        ' aria-label="상세"'
-        ' aria-expanded="false"'
-        ' aria-controls="trow-info-popover">ⓘ</button>'
-    )
-
-    expand_btn = (
-        f'<button class="expand-btn" data-task-id="{_esc(item_id or "")}"'
-        ' aria-label="Expand" title="Expand">↗</button>'
-    )
-
-    _state_summary_encoded = _encode_state_summary_attr(_build_state_summary_json(item))
-
-    return (
-        f'<div class="trow" data-status="{data_status}" data-phase="{data_phase}" data-running="{data_running}"'
-        f' data-domain="{domain_val}"'
-        f' data-task-id="{_esc(item_id or "")}"'
-        f" data-state-summary='{_state_summary_encoded}'>\n"
-        '  <div class="statusbar"></div>\n'
-        f'  <div class="tid id">{_esc(item_id)}</div>\n'
-        f'  <div class="badge" data-phase="{data_phase}"{badge_title_attr}>'
-        f'{_esc(badge_text)}'
-        '<span class="spinner-inline" aria-hidden="true"></span>'
-        '</div>\n'
-        f'  <div class="ttitle title">{clean_title}{model_chip}</div>\n'
-        f'  <div class="elapsed">{_esc(elapsed_display)}</div>\n'
-        f'  <div class="retry">×{rc}</div>\n'
-        f'  <div class="flags">{flags_inner}</div>\n'
-        f'  {info_btn}\n'
-        f'  {expand_btn}\n'
-        '</div>'
-    )
+    _tr_mod = _c2b_load_renderer("taskrow")
+    if _tr_mod is not None:
+        return _tr_mod._render_task_row_v2(item, running_ids, failed_ids, lang)
+    return ""
 
 
 def _merge_badge(ws: dict, lang: str = "ko") -> str:
@@ -5757,6 +5667,19 @@ except (ImportError, AttributeError):
         _c2b_tabs = _c2b_load_renderer("tabs")
         if _c2b_tabs is not None:
             _section_subproject_tabs = _c2b_tabs._section_subproject_tabs  # type: ignore[assignment]
+    except (ImportError, AttributeError):
+        pass
+try:
+    from .renderers.taskrow import (  # noqa: F401,E402
+        _phase_label, _phase_data_attr, _render_task_row_v2,
+    )
+except (ImportError, AttributeError):
+    try:
+        _c2b_tr = _c2b_load_renderer("taskrow")
+        if _c2b_tr is not None:
+            _phase_label = _c2b_tr._phase_label  # type: ignore[assignment]
+            _phase_data_attr = _c2b_tr._phase_data_attr  # type: ignore[assignment]
+            _render_task_row_v2 = _c2b_tr._render_task_row_v2  # type: ignore[assignment]
     except (ImportError, AttributeError):
         pass
 # === /renderer facade ===
