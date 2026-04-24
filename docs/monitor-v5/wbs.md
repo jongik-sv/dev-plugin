@@ -147,7 +147,7 @@ monitor-server, monitor-launcher
 - category: infrastructure
 - domain: frontend
 - model: sonnet
-- status: [ ]
+- status: [dd]
 - priority: critical
 - assignee: -
 - schedule: 2026-04-28 ~ 2026-04-29
