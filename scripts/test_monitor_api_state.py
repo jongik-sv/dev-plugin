@@ -1027,5 +1027,101 @@ class ApiStateWorktreeAggregationTests(unittest.TestCase):
         self.assertEqual(ids, ["TSK-MAIN"])
 
 
+class SubprojectTabProjectGlobalFeaturesTests(unittest.TestCase):
+    """Subproject 탭 선택 시 프로젝트 루트 ``docs/features/`` 도 함께 표시되는지 검증.
+
+    회귀 배경: ``/feat`` 가 기본적으로 ``docs/features/{name}/`` 에 Feature 를
+    만들지만, 대시보드에서 서브프로젝트 탭(예: ``?subproject=monitor-v5``)을
+    고르면 ``docs/monitor-v5/features/`` 만 스캔하여 실제로 존재하는 프로젝트
+    글로벌 Feature 가 화면에서 사라지는 버그가 있었다. Fix: 서브프로젝트 뷰에서도
+    base docs 의 ``features/`` 를 함께 스캔하고 ``id`` 기준 dedup.
+    """
+
+    def _run(self, *, subproject: str, scan_features_fn) -> dict:
+        h = _FakeHandler()
+        h.path = f"/api/state?subproject={subproject}" if subproject else "/api/state"
+        h.server = _FakeServer(project_root="/abs", docs_dir="docs")
+
+        discover_fn = lambda _d: ["monitor-v5"]
+
+        ctx_flat = mock.patch.object(
+            monitor_server, "discover_subprojects", discover_fn, create=True
+        )
+        if _core_mod is not None and _core_mod is not monitor_server:
+            ctx_core = mock.patch.object(
+                _core_mod, "discover_subprojects", discover_fn, create=True
+            )
+        else:
+            ctx_core = mock.patch.object(
+                monitor_server, "discover_subprojects", discover_fn, create=True
+            )
+        with ctx_flat, ctx_core:
+            monitor_server._handle_api_state(
+                h,
+                scan_tasks=lambda _d: [],
+                scan_features=scan_features_fn,
+                scan_signals=lambda: [],
+                list_tmux_panes=lambda: None,
+            )
+        self.assertEqual(h.status, 200)
+        return json.loads(h.wfile.getvalue().decode("utf-8"))
+
+    def test_subproject_tab_surfaces_project_global_features(self) -> None:
+        """``?subproject=monitor-v5`` 요청에서 ``docs/features/`` 의 Feature 노출."""
+        project_global = _make_feat("login", title="로그인")
+        calls: list = []
+
+        def scan_fn(docs_dir_arg):
+            # docs_dir_arg 는 Path 또는 str 로 도착할 수 있음
+            key = str(docs_dir_arg)
+            calls.append(key)
+            if key.rstrip("/").endswith("docs"):
+                return [project_global]
+            return []  # docs/monitor-v5/features/ 는 비어 있음
+
+        body = self._run(subproject="monitor-v5", scan_features_fn=scan_fn)
+
+        feat_ids = [f["id"] for f in (body.get("features") or [])]
+        self.assertIn(
+            "login", feat_ids,
+            msg="Project-global features must surface when a subproject tab is active",
+        )
+        # 최소 한 번은 base docs 도 스캔되어야 함
+        self.assertTrue(
+            any(str(c).rstrip("/").endswith("docs") for c in calls),
+            msg=f"Expected scan_features to be called on base docs dir; got {calls!r}",
+        )
+
+    def test_subproject_tab_dedupes_by_id(self) -> None:
+        """같은 id가 base + subproject 양쪽에서 나와도 한 번만 노출."""
+        dup = _make_feat("login")
+
+        def scan_fn(_docs_dir_arg):
+            return [dup]  # 어느 경로를 물어도 같은 feature 반환
+
+        body = self._run(subproject="monitor-v5", scan_features_fn=scan_fn)
+
+        feat_ids = [f["id"] for f in (body.get("features") or [])]
+        self.assertEqual(feat_ids.count("login"), 1)
+
+    def test_subproject_all_aggregates_base_and_each_subproject(self) -> None:
+        """``?subproject=all`` 은 기존 동작(base + 각 subproject) 유지."""
+        base_feat = _make_feat("login")
+        sp_feat = _make_feat("rate-limit", title="rate")
+
+        def scan_fn(docs_dir_arg):
+            key = str(docs_dir_arg).rstrip("/")
+            if key.endswith("docs"):
+                return [base_feat]
+            if key.endswith("docs/monitor-v5"):
+                return [sp_feat]
+            return []
+
+        body = self._run(subproject="all", scan_features_fn=scan_fn)
+        feat_ids = [f["id"] for f in (body.get("features") or [])]
+        self.assertIn("login", feat_ids)
+        self.assertIn("rate-limit", feat_ids)
+
+
 if __name__ == "__main__":
     unittest.main()
