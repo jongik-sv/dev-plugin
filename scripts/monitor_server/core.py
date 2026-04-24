@@ -6325,6 +6325,32 @@ def _task_panel_css() -> str:
         ".merge-conflict-file li.disabled{color:var(--ink-3,#585b70);}"
         ".merge-conflict-file li.disabled code{opacity:.6;}"
         ".merge-hunk-preview{max-height:120px;overflow:auto;font-size:11px;font-family:var(--font-mono,monospace);background:var(--bg-1,#181825);border-radius:4px;padding:6px;white-space:pre-wrap;word-break:break-all;margin-top:4px;}"
+        # TSK-05-01 FR-02: EXPAND 패널 sticky progress header
+        ".progress-header{position:sticky;top:0;z-index:20;"
+        "background:var(--bg-2,#1e1e2e);"
+        "border-bottom:1px solid var(--border,#313244);"
+        "margin:-16px -16px 12px;padding:10px 16px;"
+        "display:flex;flex-direction:column;gap:6px;}"
+        ".progress-header .ph-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}"
+        ".ph-badge{display:inline-flex;align-items:center;gap:4px;"
+        "padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;"
+        "border:1px solid transparent;white-space:nowrap;}"
+        ".ph-badge[data-phase=\"dd\"]{background:rgba(56,139,253,0.15);color:#4aa3ff;border-color:rgba(56,139,253,0.4);}"
+        ".ph-badge[data-phase=\"im\"]{background:rgba(188,140,255,0.15);color:#bc8cff;border-color:rgba(188,140,255,0.4);}"
+        ".ph-badge[data-phase=\"ts\"]{background:rgba(63,185,80,0.15);color:var(--done,#22c55e);border-color:rgba(63,185,80,0.4);}"
+        ".ph-badge[data-phase=\"xx\"]{background:rgba(139,148,158,0.15);color:var(--ink-3,#cdd6f4);border-color:rgba(139,148,158,0.4);}"
+        ".ph-badge[data-phase=\"pending\"]{background:transparent;color:var(--ink-3,#585b70);border-color:var(--ink-3,#585b70);}"
+        ".ph-badge[data-running=\"true\"] .spinner{display:inline-block;}"
+        ".ph-meta{display:grid;grid-template-columns:auto 1fr;gap:2px 10px;"
+        "margin:0;font-size:11px;color:var(--ink-3,#cdd6f4);}"
+        ".ph-meta dt{opacity:.7;}"
+        ".ph-meta dd{margin:0;font-family:var(--font-mono,monospace);}"
+        ".ph-history{list-style:none;padding:0;margin:4px 0 0;"
+        "font-size:11px;color:var(--ink-3,#cdd6f4);}"
+        ".ph-history li{padding:2px 0;display:flex;gap:8px;"
+        "font-family:var(--font-mono,monospace);}"
+        ".ph-history li .ph-time{opacity:.6;min-width:140px;}"
+        ".ph-history-empty{font-size:11px;color:var(--ink-3,#585b70);font-style:italic;}"
     )
 
 
@@ -6351,6 +6377,48 @@ function renderWbsSection(md){
     html+='<p>'+escapeHtml(line)+'</p>\n';
   }
   if(inCode)html+='</code></pre>\n';
+  return html;
+}
+function renderTaskProgressHeader(state){
+  if(!state)return '';
+  var status=state.status||'[ ]';
+  var phase=String(status).replace('[','').replace(']','').trim();
+  if(!phase||phase===' ')phase='pending';
+  var last=state.last||{};
+  var evt=last.event||'';
+  var isRunning=/_(start|running)$/.test(evt);
+  var elapsed=state.elapsed_seconds;
+  var elapsedStr=(elapsed==null)?'-':String(elapsed)+'s';
+  var lastAt=last.at||'-';
+  var history=state.phase_history||[];
+  var historyLen=history.length;
+  var spinner=isRunning?'<span class="spinner"></span>':'';
+  var html='<header class="progress-header">';
+  html+='<div class="ph-row">';
+  html+='<span class="ph-badge" data-phase="'+escapeHtml(phase)+'"'
+    +(isRunning?' data-running="true"':'')+'>'
+    +escapeHtml(phase)+spinner+'</span>';
+  html+='<span class="ph-last-event">'+escapeHtml(evt||'-')+'</span>';
+  html+='</div>';
+  html+='<dl class="ph-meta">'
+    +'<dt>status</dt><dd>'+escapeHtml(status)+'</dd>'
+    +'<dt>last.at</dt><dd>'+escapeHtml(lastAt)+'</dd>'
+    +'<dt>elapsed</dt><dd>'+escapeHtml(elapsedStr)+'</dd>'
+    +'<dt>phaseCount</dt><dd>'+escapeHtml(String(historyLen))+'</dd>'
+    +'</dl>';
+  if(historyLen===0){
+    html+='<div class="ph-history-empty">phase_history 없음</div>';
+  }else{
+    var recent=history.slice(-3).reverse();
+    html+='<ul class="ph-history">';
+    for(var i=0;i<recent.length;i++){
+      var h=recent[i]||{};
+      html+='<li><span class="ph-time">'+escapeHtml(h.at||'-')+'</span>'
+        +'<span class="ph-evt">'+escapeHtml(h.event||'-')+'</span></li>';
+    }
+    html+='</ul>';
+  }
+  html+='</header>';
   return html;
 }
 function renderStateJson(state){return '<h4>&sect; state.json</h4><pre>'+escapeHtml(JSON.stringify(state,null,2))+'</pre>';}
@@ -6387,7 +6455,7 @@ function openTaskPanel(taskId){
     .then(function(r){return r.json();}).then(function(data){
       var t=document.getElementById('task-panel-title');if(t)t.textContent=data.title||taskId;
       var b=document.getElementById('task-panel-body');
-      if(b)b.innerHTML=renderWbsSection(data.wbs_section_md||'')+renderStateJson(data.state||{})+renderArtifacts(data.artifacts||[])+renderLogs(data.logs||[]);
+      if(b)b.innerHTML=renderTaskProgressHeader(data.state||null)+renderWbsSection(data.wbs_section_md||'')+renderStateJson(data.state||{})+renderArtifacts(data.artifacts||[])+renderLogs(data.logs||[]);
       var p=document.getElementById('task-panel'),o=document.getElementById('task-panel-overlay');
       if(p){p.classList.add('open');p.dataset.panelMode='task';}if(o)o.removeAttribute('hidden');
     }).catch(function(e){console.error('task-panel error',e);});
