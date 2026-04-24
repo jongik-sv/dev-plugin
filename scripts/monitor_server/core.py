@@ -49,6 +49,45 @@ if not sys.pycache_prefix:
     sys.pycache_prefix = "/tmp/codex-pycache"
 
 # ---------------------------------------------------------------------------
+# [core-decomposition:C0-4] api.py SSOT import — 8개 중복 함수 재-export
+# ---------------------------------------------------------------------------
+# core.py에 있던 _signal_set, _serialize_phase_history_tail_for_graph,
+# _derive_node_status, _build_graph_payload, _build_fan_in_map, _load_state_json,
+# _build_task_detail_payload, _now_iso_z 는 api.py로 단일화되었다.
+# 본 모듈은 backward-compat을 위해 재-export하며, 신규 호출은 api.py 직접 사용 권장.
+#
+# flat-load 컨텍스트(test에서 monitor-server.py를 monitor_server 이름으로 로드하는
+# 경우) 대응: `from monitor_server.api import ...`가 실패하면 spec_from_file_location
+# 으로 api.py를 직접 로드한다. 이렇게 해야 monitor-server.py의 _load_core_module이
+# fallback 경로로 core.py를 파일 로드할 때도 8개 심볼이 정상 바인딩된다.
+try:
+    from monitor_server.api import (  # noqa: F401,E402
+        _signal_set,
+        _serialize_phase_history_tail_for_graph,
+        _derive_node_status,
+        _build_graph_payload,
+        _build_fan_in_map,
+        _load_state_json,
+        _build_task_detail_payload,
+        _now_iso_z,
+    )
+except (ImportError, ModuleNotFoundError):
+    import importlib.util as _c04_ilu  # type: ignore
+    _c04_api_path = Path(__file__).resolve().parent / "api.py"
+    _c04_spec = _c04_ilu.spec_from_file_location("monitor_server_api_c0_4", _c04_api_path)
+    _c04_mod = _c04_ilu.module_from_spec(_c04_spec)
+    sys.modules.setdefault("monitor_server_api_c0_4", _c04_mod)
+    _c04_spec.loader.exec_module(_c04_mod)  # type: ignore[union-attr]
+    _signal_set = _c04_mod._signal_set
+    _serialize_phase_history_tail_for_graph = _c04_mod._serialize_phase_history_tail_for_graph
+    _derive_node_status = _c04_mod._derive_node_status
+    _build_graph_payload = _c04_mod._build_graph_payload
+    _build_fan_in_map = _c04_mod._build_fan_in_map
+    _load_state_json = _c04_mod._load_state_json
+    _build_task_detail_payload = _c04_mod._build_task_detail_payload
+    _now_iso_z = _c04_mod._now_iso_z
+
+# ---------------------------------------------------------------------------
 # etag_cache lazy-load (monitor-perf: weak ETag/304 for _json_response)
 # ---------------------------------------------------------------------------
 # etag_cache.py는 _json_response 일반 API 응답에서 weak ETag(W/"...")를 처리한다.
@@ -2622,17 +2661,7 @@ def _refresh_seconds(model: dict) -> int:
     return value
 
 
-def _signal_set(signals: Optional[Iterable], kind: str) -> set:
-    """Return set of task_ids for signals whose ``kind`` matches."""
-    if not signals:
-        return set()
-    result = set()
-    for sig in signals:
-        sig_kind = getattr(sig, "kind", None)
-        sig_task = getattr(sig, "task_id", None)
-        if sig_kind == kind and sig_task:
-            result.add(sig_task)
-    return result
+# _signal_set: moved to monitor_server.api (C0-4).
 
 
 def _format_elapsed(item, lang: str = "ko") -> str:
@@ -5701,38 +5730,7 @@ _RUNNING_STATUSES = {"[dd]", "[im]", "[ts]"}
 _GRAPH_PHASE_TAIL_LIMIT = 3
 
 
-def _serialize_phase_history_tail_for_graph(
-    entries: "Optional[List[PhaseEntry]]",
-    limit: int = _GRAPH_PHASE_TAIL_LIMIT,
-) -> "List[dict]":
-    """Convert the last *limit* PhaseEntry items to /api/graph spec dicts.
-
-    Mapping:
-      - ``PhaseEntry.from_status`` → ``"from"``  (avoids Python reserved word)
-      - ``PhaseEntry.to_status``   → ``"to"``
-      - Other fields (``event``, ``at``, ``elapsed_seconds``) pass through unchanged.
-
-    Args:
-        entries: list of PhaseEntry (may be None or empty).
-        limit: maximum number of tail entries to return (default: _GRAPH_PHASE_TAIL_LIMIT=3).
-
-    Returns:
-        List of dicts with keys ``event``, ``from``, ``to``, ``at``, ``elapsed_seconds``.
-        Empty list when *entries* is None or empty.
-    """
-    if not entries:
-        return []
-    tail = entries[-limit:] if limit > 0 else []
-    return [
-        {
-            "event": entry.event,
-            "from": entry.from_status,
-            "to": entry.to_status,
-            "at": entry.at,
-            "elapsed_seconds": entry.elapsed_seconds,
-        }
-        for entry in tail
-    ]
+# _serialize_phase_history_tail_for_graph: moved to monitor_server.api (C0-4).
 
 
 def _is_api_graph_path(path: str) -> bool:
@@ -5751,146 +5749,10 @@ def _is_api_graph_path(path: str) -> bool:
     return urlsplit(path).path == _API_GRAPH_PATH
 
 
-def _derive_node_status(task: "WorkItem", signals: "List[SignalEntry]") -> str:
-    """Derive display status for a graph node.
-
-    Priority order (higher overrides lower):
-      1. ``bypassed``:  task.bypassed == True
-      2. ``failed``:    .failed signal exists OR last_event ends with ".fail"
-      3. ``done``:      task.status == "[xx]"
-      4. ``running``:   .running signal exists OR status in {[dd],[im],[ts]}
-      5. ``pending``:   all other cases
-    """
-    # Build signal kind sets for this task's id
-    task_signals = {sig.kind for sig in signals if sig.task_id == task.id}
-
-    # 1. bypassed
-    if task.bypassed:
-        return "bypassed"
-
-    # 2. failed
-    has_failed_signal = "failed" in task_signals
-    last_ev = task.last_event or ""
-    has_fail_event = last_ev.endswith(".fail") or last_ev == "fail"
-    if has_failed_signal or has_fail_event:
-        return "failed"
-
-    # 3. done
-    if task.status == "[xx]":
-        return "done"
-
-    # 4. running
-    has_running_signal = "running" in task_signals
-    if has_running_signal or task.status in _RUNNING_STATUSES:
-        return "running"
-
-    # 5. pending
-    return "pending"
+# _derive_node_status: moved to monitor_server.api (C0-4).
 
 
-def _build_graph_payload(
-    tasks: "List[WorkItem]",
-    signals: "List[SignalEntry]",
-    graph_stats: dict,
-    docs_dir_str: str,
-    subproject: str,
-) -> dict:
-    """Assemble the /api/graph response payload.
-
-    Args:
-        tasks: WorkItem list from scan_tasks().
-        signals: SignalEntry list from scan_signals().
-        graph_stats: dict from dep-analysis.py --graph-stats.
-        docs_dir_str: effective docs directory path string.
-        subproject: subproject query parameter value (e.g. "all" or "p1").
-
-    Returns:
-        dict with keys: subproject, docs_dir, generated_at, stats,
-        critical_path, nodes, edges.
-    """
-    # dep-analysis.py returns both "fan_out" and "fan_out_map" (alias).
-    # fan_in_map is injected locally by _handle_graph_api before calling here.
-    fan_in_map: dict = graph_stats.get("fan_in_map", {})
-    fan_out_map: dict = graph_stats.get("fan_out_map", {})
-    critical_path: dict = graph_stats.get("critical_path", {"nodes": [], "edges": []})
-    bottleneck_ids: list = graph_stats.get("bottleneck_ids", [])
-    bottleneck_set: set = set(bottleneck_ids)
-    cp_node_set = set(critical_path.get("nodes", []))
-
-    # Derive per-task status and count stats
-    status_counts = {"done": 0, "running": 0, "pending": 0, "failed": 0, "bypassed": 0}
-    nodes = []
-    task_id_set = {t.id for t in tasks}
-
-    # Compute running_ids once (O(N+M)) — reuse same set for all nodes (no per-node scan)
-    running_ids_set = _signal_set(signals, "running")
-
-    for task in tasks:
-        node_status = _derive_node_status(task, signals)
-        status_counts[node_status] += 1
-
-        # TSK-04-01 (FR-06): per-node data-phase attribute derivation
-        _node_phase = _phase_data_attr(
-            task.status,
-            failed=(node_status == "failed"),
-            bypassed=bool(task.bypassed),
-        )
-
-        nodes.append({
-            "id": task.id,
-            "label": task.title or task.id,
-            "status": node_status,
-            "is_critical": task.id in cp_node_set,
-            "is_bottleneck": task.id in bottleneck_set,
-            "fan_in": fan_in_map.get(task.id, 0),
-            "fan_out": fan_out_map.get(task.id, 0),
-            "bypassed": task.bypassed,
-            "wp_id": task.wp_id,
-            "depends": list(task.depends),
-            # v4 payload fields (TSK-00-02)
-            "phase_history_tail": _serialize_phase_history_tail_for_graph(
-                task.phase_history_tail
-            ),
-            "last_event": task.last_event,
-            "last_event_at": task.last_event_at,
-            "elapsed_seconds": task.elapsed_seconds,
-            "is_running_signal": task.id in running_ids_set,
-            # TSK-05-02: filter predicate support fields
-            "domain": task.domain if task.domain is not None else "-",
-            "model": task.model if task.model is not None else "-",
-            # TSK-04-01 (FR-06): data-phase attribute value for graph node
-            "phase": _node_phase,
-        })
-
-    # Build edges from task depends relationships
-    edges = []
-    for task in tasks:
-        for dep_id in task.depends:
-            if dep_id in task_id_set:
-                edges.append({"source": dep_id, "target": task.id})
-
-    total = len(nodes)
-    stats = {
-        "total": total,
-        "done": status_counts["done"],
-        "running": status_counts["running"],
-        "pending": status_counts["pending"],
-        "failed": status_counts["failed"],
-        "bypassed": status_counts["bypassed"],
-        "max_chain_depth": graph_stats.get("max_chain_depth", 0),
-        "critical_path_length": len(critical_path.get("nodes", [])),
-        "bottleneck_count": len(bottleneck_ids),
-    }
-
-    return {
-        "subproject": subproject,
-        "docs_dir": docs_dir_str,
-        "generated_at": _now_iso_z(),
-        "stats": stats,
-        "critical_path": critical_path,
-        "nodes": nodes,
-        "edges": edges,
-    }
+# _build_graph_payload: moved to monitor_server.api (C0-4).
 
 
 _DEP_ANALYSIS_MODULE_NAME = "dep_analysis_inproc"
@@ -5983,18 +5845,7 @@ def _call_dep_analysis_graph_stats(tasks_input: list) -> "Tuple[Optional[dict], 
         return None, f"dep-analysis bad JSON: {exc!r}"
 
 
-def _build_fan_in_map(tasks: "List[WorkItem]") -> dict:
-    """Compute fan-in counts for each task from its dependents.
-
-    fan_in_map[t] = number of tasks that list *t* as a dependency.
-    Returns a dict with an entry for every task id, defaulting to 0.
-    """
-    fan_in_map: dict = {t.id: 0 for t in tasks}
-    for t in tasks:
-        for dep_id in t.depends:
-            if dep_id in fan_in_map:
-                fan_in_map[dep_id] += 1
-    return fan_in_map
+# _build_fan_in_map: moved to monitor_server.api (C0-4).
 
 
 def _graph_etag(json_bytes: bytes) -> str:
@@ -6335,61 +6186,7 @@ def _extract_wp_id(section_md: str, wbs_md: str, task_id: str) -> str:
     return ""
 
 
-def _load_state_json(task_dir) -> dict:
-    """Load state.json from task_dir. Returns ``{"status": "[ ]"}`` on missing/corrupt file."""
-    state_json_path = Path(task_dir) / "state.json"
-    if not state_json_path.exists():
-        return {"status": "[ ]"}
-    try:
-        with open(state_json_path, "r", encoding="utf-8") as fp:
-            return json.load(fp)
-    except (OSError, json.JSONDecodeError):
-        return {"status": "[ ]"}
-
-
-def _build_task_detail_payload(task_id, subproject, effective_docs_dir, wbs_md):
-    """Build /api/task-detail payload. Returns (status_code, dict).
-
-    Handles two ID kinds: WBS Tasks (``TSK-…``) and Features (kebab-case names
-    under ``{docs}/features/{name}/``). Invalid IDs return 400; missing
-    resources return 404.
-    """
-    if _TSK_ID_VALID_RE.match(task_id):
-        wbs_section_md = _extract_wbs_section(wbs_md, task_id)
-        if not wbs_section_md:
-            return (404, {"error": f"Task {task_id!r} not found in wbs.md", "code": 404})
-        title = _extract_title_from_section(wbs_section_md)
-        wp_id = _extract_wp_id(wbs_section_md, wbs_md, task_id)
-        task_dir = Path(effective_docs_dir) / "tasks" / task_id
-        state = _load_state_json(task_dir)
-        artifacts = _collect_artifacts(task_dir)
-        logs = _collect_logs(task_dir)
-        return (200, {
-            "task_id": task_id, "title": title, "wp_id": wp_id, "source": "wbs",
-            "wbs_section_md": wbs_section_md, "state": state, "artifacts": artifacts,
-            "logs": logs,
-        })
-
-    if _FEAT_ID_VALID_RE.match(task_id):
-        feat_dir = Path(effective_docs_dir) / "features" / task_id
-        if not feat_dir.is_dir():
-            return (404, {"error": f"Feature {task_id!r} not found", "code": 404})
-        state = _load_state_json(feat_dir)
-        title = state.get("name") or task_id
-        artifacts = _collect_feat_artifacts(feat_dir)
-        logs = _collect_logs(feat_dir)
-        spec_md = ""
-        try:
-            spec_md = (feat_dir / "spec.md").read_text(encoding="utf-8")
-        except OSError:
-            pass
-        return (200, {
-            "task_id": task_id, "title": title, "wp_id": "", "source": "feat",
-            "wbs_section_md": spec_md, "state": state, "artifacts": artifacts,
-            "logs": logs,
-        })
-
-    return (400, {"error": f"Invalid task_id format: {task_id!r}", "code": 400})
+# _load_state_json, _build_task_detail_payload: moved to monitor_server.api (C0-4).
 
 
 def _handle_api_task_detail(handler) -> None:
@@ -6996,17 +6793,7 @@ def _asdict_or_none(value):
     return value
 
 
-def _now_iso_z() -> str:
-    """Current UTC time as ISO-8601 with ``Z`` suffix (seconds precision).
-
-    Example: ``"2026-04-30T10:30:00Z"``. Matches the ``generated_at`` contract
-    in TRD §4.1.
-    """
-    return (
-        datetime.now(timezone.utc)
-        .isoformat(timespec="seconds")
-        .replace("+00:00", "Z")
-    )
+# _now_iso_z: moved to monitor_server.api (C0-4).
 
 
 def _classify_signal_scopes(

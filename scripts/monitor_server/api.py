@@ -211,6 +211,33 @@ def _derive_node_status(task, signals) -> str:
     return "pending"
 
 
+# Maps status code → data-phase attribute value (raw string without brackets).
+# Mirrors core.py SSOT (_PHASE_CODE_TO_ATTR). Used by _phase_data_attr for
+# graph node "phase" field derivation.
+_PHASE_CODE_TO_ATTR: "dict[str, str]" = {
+    "[dd]": "dd",
+    "[im]": "im",
+    "[ts]": "ts",
+    "[xx]": "xx",
+    "failed": "failed",
+    "bypass": "bypass",
+    "pending": "pending",
+}
+
+
+def _phase_data_attr(status_code, *, failed: bool = False, bypassed: bool = False) -> str:
+    """Return the data-phase attribute value for a Task row/node.
+
+    Priority: bypassed > failed > status_code mapping > pending.
+    """
+    if bypassed:
+        return "bypass"
+    if failed:
+        return "failed"
+    code = str(status_code).strip() if status_code else ""
+    return _PHASE_CODE_TO_ATTR.get(code, "pending")
+
+
 def _build_graph_payload(tasks, signals, graph_stats: dict, docs_dir_str: str, subproject: str) -> dict:
     """Assemble the /api/graph response payload."""
     fan_in_map: dict = graph_stats.get("fan_in_map", {})
@@ -232,6 +259,12 @@ def _build_graph_payload(tasks, signals, graph_stats: dict, docs_dir_str: str, s
 
         tid = _task_id(task)
         ph_tail = _task_attr(task, "phase_history_tail") or []
+        # TSK-04-01 (FR-06): per-node data-phase attribute derivation.
+        _node_phase = _phase_data_attr(
+            _task_attr(task, "status"),
+            failed=(node_status == "failed"),
+            bypassed=bool(_task_attr(task, "bypassed", False)),
+        )
         nodes.append({
             "id": tid,
             "label": _task_attr(task, "title") or tid,
@@ -250,6 +283,8 @@ def _build_graph_payload(tasks, signals, graph_stats: dict, docs_dir_str: str, s
             "is_running_signal": tid in running_ids_set,
             "domain": _task_attr(task, "domain") or "-",
             "model": _task_attr(task, "model") or "-",
+            # TSK-04-01 (FR-06): data-phase attribute value for graph node
+            "phase": _node_phase,
         })
 
     edges = []
