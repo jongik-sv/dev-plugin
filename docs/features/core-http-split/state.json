@@ -1,9 +1,9 @@
 {
   "name": "core-http-split",
-  "status": "[im]",
+  "status": "[xx]",
   "last": {
-    "event": "build.ok",
-    "at": "2026-04-24T16:04:07Z"
+    "event": "refactor.ok",
+    "at": "2026-04-24T16:20:08Z"
   },
   "phase_history": [
     {
@@ -19,8 +19,24 @@
       "to": "[im]",
       "at": "2026-04-24T16:04:07Z",
       "elapsed_seconds": 3410
+    },
+    {
+      "event": "test.ok",
+      "from": "[im]",
+      "to": "[ts]",
+      "at": "2026-04-24T16:08:13Z",
+      "elapsed_seconds": 246
+    },
+    {
+      "event": "refactor.ok",
+      "from": "[ts]",
+      "to": "[xx]",
+      "at": "2026-04-24T16:20:08Z",
+      "elapsed_seconds": 715
     }
   ],
-  "updated": "2026-04-24T16:04:07Z",
-  "started_at": "2026-04-24T15:07:17Z"
+  "updated": "2026-04-24T16:20:08Z",
+  "started_at": "2026-04-24T15:07:17Z",
+  "completed_at": "2026-04-24T16:20:08Z",
+  "elapsed_seconds": 4371
 }
