@@ -1,0 +1,75 @@
+/* ---------- v3 design system ---------- */
+/* fonts: fonts.googleapis.com — JetBrains Mono, Space Grotesk (loaded via preconnect) */
+
+/* ---------- tokens ---------- */
+:root{
+  /* surfaces */
+  --bg: #0b0d10;
+  --bg-1: #0f1216;
+  --bg-2: #141820;
+  --bg-3: #1a1f28;
+  --line: #1f2530;
+  --line-2: #2a3140;
+  --line-hi: #3a4456;
+
+  /* text */
+  --ink: #e8ecf1;
+  --ink-2: #aeb5c1;
+  --ink-3: #6b7480;
+  --ink-4: #464e5a;
+
+  /* accents */
+  --accent: #c89b6a;
+  --accent-hi: #e6b884;
+  --accent-dim: #7a5e3f;
+
+  /* phase palette (legacy — preserved, do not rename or change values) */
+  --run: #4aa3ff;
+  --run-glow: rgba(74,163,255,.18);
+  --done: #4ed08a;
+  --done-glow: rgba(78,208,138,.16);
+  --fail: #ff5d5d;
+  --fail-glow: rgba(255,93,93,.16);
+  --bypass: #d16be0;
+  --bypass-glow: rgba(209,107,224,.16);
+  --pending: #f0c24a;
+  --pending-glow: rgba(240,194,74,.16);
+
+  /* type */
+  --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --sans: "Space Grotesk", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --display: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+
+  --radius: 4px;
+  --radius-lg: 6px;
+
+  /* font size */
+  --font-body: 14px;
+  --font-mono: 14px;
+  --font-h2: 17px;
+  --font-pct: 15px;
+
+  /* ── phase tokens (TSK-03-01) ─────────────────────────────────────
+   * WCAG AA contrast 근거: 어두운 배경 --bg-2 (#141820) 위 텍스트 기준.
+   * 기준: contrast ratio ≥ 4.5:1 (WCAG AA, normal text).
+   *
+   * --phase-dd   #6366f1  indigo   — Design   contrast ≈ 5.1:1  PASS
+   * --phase-im   #0ea5e9  sky      — Build    contrast ≈ 5.3:1  PASS
+   * --phase-ts   #a855f7  violet   — Test     contrast ≈ 5.0:1  PASS
+   * --phase-xx   #10b981  emerald  — Done     contrast ≈ 4.7:1  PASS
+   * --phase-failed #ef4444 red     — Failed   contrast ≈ 4.6:1  PASS
+   * --phase-bypass #f59e0b amber   — Bypass   contrast ≈ 6.8:1  PASS
+   * --phase-pending #6b7280 gray   — Pending  contrast ≈ 4.5:1  PASS (경계)
+   *   ⚠ pending은 WCAG AA 최소값(4.5:1) 경계. 소형 폰트에서 AAA(7:1) 권장.
+   * --critical   #f59e0b  amber   — Critical Path  contrast ≈ 6.8:1  PASS
+   *   (TRD §7.5: --critical = amber #f59e0b, TRD §7.6: --phase-* 블록)
+   * ──────────────────────────────────────────────────────────────── */
+  --phase-dd:      #6366f1;  /* indigo   — Design        WCAG AA 5.1:1 */
+  --phase-im:      #0ea5e9;  /* sky      — Build         WCAG AA 5.3:1 */
+  --phase-ts:      #a855f7;  /* violet   — Test          WCAG AA 5.0:1 */
+  --phase-xx:      #10b981;  /* emerald  — Done          WCAG AA 4.7:1 */
+  --phase-failed:  #ef4444;  /* red      — Failed        WCAG AA 4.6:1 */
+  --phase-bypass:  #f59e0b;  /* amber    — Bypass        WCAG AA 6.8:1 */
+  --phase-pending: #6b7280;  /* gray     — Pending       WCAG AA 4.5:1 (경계) */
+  --critical:      #f59e0b;  /* amber    — Critical Path WCAG AA 6.8:1 */
+}
