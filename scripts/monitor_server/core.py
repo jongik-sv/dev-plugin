@@ -2471,20 +2471,12 @@ def _section_wp_cards(*args, **kwargs) -> str:  # type: ignore[misc]
     return ""  # fallback: should not reach here in production
 
 
+# moved to monitor_server.renderers.features [core-renderer-split:C2-3]
 def _section_features(features, running_ids: set, failed_ids: set, heading: "Optional[str]" = None, lang: str = "ko") -> str:
-    """Feature section: flat .trow list inside .features-wrap panel (no WP grouping).
-
-    TSK-02-02: heading 파라미터 추가 — i18n 지원.
-    """
-    heading = _resolve_heading("features", heading)
-    if not features:
-        return _empty_section(
-            "features", heading, "no features found — docs/features/ is empty"
-        )
-    rows = "\n".join(
-        _render_task_row_v2(item, running_ids, failed_ids, lang=lang) for item in features
-    )
-    return _section_wrap("features", heading, f'<div class="features-wrap">\n{rows}\n</div>')
+    _feat_mod = _c2b_load_renderer("features")
+    if _feat_mod is not None:
+        return _feat_mod._section_features(features, running_ids, failed_ids, heading, lang)
+    return ""
 
 
 def _pane_attr(pane, key: str, default=""):
@@ -5833,6 +5825,15 @@ except (ImportError, AttributeError):
             _kpi_counts = _c2b_kpi._kpi_counts  # type: ignore[assignment]
             _spark_buckets = _c2b_kpi._spark_buckets  # type: ignore[assignment]
             _kpi_spark_svg = _c2b_kpi._kpi_spark_svg  # type: ignore[assignment]
+    except (ImportError, AttributeError):
+        pass
+try:
+    from .renderers.features import _section_features  # noqa: F401,E402
+except (ImportError, AttributeError):
+    try:
+        _c2b_feat = _c2b_load_renderer("features")
+        if _c2b_feat is not None:
+            _section_features = _c2b_feat._section_features  # type: ignore[assignment]
     except (ImportError, AttributeError):
         pass
 # === /renderer facade ===
