@@ -5533,6 +5533,7 @@ def _render_pane_html(
     )
 
     css_ver = get_static_version("style.css")
+    js_ver = get_static_version("app.js")
     return (
         '<!DOCTYPE html>\n'
         '<html lang="en">\n'
@@ -5540,6 +5541,7 @@ def _render_pane_html(
         '  <meta charset="utf-8">\n'
         f'  <title>pane {escaped_id}</title>\n'
         f'  <link rel="stylesheet" href="/static/style.css?v={css_ver}">\n'
+        f'  <script src="/static/app.js?v={js_ver}" defer></script>\n'
         '</head>\n'
         '<body>\n'
         '<nav class="top-nav"><a href="/">&#x2190; back to dashboard</a></nav>\n'
@@ -5547,7 +5549,6 @@ def _render_pane_html(
         f'{error_block}'
         f'<pre class="pane-capture" data-pane="{escaped_id}">{escaped_lines}</pre>\n'
         f'<div class="footer">captured at {escaped_ts}</div>\n'
-        f'<script>{_PANE_JS}</script>\n'
         '</body>\n'
         '</html>\n'
     )

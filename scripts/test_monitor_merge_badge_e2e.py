@@ -198,25 +198,28 @@ class MergeBadgeSSRStructureTests(unittest.TestCase):
         }
         return monitor_server.render_dashboard(model, lang="ko", subproject="monitor-v4")
 
+    def _style_bundle(self) -> str:
+        return monitor_server.get_static_bundle("style.css").decode("utf-8")
+
+    def _app_bundle(self) -> str:
+        return monitor_server.get_static_bundle("app.js").decode("utf-8")
+
     def test_full_dashboard_has_merge_badge(self):
         """render_dashboard 출력에 merge-badge 포함."""
         html = self._render()
         self.assertIn("merge-badge", html)
 
     def test_full_dashboard_has_open_merge_panel_js(self):
-        """render_dashboard 출력에 openMergePanel JS 포함."""
-        html = self._render()
-        self.assertIn("openMergePanel", html)
+        """TSK-01-03 후: app.js 번들에 openMergePanel 포함."""
+        self.assertIn("openMergePanel", self._app_bundle())
 
     def test_full_dashboard_has_render_merge_preview_js(self):
-        """render_dashboard 출력에 renderMergePreview JS 포함."""
-        html = self._render()
-        self.assertIn("renderMergePreview", html)
+        """TSK-01-03 후: app.js 번들에 renderMergePreview 포함."""
+        self.assertIn("renderMergePreview", self._app_bundle())
 
     def test_full_dashboard_has_merge_badge_css(self):
-        """render_dashboard 출력에 .merge-badge CSS 포함."""
-        html = self._render()
-        self.assertIn(".merge-badge", html)
+        """TSK-01-02 후: style.css 번들에 .merge-badge CSS 포함."""
+        self.assertIn(".merge-badge", self._style_bundle())
 
     def test_task_panel_outside_data_section_structure(self):
         """#task-panel이 HTML에 존재하며 body 직계 배치."""
@@ -225,12 +228,10 @@ class MergeBadgeSSRStructureTests(unittest.TestCase):
         self.assertIn('id="task-panel-overlay"', html)
 
     def test_auto_refresh_panel_isolation_via_delegation(self):
-        """document-level delegation으로 .merge-badge 클릭 처리 — sectional innerHTML 교체 후에도 생존."""
-        html = self._render()
-        # document.addEventListener('click', ...) 내에 .merge-badge 분기 포함
-        self.assertIn(".merge-badge", html)
-        # delegation은 document.addEventListener로 구현
-        self.assertIn("document.addEventListener", html)
+        """document-level delegation으로 .merge-badge 클릭 처리.
+        TSK-01-02/03 후: .merge-badge selector는 style.css 번들, delegation 핸들러는 app.js 번들에 있음."""
+        self.assertIn(".merge-badge", self._style_bundle())
+        self.assertIn("document.addEventListener", self._app_bundle())
 
 
 if __name__ == "__main__":
