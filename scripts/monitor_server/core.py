@@ -88,96 +88,52 @@ except (ImportError, ModuleNotFoundError):
     _now_iso_z = _c04_mod._now_iso_z
 
 # ---------------------------------------------------------------------------
-# etag_cache lazy-load (monitor-perf: weak ETag/304 for _json_response)
+# [core-decomposition:C1-1] caches 모듈 재-export
 # ---------------------------------------------------------------------------
-# etag_cache.py는 _json_response 일반 API 응답에서 weak ETag(W/"...")를 처리한다.
-# /api/graph 전용 ETag는 _graph_etag() / _get_if_none_match()가 직접 처리한다.
-_compute_etag = None  # type: ignore
-_check_if_none_match = None  # type: ignore
-_etag_cache_loaded = False
+# _TTLCache, _SIGNALS_CACHE, _GRAPH_CACHE, _ensure_etag_cache 는 caches.py로
+# 이관되었다. `core._SIGNALS_CACHE` 등 기존 속성 접근을 유지하기 위해 재-export.
+# flat-load fallback 은 C0-4 의 monitor_server.api 처리와 동일 패턴 사용.
+try:
+    from monitor_server.caches import (  # noqa: F401,E402
+        _TTLCache,
+        _SIGNALS_CACHE,
+        _GRAPH_CACHE,
+        _ensure_etag_cache,
+    )
+    # _compute_etag / _check_if_none_match 은 module-level globals로 lazy-load 되므로
+    # 속성 접근 시점마다 caches 모듈을 경유해야 한다. core.py 내부 호출자는
+    # _ensure_etag_cache() 호출 후 caches 모듈에서 다시 읽는다.
+    import monitor_server.caches as _caches_mod  # noqa: E402
+except (ImportError, ModuleNotFoundError):
+    import importlib.util as _c11_ilu  # type: ignore
+    _c11_caches_path = Path(__file__).resolve().parent / "caches.py"
+    _c11_spec = _c11_ilu.spec_from_file_location(
+        "monitor_server_caches_c1_1", _c11_caches_path
+    )
+    _c11_mod = _c11_ilu.module_from_spec(_c11_spec)
+    sys.modules.setdefault("monitor_server_caches_c1_1", _c11_mod)
+    _c11_spec.loader.exec_module(_c11_mod)  # type: ignore[union-attr]
+    _TTLCache = _c11_mod._TTLCache
+    _SIGNALS_CACHE = _c11_mod._SIGNALS_CACHE
+    _GRAPH_CACHE = _c11_mod._GRAPH_CACHE
+    _ensure_etag_cache = _c11_mod._ensure_etag_cache
+    _caches_mod = _c11_mod
 
 
-def _ensure_etag_cache() -> None:
-    """etag_cache.py를 최초 1회 lazy-load.
-
-    고유 키(_monitor_perf_etag_cache)로만 등록하여 sys.modules["monitor_server"]
-    가 flat 파일이거나 패키지이거나 관계없이 __init__.py 실행 등 side-effect를 방지.
-    """
-    global _compute_etag, _check_if_none_match, _etag_cache_loaded
-    if _etag_cache_loaded:
-        return
-    _etag_cache_loaded = True
-    try:
-        import importlib.util as _ilu
-        _ec_path = Path(__file__).with_name("etag_cache.py")
-        if not _ec_path.exists():
-            return
-        # 고유 키로 확인 — monitor_server.etag_cache 키는 __init__.py 실행 side-effect 위험
-        _uniq_key = "_monitor_perf_etag_cache"
-        _existing = sys.modules.get(_uniq_key)
-        if _existing is not None:
-            _compute_etag = getattr(_existing, "compute_etag", None)
-            _check_if_none_match = getattr(_existing, "check_if_none_match", None)
-            return
-        _spec = _ilu.spec_from_file_location(_uniq_key, str(_ec_path))
-        if _spec is None:
-            return
-        _mod = _ilu.module_from_spec(_spec)
-        sys.modules[_uniq_key] = _mod
-        _spec.loader.exec_module(_mod)  # type: ignore[union-attr]
-        _compute_etag = getattr(_mod, "compute_etag", None)
-        _check_if_none_match = getattr(_mod, "check_if_none_match", None)
-    except Exception:
-        pass
+def _compute_etag(*args, **kwargs):  # type: ignore[no-redef]
+    """Shim: etag_cache lazy-load 후 실제 구현 호출 (caches 모듈 경유)."""
+    fn = getattr(_caches_mod, "_compute_etag", None)
+    if fn is None:
+        return None
+    return fn(*args, **kwargs)
 
 
-# ---------------------------------------------------------------------------
-# TTL Cache (monitor-server-perf)
-# ---------------------------------------------------------------------------
-
-class _TTLCache:
-    """Thread-safe in-memory TTL cache.
-
-    Usage::
-
-        cache = _TTLCache(ttl_seconds=1.0)
-        value, hit = cache.get("key")   # hit=False → miss
-        cache.set("key", value)         # stores value with ttl
-
-    All operations are protected by a single ``threading.Lock`` so concurrent
-    requests from ``ThreadingHTTPServer`` workers are safe.
-    """
-
-    def __init__(self, ttl_seconds: float = 1.0) -> None:
-        self._ttl = ttl_seconds
-        self._store: dict = {}   # key -> (value, expire_at)
-        self._lock = threading.Lock()
-
-    def get(self, key: str) -> "Tuple[Any, bool]":
-        """Return ``(value, True)`` on hit, ``(None, False)`` on miss/expired."""
-        with self._lock:
-            entry = self._store.get(key)
-            if entry is None:
-                return None, False
-            value, expire_at = entry
-            if time.monotonic() >= expire_at:
-                del self._store[key]
-                return None, False
-            return value, True
-
-    def set(self, key: str, value: "Any") -> None:
-        """Store *value* under *key* with expiry at now + ttl_seconds."""
-        expire_at = time.monotonic() + self._ttl
-        with self._lock:
-            self._store[key] = (value, expire_at)
-
-
-# Module-level TTL cache instances
-# _GRAPH_CACHE TTL=0: 테스트 호환성 — 동일 docs_dir로 반복 호출 시 캐시 히트가
-# scan_tasks mock을 우회하는 문제 방지. 실 서버에서도 ETag/304가 클라이언트 캐싱을
-# 담당하므로 서버측 in-memory TTL 캐시는 불필요.
-_SIGNALS_CACHE: _TTLCache = _TTLCache(ttl_seconds=1.0)
-_GRAPH_CACHE: _TTLCache = _TTLCache(ttl_seconds=0.0)
+def _check_if_none_match(*args, **kwargs):  # type: ignore[no-redef]
+    """Shim: etag_cache lazy-load 후 실제 구현 호출 (caches 모듈 경유)."""
+    fn = getattr(_caches_mod, "_check_if_none_match", None)
+    if fn is None:
+        return None
+    return fn(*args, **kwargs)
 
 
 # ---------------------------------------------------------------------------
