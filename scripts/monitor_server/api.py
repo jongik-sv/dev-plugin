@@ -165,14 +165,20 @@ def _serialize_phase_history_tail_for_graph(
 
 
 def _signal_set(signals: Optional[Iterable], kind: str) -> set:
-    """Return set of task_ids whose signal kind matches *kind*."""
+    """Return set of task_ids for signals whose ``kind`` matches.
+
+    Empty task_ids are excluded — matches core.py SSOT semantics so that
+    anonymous/malformed signals don't leak into the running/failed sets.
+    """
     if not signals:
         return set()
-    return {
-        _sig_attr(sig, "task_id")
-        for sig in signals
-        if _sig_attr(sig, "kind") == kind
-    }
+    result = set()
+    for sig in signals:
+        sig_kind = _sig_attr(sig, "kind")
+        sig_task = _sig_attr(sig, "task_id")
+        if sig_kind == kind and sig_task:
+            result.add(sig_task)
+    return result
 
 
 def _derive_node_status(task, signals) -> str:
