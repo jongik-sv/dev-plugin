@@ -226,9 +226,10 @@ class Handler(BaseHTTPRequestHandler):
     def _serve_local_static(self, filename: str) -> None:
         """CSS/JS를 in-memory 번들 우선, monitor_server/static/ 폴백으로 서빙.
 
-        TSK-01-02/03: core.get_static_bundle(filename)이 inline constants를
-        concat하여 반환한다. 이게 source of truth이며 on-disk static 파일은
-        옵셔널 (외부 도구 참조용). 번들이 비어있을 때만 디스크로 폴백.
+        [core-dashboard-asset-split:C2-1] core.get_static_bundle(filename)이
+        monitor_server/static/{dashboard,task_panel,pane}.{css,js} 를 import
+        시 읽어 concat하여 반환한다. 이게 source of truth.
+        번들이 비어있을 때만 디스크로 폴백 (미래 호환 유지).
         """
         # Primary: in-memory bundle (source of truth)
         data = b""
