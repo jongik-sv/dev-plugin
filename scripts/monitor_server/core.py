@@ -1,25 +1,43 @@
-"""monitor_server.core — dev-monitor 핵심 구현 (TSK-02-03).
+"""monitor_server.core — dev-monitor 통합 모듈 + facade.
 
-monitor-server.py의 모든 구현이 이 모듈로 이전되었다.
-monitor-server.py는 얇은 엔트리로 축소되어 이 모듈을 import한다.
+core-decomposition (Phase 0 + Phase 1) 결과 본 모듈은 **facade 역할**과
+**HTTP 핸들러/렌더러 구현**을 함께 담는다. 대부분의 도메인 로직은 전용
+서브모듈로 이관되었고 core.py 는 해당 심볼을 재-export 하여 기존
+``import monitor_server.core as core`` 패턴의 backward-compat 을 보장한다.
 
-주요 구성 요소:
+하위 서브모듈 (Phase 1 분리):
+- :mod:`monitor_server.caches`    — TTL 캐시 + ETag 캐시 lazy-load
+- :mod:`monitor_server.signals`   — 시그널 파일 스캔 + WP busy 집계
+- :mod:`monitor_server.panes`     — tmux pane 메타데이터 + capture
+- :mod:`monitor_server.workitems` — Task/Feature 스캔, worktree 집계, 서브프로젝트
+- :mod:`monitor_server.api`       — /api/* 엔드포인트 공용 유틸 (Phase 0에서 SSOT 승격)
 
-- 시그널 스캐너: ``scan_signals()``
-- tmux pane 스캐너: ``list_tmux_panes()``, ``capture_pane(pane_id)``
-- 데이터 클래스: ``SignalEntry``, ``PaneInfo`` (TRD §5.2 / §5.3)
+core.py 에 남은 주요 구성 요소 (Phase 2 후보):
 - HTTP 서버: ``MonitorHandler``, ``run_server()``
 - 라우팅: ``/`` (대시보드), ``/pane/{id}`` (HTML), ``/api/pane/{id}`` (JSON),
   ``/api/state`` (전체 스냅샷)
+- HTML 렌더러: ``_render_*``, ``DASHBOARD_CSS``
+- 상태 모델 공용 유틸: ``_phase_data_attr``, ``_phase_label`` 등
+
+facade 계약:
+- ``core._SIGNALS_CACHE``, ``core._TTLCache``, ``core.scan_signals`` 등
+  서브모듈 심볼은 **import 시점 바인딩** 으로 재-export 된다.
+- 테스트가 ``core._X`` 를 monkey-patch 하더라도 서브모듈 내부 이름 참조는
+  서브모듈 namespace 를 본다. 따라서 캐시/함수 monkey-patch 는 대상 서브모듈
+  경유로 수행해야 한다 (design.md §4.1 Option A).
+- ``__all__`` 은 선언하지 않는다 — 외부 ``from monitor_server.core import *``
+  호환성을 유지하기 위해.
 
 구현 원칙:
 - Python 3.8+ stdlib 전용 (``CLAUDE.md`` 규약)
 - 모든 ``subprocess.run`` 은 ``shell=False`` 리스트 인자 + 명시 ``timeout``
-- 모든 실패 경로(디렉터리 부재, tmux 부재, 서버 미기동, 잘못된 pane_id,
-  subprocess 오류/타임아웃)는 정의된 반환 값으로 흡수 — 예외는
+- 모든 실패 경로는 정의된 반환 값으로 흡수 — 예외는
   ``capture_pane`` 의 pane_id 형식 위반(ValueError)만 허용
 - pane_id URL 인코딩: 링크 생성 시 ``quote(pane_id, safe="")``, 라우터에서
   ``unquote(path_segment)`` 후 ``_PANE_ID_RE`` 검증
+- flat-load 컨텍스트(test 에서 monitor-server.py 를 monitor_server 이름으로
+  로드하는 경우)도 지원 — 모든 서브모듈 import 는 try/except 로
+  ``_c1_bootstrap_submodules()`` fallback 을 가진다.
 """
 
 from __future__ import annotations
