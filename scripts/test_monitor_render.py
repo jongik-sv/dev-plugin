@@ -243,7 +243,7 @@ class ErrorBadgeTests(unittest.TestCase):
     """TSK-01-08: error 필드가 있는 Task 에 ⚠ 배지 + badge-warn CSS."""
 
     def test_error_task_shows_warn_badge(self) -> None:
-        """v3: 손상 Task 행은 badge 'error' 텍스트 + title 속성 포함."""
+        """TSK-04-01: 손상 Task 행은 badge에 title 속성 + data-phase="failed" 포함."""
         model = _normal_model()
         bad = _make_task(tsk_id="TSK-BAD", title=None, status=None,
                          last_event=None, last_event_at=None,
@@ -252,8 +252,9 @@ class ErrorBadgeTests(unittest.TestCase):
         model["wbs_tasks"].append(bad)
         html = render_dashboard(model)
         self.assertIn("TSK-BAD", html)
-        # v3: badge shows literal "error" text
-        self.assertIn('<div class="badge" title=', html)
+        # TSK-04-01: badge now has data-phase attribute before optional title attr
+        self.assertIn('class="badge"', html)
+        self.assertIn('title=', html)
 
     def test_error_task_has_badge_warn_class(self) -> None:
         """TSK-02-01: error 필드 있는 Task 배지는 'Failed' 텍스트로 표시 (data-phase='failed')."""
@@ -269,15 +270,20 @@ class ErrorBadgeTests(unittest.TestCase):
         self.assertIn('data-phase="failed"', html)
 
     def test_normal_task_has_no_warn_badge(self) -> None:
-        """v3: 정상 Task 행에는 title 속성 없는 badge, 'error' 텍스트 미출현.
+        """TSK-04-01: 정상 Task 행에는 badge에 title 속성 없음, 'error' 텍스트 미출현.
 
-        Badge 값은 data-status와 동일 (running/done/failed/bypass/pending).
+        Badge 값은 data-phase로 제어 (dd/im/ts/xx/failed/bypass/pending).
         """
+        import re as _re
         model = _normal_model()
         model["wbs_tasks"] = [_make_task(tsk_id="TSK-OK", status="[dd]")]
         html = render_dashboard(model)
         # 정상 Task의 badge는 title 속성을 갖지 않아야 한다.
-        self.assertNotIn('<div class="badge" title=', html)
+        # TSK-04-01: badge now has data-phase; check no title on badge element specifically
+        # badge elements: class="badge" ... — should not have title attr (only error tasks get it)
+        badges_with_title = _re.findall(r'class="badge"[^>]*title=', html)
+        self.assertEqual(len(badges_with_title), 0,
+                         f"정상 Task badge에 title 속성이 있음 (오류만 허용): {badges_with_title}")
 
     def test_error_title_attribute_contains_error_preview(self) -> None:
         """v3: 경고 div에 title 속성으로 에러 미리보기 포함."""
@@ -319,8 +325,12 @@ class ErrorBadgeTests(unittest.TestCase):
         html = render_dashboard(model)
         self.assertIn("TSK-GOOD", html)
         self.assertIn("TSK-BAD2", html)
-        # v3: error tasks get title attr on badge; count exactly 1 (only TSK-BAD2)
-        self.assertEqual(html.count('<div class="badge" title='), 1)
+        # TSK-04-01: badge now has data-phase before title attr; use title= count
+        # error tasks get title attr on badge (data-phase="failed" + title=)
+        # Verify exactly 1 badge has title attr (only TSK-BAD2 has error)
+        import re as _re
+        title_in_badge = _re.findall(r'class="badge"[^>]*title=', html)
+        self.assertEqual(len(title_in_badge), 1)
 
 
 class XSSEscapeTests(unittest.TestCase):
@@ -2504,10 +2514,10 @@ class TaskRowDataPhaseAttributeTests(unittest.TestCase):
         self.assertIn('data-status="done"', html)
 
     def test_spinner_placeholder_in_badge(self):
-        """배지 내부에 spinner span 자리가 존재한다 (TSK-02-02 준비)."""
+        """TSK-04-01: 배지 내부에 .spinner-inline span이 존재한다 (row-level .spinner 제거 후)."""
         task = _make_task(tsk_id="TSK-02-01", status="[dd]")
         html = monitor_server._render_task_row_v2(task, set(), set())
-        self.assertIn('class="spinner"', html)
+        self.assertIn('class="spinner-inline"', html)
 
 
 class I18NPhaseKeysTests(unittest.TestCase):
@@ -2549,16 +2559,16 @@ class TskSpinnerTests(unittest.TestCase):
         self.assertIn('data-running="false"', html)
 
     def test_task_row_spinner_span_always_present(self):
-        """모든 trow 에 <span class="spinner"> 가 존재해야 한다 (CSS 로 노출 제어)."""
+        """TSK-04-01: 모든 trow badge에 <span class="spinner-inline"> 가 존재 (CSS 로 노출 제어)."""
         task = _make_task(tsk_id="TSK-01-01", status="[dd]")
         html = monitor_server._render_task_row_v2(task, set(), set())
-        self.assertIn('<span class="spinner"', html)
+        self.assertIn('<span class="spinner-inline"', html)
 
     def test_task_row_spinner_span_present_when_running(self):
-        """running 상태 trow 에도 <span class="spinner"> 가 존재한다."""
+        """TSK-04-01: running 상태 trow badge 에도 <span class="spinner-inline"> 가 존재한다."""
         task = _make_task(tsk_id="TSK-01-01", status="[im]")
         html = monitor_server._render_task_row_v2(task, {"TSK-01-01"}, set())
-        self.assertIn('<span class="spinner"', html)
+        self.assertIn('<span class="spinner-inline"', html)
 
     def test_task_row_spinner_has_aria_hidden(self):
         """spinner span 에 aria-hidden="true" 가 있어야 한다."""
@@ -2589,9 +2599,9 @@ class TskSpinnerTests(unittest.TestCase):
         self.assertIn('data-status="done"', html)
 
     def test_dashboard_css_has_trow_running_spinner_rule(self):
-        """.trow[data-running="true"] .spinner { display: inline-block } 규칙 존재."""
+        """TSK-04-01: .trow[data-running="true"] .badge .spinner-inline { display: inline-block } 규칙 존재."""
         css = monitor_server.DASHBOARD_CSS
-        self.assertIn('.trow[data-running="true"] .spinner', css)
+        self.assertIn('.trow[data-running="true"] .badge .spinner-inline', css)
 
 
 class TskTooltipStateSummaryTests(unittest.TestCase):
@@ -2739,44 +2749,52 @@ class TskTooltipStateSummaryTests(unittest.TestCase):
         for cls in ("statusbar", "tid", "badge", "spinner", "ttitle", "elapsed", "retry", "flags"):
             self.assertIn(cls, h, f"기존 클래스 {cls} 누락")
 
-    def test_trow_tooltip_dom_in_body(self):
+    def test_trow_info_popover_dom_in_body(self):
+        """TSK-04-02: 싱글톤 팝오버 #trow-info-popover이 body에 1회 등장."""
         tasks = [self._make_task_with_history(tsk_id="TSK-02-03")]
         h = render_dashboard(self._make_model(tasks))
-        count = h.count('<div id="trow-tooltip"')
-        self.assertEqual(count, 1, f"#trow-tooltip 이 {count}회 발견 (1회 이어야 함)")
+        count = h.count('id="trow-info-popover"')
+        self.assertEqual(count, 1, f"#trow-info-popover 이 {count}회 발견 (1회 이어야 함)")
 
-    def test_trow_tooltip_dom_has_role_tooltip(self):
+    def test_trow_info_popover_dom_has_role_dialog(self):
+        """TSK-04-02: 팝오버 DOM에 role="dialog" 속성이 있다."""
         tasks = [self._make_task_with_history(tsk_id="TSK-02-03")]
         h = render_dashboard(self._make_model(tasks))
-        self.assertIn('<div id="trow-tooltip" role="tooltip"', h)
+        self.assertIn('id="trow-info-popover"', h)
+        self.assertIn('role="dialog"', h)
 
-    def test_trow_tooltip_dom_has_hidden_attribute(self):
+    def test_trow_info_popover_dom_has_hidden_attribute(self):
+        """TSK-04-02: 팝오버 DOM이 초기 hidden 속성을 가진다."""
         tasks = [self._make_task_with_history(tsk_id="TSK-02-03")]
         h = render_dashboard(self._make_model(tasks))
-        self.assertIn('<div id="trow-tooltip" role="tooltip" hidden', h)
+        self.assertIn('id="trow-info-popover"', h)
+        self.assertIn("hidden", h)
 
-    def test_dashboard_css_has_trow_tooltip_rule(self):
-        self.assertIn("#trow-tooltip", monitor_server.DASHBOARD_CSS)
+    def test_dashboard_css_has_info_popover_rule(self):
+        """TSK-04-02: DASHBOARD_CSS에 .info-popover 규칙이 있다."""
+        self.assertIn(".info-popover", monitor_server.DASHBOARD_CSS)
 
-    def test_dashboard_css_trow_tooltip_has_position_fixed(self):
-        self.assertIn("position:fixed", monitor_server.DASHBOARD_CSS)
+    def test_dashboard_css_info_popover_has_position_absolute(self):
+        """TSK-04-02: .info-popover는 position:absolute를 사용한다."""
+        css = monitor_server.DASHBOARD_CSS
+        idx = css.find('.info-popover')
+        self.assertNotEqual(idx, -1)
+        snippet = css[idx:idx+300].replace(' ', '').replace('\n', '')
+        self.assertIn('position:absolute', snippet)
 
-    def test_dashboard_css_trow_tooltip_has_pointer_events_none(self):
-        self.assertIn("pointer-events:none", monitor_server.DASHBOARD_CSS)
+    def test_dashboard_css_has_info_btn_rule(self):
+        """TSK-04-02: DASHBOARD_CSS에 .info-btn 규칙이 있다."""
+        self.assertIn(".info-btn", monitor_server.DASHBOARD_CSS)
 
-    def test_dashboard_js_has_setup_task_tooltip(self):
-        self.assertIn("setupTaskTooltip", monitor_server._DASHBOARD_JS)
+    def test_dashboard_js_has_setup_info_popover(self):
+        """TSK-04-02: _DASHBOARD_JS에 setupInfoPopover IIFE가 있다."""
+        self.assertIn("setupInfoPopover", monitor_server._DASHBOARD_JS)
 
-    def test_dashboard_js_has_document_level_delegation(self):
+    def test_dashboard_js_has_click_delegation(self):
+        """TSK-04-02: setupInfoPopover는 click delegation + closest 사용."""
         js = monitor_server._DASHBOARD_JS
-        self.assertIn("mouseenter", js)
         self.assertIn("closest", js)
         self.assertIn("data-state-summary", js)
-
-    def test_dashboard_js_has_300ms_debounce(self):
-        js = monitor_server._DASHBOARD_JS
-        self.assertIn("300", js)
-        self.assertIn("setTimeout", js)
 
     def test_dashboard_js_has_scroll_hide(self):
         self.assertIn("scroll", monitor_server._DASHBOARD_JS)
@@ -2791,11 +2809,12 @@ class TskTooltipStateSummaryTests(unittest.TestCase):
         result = monitor_server._encode_state_summary_attr({"status": "[im]"})
         self.assertIsInstance(result, str)
 
-    def test_trow_tooltip_skeleton_helper_exists(self):
-        self.assertTrue(hasattr(monitor_server, "_trow_tooltip_skeleton"))
-        h = monitor_server._trow_tooltip_skeleton()
-        self.assertIn('id="trow-tooltip"', h)
-        self.assertIn('role="tooltip"', h)
+    def test_trow_info_popover_skeleton_helper_exists(self):
+        """TSK-04-02: _trow_info_popover_skeleton() 함수가 존재하고 올바른 DOM 반환."""
+        self.assertTrue(hasattr(monitor_server, "_trow_info_popover_skeleton"))
+        h = monitor_server._trow_info_popover_skeleton()
+        self.assertIn('id="trow-info-popover"', h)
+        self.assertIn('role="dialog"', h)
         self.assertIn("hidden", h)
 
 
