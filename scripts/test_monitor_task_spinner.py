@@ -277,10 +277,15 @@ class TestSpinnerPositionInJsSource(unittest.TestCase):
         """monitor-server.py 또는 monitor_server/core.py에 .dep-node .node-spinner CSS 위치 규칙이 있다."""
         server_path = pathlib.Path(__file__).parent / "monitor-server.py"
         core_path = pathlib.Path(__file__).parent / "monitor_server" / "core.py"
-        src = ""
-        for path in (server_path, core_path):
-            if path.exists():
-                src += path.read_text(encoding="utf-8")
+        # [core-dashboard-asset-split:C1-1] 외부 파일 우선
+        _static_css = pathlib.Path(__file__).parent / "monitor_server" / "static" / "dashboard.css"
+        if _static_css.exists():
+            src = _static_css.read_text(encoding="utf-8")
+        else:
+            src = ""
+            for path in (server_path, core_path):
+                if path.exists():
+                    src += path.read_text(encoding="utf-8")
         if not src:
             self.skipTest("monitor-server.py / core.py 없음 — 건너뜀")
         # .dep-node .node-spinner 위치 규칙이 있어야 한다 (top:4px, right:4px)

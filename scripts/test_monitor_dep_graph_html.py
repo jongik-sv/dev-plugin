@@ -426,10 +426,14 @@ _CORE_PY = _SERVER_PY.parent / "monitor_server" / "core.py"
 def _read_dashboard_css() -> str:
     """monitor-server.py 또는 monitor_server/core.py에서 DASHBOARD_CSS 원본 문자열을 추출한다.
 
-    TSK-02-03 이후 구현이 core.py로 이전되었으므로 두 파일을 모두 검색한다.
+    [core-dashboard-asset-split:C1-1] 외부 파일 우선, core.py regex-parse fallback.
     _minify_css()로 압축되기 전 원본을 읽어 패턴 검증한다.
-    삼중 따옴표 블록을 정규식으로 추출 — 첫 번째 DASHBOARD_CSS = \"\"\"...\"\"\".
     """
+    # 외부 파일 우선 (core-dashboard-asset-split 이관 후)
+    _static_css = _CORE_PY.parent / "static" / "dashboard.css"
+    if _static_css.exists():
+        return _static_css.read_text(encoding="utf-8")
+    # Legacy fallback (삼중 따옴표 블록)
     for path in (_SERVER_PY, _CORE_PY):
         try:
             src = path.read_text(encoding="utf-8")

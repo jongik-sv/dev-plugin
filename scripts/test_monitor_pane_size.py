@@ -31,8 +31,18 @@ def _import_server():
 
 
 def _read_css() -> str:
-    """monitor-server.py 소스를 읽어 DASHBOARD_CSS 상수 문자열을 반환."""
+    """DASHBOARD_CSS 상수 문자열을 반환.
+
+    [core-dashboard-asset-split:C1-1] 외부 파일 우선, monitor-server.py fallback.
+    """
+    _static_css = _SCRIPT_DIR / "monitor_server" / "static" / "dashboard.css"
+    if _static_css.exists():
+        return _static_css.read_text(encoding="utf-8")
+    # Legacy fallback: monitor-server.py 소스 전체 + core.py
     src = (_SCRIPT_DIR / "monitor-server.py").read_text(encoding="utf-8")
+    _core_path = _SCRIPT_DIR / "monitor_server" / "core.py"
+    if _core_path.exists():
+        src += "\n" + _core_path.read_text(encoding="utf-8")
     return src
 
 

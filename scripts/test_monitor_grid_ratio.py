@@ -21,8 +21,7 @@ _CORE_SRC = _SCRIPTS_DIR / "monitor_server" / "core.py"
 def _read_server_source() -> str:
     """monitor-server.py + monitor_server/core.py 전체 소스를 합쳐 반환한다.
 
-    TSK-02-03 이후 CSS/JS 본체가 monitor_server/core.py로 이전되었으므로,
-    두 파일을 합친 소스로 검색해야 CSS 블록을 찾을 수 있다.
+    [core-dashboard-asset-split:C1-1] 외부 dashboard.css 파일 내용도 포함한다.
     """
     parts = []
     for p in (_SERVER_SRC, _CORE_SRC):
@@ -30,6 +29,10 @@ def _read_server_source() -> str:
             parts.append(p.read_text(encoding="utf-8"))
         except OSError:
             pass
+    # 외부 파일 CSS도 포함
+    _static_css = _CORE_SRC.parent / "static" / "dashboard.css"
+    if _static_css.exists():
+        parts.append(_static_css.read_text(encoding="utf-8"))
     return "\n".join(parts)
 
 
