@@ -21,7 +21,7 @@ import re
 import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 try:
     from monitor_server.caches import _SIGNALS_CACHE
@@ -221,7 +221,7 @@ def scan_signals_cached() -> "List[SignalEntry]":
     return result
 
 
-def _wp_busy_set(signals: "List[SignalEntry]") -> "dict[str, str]":
+def _wp_busy_set(signals: "List[SignalEntry]") -> "Dict[str, str]":
     """WP 레벨 busy 상태를 {wp_id: label} 딕셔너리로 반환한다.
 
     kind="running" AND task_id가 ^WP-\\d{2}$ 패턴인 시그널만 추출.
@@ -233,7 +233,7 @@ def _wp_busy_set(signals: "List[SignalEntry]") -> "dict[str, str]":
     wp-progress-spinner feature: 기존 _WP_SIGNAL_PREFIX_RE(^WP-\\d{2}-)는
     Task 레벨 신호 감지용이므로 WP 레벨 감지에는 별도 _WP_ID_RE(^WP-\\d{2}$) 사용.
     """
-    result: "dict[str, str]" = {}
+    result: "Dict[str, str]" = {}
     for sig in signals:
         if sig.kind != "running":
             continue
