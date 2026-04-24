@@ -81,6 +81,14 @@ if not sys.pycache_prefix:
 # 원본 CSS/JS 블록은 monitor_server/static/*.css|.js 로 이관되었다.
 # 본 모듈 import 시 파일을 읽어 기존 동일 이름 속성으로 재바인딩한다.
 # 파일 IO 실패(누락/권한) → 빈 문자열 fallback + sys.stderr 경고.
+#
+# 이관 완료 목록 (커밋 태그 기준):
+#   C1-1: DASHBOARD_CSS      → static/dashboard.css   (1,210 LOC)
+#   C1-2: _DASHBOARD_JS      → static/dashboard.js    (  545 LOC)
+#   C1-3: _PANE_JS/_PANE_CSS → static/pane.{js,css}   (   42 LOC)
+#   C1-4: _task_panel_css    → static/task_panel.css   (  103 LOC)
+#   C1-5: _TASK_PANEL_JS     → static/task_panel.js    (  277 LOC)
+# Net core.py LOC: 5,418 → ~3,274 (−2,144 LOC)
 
 _STATIC_ROOT = Path(__file__).parent / "static"
 
@@ -1310,6 +1318,7 @@ _DATA_SECTION_TAG_RE = re.compile(r'(<(?:section|header)(\s[^>]*)?>)', re.DOTALL
 
 # ---------------------------------------------------------------------------
 # WP-02: Client-side dashboard JS (filter chips, auto-refresh, drawer polling)
+# (moved to monitor_server/static/dashboard.js — C1-2)
 # ---------------------------------------------------------------------------
 _DASHBOARD_JS = _load_static_text("dashboard.js")
 
@@ -1586,6 +1595,7 @@ _DEFAULT_MAX_PANE_LINES = 500
 
 # Inline vanilla JS for 2-second partial refresh of <pre class="pane-capture">.
 # No external src — fetch + setInterval are browser built-ins.
+# (moved to monitor_server/static/pane.{js,css} — C1-3)
 _PANE_JS = _load_static_text("pane.js")
 
 _PANE_CSS = _load_static_text("pane.css")
