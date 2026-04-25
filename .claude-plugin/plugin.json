@@ -1,7 +1,7 @@
 {
   "name": "dev",
   "description": "WBS/Feature 기반 TDD 개발 자동화 플러그인 (설계→TDD구현→테스트→리팩토링, 팀 병렬 개발, WBS 독립 Feature 지원)",
-  "version": "1.6.4",
+  "version": "1.6.5",
   "author": {
     "name": "svisor",
     "url": "https://github.com/jongik-sv"
