@@ -63,10 +63,17 @@
     "event": "bypass — wbs-transition.py가 처리하는 특수 이벤트. DFA 전이가 아니며 status를 변경하지 않는다.",
     "state_json_fields": {
       "bypassed": "true일 때 dep-analysis가 이 task를 의존성 충족(완료)으로 판정한다. 실제 status는 실패 시점 그대로 유지.",
-      "bypassed_reason": "bypass 사유. 예: 'test.fail after 3 retries (escalated to opus)'"
+      "bypassed_reason": "bypass 사유. 예: 'test.fail after 3 retries (escalated to opus)'. systematic-debugging이 활성화된 환경에서는 debug-evidence.py bypass-reason 출력을 사용한다."
     },
     "dependency_resolution": "dep-analysis.py는 bypassed: true인 task를 [xx]와 동일하게 completed로 분류한다.",
     "signal": ".bypassed — signal-helper.py가 생성. wait 명령이 .done/.failed와 함께 감지한다.",
     "future_extension": "[im] 상태 자체를 의존성 충족으로 인정하는 속도 우선 모드로 확장 가능 (dep-analysis 판정 조건만 변경)."
+  },
+  "_debug_required_before_escalation": {
+    "enabled": true,
+    "description": "dev-test 실패 시 escalation(Sonnet→Opus) 또는 bypass 진입 직전, scripts/debug-evidence.py로 4단계 evidence(에러/재현/최근변경/컴포넌트)를 수집해 phase_history 항목의 debug_evidence 필드에 합성해야 한다. 'should fix this'·'just retry harder' 같은 근거 없는 escalation을 차단하기 위함.",
+    "phases": "build|test|refactor",
+    "footer_field": "debug_evidence — phase_history entry에 verification 필드와 동일 위계로 적재",
+    "bypass_contract": "bypass 시 bypassed_reason은 debug-evidence.py bypass-reason 출력으로 채운다. 'tests still failing' 같은 빈 사유 금지."
   }
 }

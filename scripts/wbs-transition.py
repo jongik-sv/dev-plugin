@@ -132,7 +132,7 @@ def save_state_json(state_path, data):
         return f"failed to write state.json: {e}"
 
 
-def apply_transition(sm, state_data, event, bypass_reason="", verification=None):
+def apply_transition(sm, state_data, event, bypass_reason="", verification=None, debug_evidence=None):
     """Apply an event to state_data in-place.
 
     Returns (previous_status, next_status, no_change).
@@ -148,6 +148,10 @@ def apply_transition(sm, state_data, event, bypass_reason="", verification=None)
     If ``verification`` (dict) is provided, it is merged into the new
     phase_history entry as a ``verification`` field. See
     references/verification-protocol.md for footer schema.
+
+    If ``debug_evidence`` (dict) is provided, it is merged into the new
+    phase_history entry as a ``debug_evidence`` field (systematic-debugging
+    4-phase output). See scripts/debug-evidence.py.
     """
     current = state_data.get("status", "[ ]")
     ts = now_iso()
@@ -169,6 +173,8 @@ def apply_transition(sm, state_data, event, bypass_reason="", verification=None)
             entry["elapsed_seconds"] = phase_elapsed
         if verification is not None:
             entry["verification"] = verification
+        if debug_evidence is not None:
+            entry["debug_evidence"] = debug_evidence
         state_data["phase_history"].append(entry)
         state_data["last"] = {"event": "bypass", "at": ts}
         state_data["bypassed"] = True
@@ -193,6 +199,8 @@ def apply_transition(sm, state_data, event, bypass_reason="", verification=None)
         entry["elapsed_seconds"] = phase_elapsed
     if verification is not None:
         entry["verification"] = verification
+    if debug_evidence is not None:
+        entry["debug_evidence"] = debug_evidence
     state_data["phase_history"].append(entry)
     state_data["last"] = {"event": event, "at": ts}
     state_data["status"] = next_status
@@ -426,8 +434,9 @@ def parse_args(argv):
         print(__doc__)
         sys.exit(1)
 
-    # Extract --verification PATH if present
+    # Extract --verification PATH and --debug-evidence PATH if present
     verification_path = None
+    debug_evidence_path = None
     out = []
     i = 0
     while i < len(args):
@@ -436,6 +445,13 @@ def parse_args(argv):
                 print("ERROR: --verification requires a path argument", file=sys.stderr)
                 sys.exit(1)
             verification_path = args[i + 1]
+            i += 2
+            continue
+        if args[i] == "--debug-evidence":
+            if i + 1 >= len(args):
+                print("ERROR: --debug-evidence requires a path argument", file=sys.stderr)
+                sys.exit(1)
+            debug_evidence_path = args[i + 1]
             i += 2
             continue
         out.append(args[i])
@@ -451,6 +467,7 @@ def parse_args(argv):
             "event": args[2],
             "reason": args[3] if len(args) > 3 else "",
             "verification_path": verification_path,
+            "debug_evidence_path": debug_evidence_path,
         }
 
     if len(args) < 3:
@@ -491,6 +508,10 @@ def main():
     if verr:
         print(json.dumps({"error": verr, "ok": False}, ensure_ascii=False))
         sys.exit(1)
+    debug_evidence, derr = _load_verification(a.get("debug_evidence_path"))
+    if derr:
+        print(json.dumps({"error": derr.replace("verification", "debug_evidence"), "ok": False}, ensure_ascii=False))
+        sys.exit(1)
 
     # bypass is a special meta-event handled outside the DFA events dict
     if event != "bypass" and event not in sm.get("events", {}):
@@ -512,7 +533,7 @@ def main():
             print(json.dumps({"source": "wbs", "id": tsk_id, "error": err, "ok": False}, ensure_ascii=False))
             sys.exit(1)
 
-        previous, current, no_change = apply_transition(sm, data, event, bypass_reason=reason, verification=verification)
+        previous, current, no_change = apply_transition(sm, data, event, bypass_reason=reason, verification=verification, debug_evidence=debug_evidence)
 
         err = save_state_json(state_path, data)
         if err:
@@ -553,7 +574,7 @@ def main():
         print(json.dumps({"source": "feat", "error": err, "ok": False}, ensure_ascii=False))
         sys.exit(1)
 
-    previous, current, no_change = apply_transition(sm, data, event, bypass_reason=reason, verification=verification)
+    previous, current, no_change = apply_transition(sm, data, event, bypass_reason=reason, verification=verification, debug_evidence=debug_evidence)
 
     err = save_state_json(state_path, data)
     if err:

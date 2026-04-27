@@ -189,5 +189,80 @@ class TestCLI(unittest.TestCase):
             self.assertIn("verification", payload["error"])
 
 
+class TestDebugEvidenceFlag(unittest.TestCase):
+    """--debug-evidence flag integration."""
+
+    def setUp(self):
+        self.sm, _ = wbs_transition.load_state_machine()
+
+    def test_apply_transition_with_debug_evidence(self):
+        data = wbs_transition._default_state()
+        data["status"] = "[im]"
+        ev = {
+            "phase": "test",
+            "reproduce": "always",
+            "errors": {"error_line_count": 2},
+            "recent_changes": {"files_changed": ["a.py"]},
+            "components": [],
+        }
+        wbs_transition.apply_transition(
+            self.sm, data, "test.fail", debug_evidence=ev,
+        )
+        entry = data["phase_history"][0]
+        self.assertEqual(entry["event"], "test.fail")
+        self.assertIn("debug_evidence", entry)
+        self.assertEqual(entry["debug_evidence"]["phase"], "test")
+
+    def test_bypass_with_both_verification_and_debug_evidence(self):
+        data = wbs_transition._default_state()
+        data["status"] = "[im]"
+        v = {"ok": False, "phase": "test", "checks": []}
+        ev = {"phase": "test", "reproduce": "always", "errors": {}, "recent_changes": {}, "components": []}
+        wbs_transition.apply_transition(
+            self.sm, data, "bypass",
+            bypass_reason="3 retries failed",
+            verification=v, debug_evidence=ev,
+        )
+        entry = data["phase_history"][0]
+        self.assertEqual(entry["event"], "bypass")
+        self.assertIn("verification", entry)
+        self.assertIn("debug_evidence", entry)
+        self.assertTrue(data["bypassed"])
+
+    def test_cli_debug_evidence_flag(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            feat_dir = _make_feat(tmp_path)
+            # advance to [im] first
+            r = _run_cli(["--feat", str(feat_dir), "design.ok"])
+            self.assertEqual(r.returncode, 0)
+            r = _run_cli(["--feat", str(feat_dir), "build.ok"])
+            self.assertEqual(r.returncode, 0)
+
+            ev = {
+                "phase": "test",
+                "reproduce": "always",
+                "errors": {"error_line_count": 1},
+                "recent_changes": {"files_changed": ["a.py"]},
+                "components": [],
+            }
+            ev_path = tmp_path / "evidence.json"
+            ev_path.write_text(json.dumps(ev), encoding="utf-8")
+
+            r = _run_cli([
+                "--feat", str(feat_dir), "test.fail",
+                "--debug-evidence", str(ev_path),
+            ])
+            self.assertEqual(r.returncode, 0, r.stderr)
+            state = json.loads((feat_dir / "state.json").read_text(encoding="utf-8"))
+            # last entry is test.fail with debug_evidence
+            last = state["phase_history"][-1]
+            self.assertEqual(last["event"], "test.fail")
+            self.assertIn("debug_evidence", last)
+            self.assertEqual(last["debug_evidence"]["phase"], "test")
+            # status unchanged
+            self.assertEqual(state["status"], "[im]")
+
+
 if __name__ == "__main__":
     unittest.main()

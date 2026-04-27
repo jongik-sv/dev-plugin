@@ -178,5 +178,82 @@ class TestPR2Integration(unittest.TestCase):
             self.assertFalse(footer["ok"])
 
 
+class TestPR3Integration(unittest.TestCase):
+    """PR-3: debug-evidence + wbs-transition --debug-evidence + bypass."""
+
+    def test_test_failure_with_evidence_then_bypass(self):
+        env = os.environ.copy()
+        env["CLAUDE_PLUGIN_ROOT"] = str(_PLUGIN_ROOT)
+        debug_script = _THIS_DIR / "debug-evidence.py"
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            feat_dir = tmp_path / "docs" / "features" / "smoke"
+            feat_dir.mkdir(parents=True, exist_ok=True)
+            (feat_dir / "spec.md").write_text("# Spec\n", encoding="utf-8")
+            state = {
+                "status": "[ ]", "started_at": None, "last": None,
+                "phase_history": [], "updated": "2026-04-28T00:00:00Z",
+            }
+            (feat_dir / "state.json").write_text(json.dumps(state, indent=2), encoding="utf-8")
+
+            # advance to [im]
+            (feat_dir / "design.md").write_text(
+                "# Design\n\n## Implementation Steps\n\n- [x] Step 1\n", encoding="utf-8",
+            )
+            for ev in ("design.ok", "build.ok"):
+                r = _run([str(_THIS_DIR / "wbs-transition.py"), "--feat", str(feat_dir), ev], env=env)
+                self.assertEqual(r.returncode, 0, r.stderr)
+
+            # capture debug evidence on test.fail
+            err_file = tmp_path / "err.txt"
+            err_file.write_text(
+                "FAIL test_login\nAssertionError: expected 200, got 401\n", encoding="utf-8",
+            )
+            r = _run([
+                str(debug_script), "collect",
+                "--phase", "test", "--target", str(feat_dir),
+                "--error-file", str(err_file),
+                "--reproduce", "always",
+                "--component", "auth-api:401 from /login",
+                "--skip-git",
+            ], env=env)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            evidence_path = tmp_path / "evidence.json"
+            evidence_path.write_text(r.stdout, encoding="utf-8")
+            evidence = json.loads(r.stdout)
+            self.assertEqual(evidence["reproduce"], "always")
+
+            # transition test.fail with --debug-evidence
+            r = _run([
+                str(_THIS_DIR / "wbs-transition.py"), "--feat", str(feat_dir), "test.fail",
+                "--debug-evidence", str(evidence_path),
+            ], env=env)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            state = json.loads((feat_dir / "state.json").read_text(encoding="utf-8"))
+            last = state["phase_history"][-1]
+            self.assertEqual(last["event"], "test.fail")
+            self.assertIn("debug_evidence", last)
+
+            # bypass with reason from evidence
+            r = _run([str(debug_script), "bypass-reason", "--evidence", str(evidence_path)], env=env)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            reason = r.stdout.strip()
+            self.assertTrue(reason)
+            self.assertIn("test.fail", reason)
+
+            r = _run([
+                str(_THIS_DIR / "wbs-transition.py"), "--feat", str(feat_dir), "bypass", reason,
+                "--debug-evidence", str(evidence_path),
+            ], env=env)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            state = json.loads((feat_dir / "state.json").read_text(encoding="utf-8"))
+            self.assertTrue(state.get("bypassed"))
+            self.assertEqual(state["bypassed_reason"], reason)
+            bypass_entry = state["phase_history"][-1]
+            self.assertEqual(bypass_entry["event"], "bypass")
+            self.assertIn("debug_evidence", bypass_entry)
+
+
 if __name__ == "__main__":
     unittest.main()
