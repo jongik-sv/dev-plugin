@@ -27,6 +27,44 @@ WP 내 모든 Task에 대해 아래 파일이 존재하는지 확인한다:
 - 시그널에 실패 내용이 있으면 → 해당 Task를 부분 완료로 기록
 - 파일은 없지만 시그널은 성공이면 → WP 리더에게 재확인 요청 후 진행
 
+### 0-1. Verification Footer 정합성 (머지 직전 추가 게이트)
+
+각 Task의 `state.json.phase_history`가 4 phase(`design.ok`/`build.ok`/`test.ok`/`refactor.ok`)에 대해 `verification.ok=true` footer를 보유하는지 확인한다. 미보유 Task는 PR-2 이전 사이클로 진행되었거나 verification 누락 상태이며, **머지 차단**한다 (bypassed Task는 예외 — `bypassed=true` 시 통과).
+
+```bash
+python3 - <<'PY'
+import json, sys, pathlib, os
+docs = os.environ.get("DOCS_DIR", "docs")
+tsk_ids = os.environ.get("TSK_IDS", "").split()
+required_events = ["design.ok", "build.ok", "test.ok", "refactor.ok"]
+problems = []
+for tid in tsk_ids:
+    sp = pathlib.Path(docs) / "tasks" / tid / "state.json"
+    if not sp.is_file():
+        problems.append(f"{tid}: state.json missing")
+        continue
+    data = json.loads(sp.read_text(encoding="utf-8"))
+    if data.get("bypassed"):
+        continue  # bypass Task는 verification 누락 허용
+    history = data.get("phase_history", [])
+    have_ok = {h["event"]: h for h in history if h.get("event", "").endswith(".ok")}
+    for ev in required_events:
+        h = have_ok.get(ev)
+        if not h:
+            problems.append(f"{tid}: missing {ev} in phase_history")
+        elif not h.get("verification", {}).get("ok"):
+            problems.append(f"{tid}: {ev} has no verification.ok=true footer")
+if problems:
+    print("MERGE BLOCKED — verification footer 정합성 위반:")
+    for p in problems:
+        print(f"  - {p}")
+    sys.exit(1)
+print(f"OK — {len(tsk_ids)} tasks all have verified phase_history")
+PY
+```
+
+차단 시: 누락된 Task의 phase를 재실행해 verification footer를 채우거나, 의도된 bypass라면 `wbs-transition.py bypass`로 명시한 뒤 재시도.
+
 ### 1. tmux 창 종료
 
 `graceful-shutdown.py --no-marker`로 해당 WP 창을 정상 종료한다 (Escape → `/exit` → kill-window). 헬퍼가 absolute `window_id`(`@N`)로 타겟을 해석하므로 `session:name` prefix 매칭 폴백으로 팀리더 자기 window를 지우는 사고를 방지한다(self-protection은 기본 ON):
