@@ -85,22 +85,50 @@ Domain: {domain}
 - **(B) 리팩토링 실패 → 전체 되돌림 후 통과**: 리팩토링을 취소했으므로 코드는 dev-test 통과 시점 상태. **결과적으로 동작 보존에 성공했으므로 `refactor.ok`** (비고에 "리팩토링 시도 후 rollback, 다음 반복에서 재시도 여지"로 기록). "리팩토링 없음 = 완료"가 허용되는 이유는 DDTR의 R이 "품질 개선 **시도**"이지 "반드시 변경"이 아니기 때문.
 - **(C) 전체 되돌림 후에도 테스트 실패**: 기존 코드 자체에 regression 의심. → `refactor.fail`, status `[ts]` 유지. 비고에 "pre-existing regression suspected"를 명시하여 사용자 개입을 유도.
 
-**재진입 규약**: `/dev {TSK-ID}` 재실행 시 `status=[ts]`, `last.event=refactor.fail` 상태에서는 phase_start가 `refactor`이므로 본 스킬이 다시 호출된다. 이전 시도의 부작용은 이미 되돌려져 있어야 하며 (규칙의 "전부 되돌린다" 참조), 본 스킬은 **현재 코드 상태 기준으로 처음부터 리팩토링을 재시작**한다. 이전 실패 원인은 서브에이전트 의사결정에 영향을 주지 않는다 (ref refactor.md 비고는 사용자용 기록).
+**재진입 규약**: `/dev {TSK-ID}` 재실행 시 `status=[ts]`, `last.event=refactor.fail` 상태에서는 phase_start가 `refactor`이므로 본 스킬이 다시 호출된다. 이전 시도의 부작용은 이미 되돌려져 있어야 하며 (규칙의 "전부 되돌린다" 참조), 본 스킬은 **현재 코드 상태 기준으로 처음부터 리팩토링을 재시작**한다.
+
+### Verification Gate (refactor.ok 직전 필수)
+
+리팩토링 후 단위 테스트 재실행 결과 + (Dev Config에 정의 시) lint·typecheck 결과를 verify-phase.py에 합성한다. 차단 시 `refactor.ok` 호출하지 않는다.
+
+```bash
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/verify-phase.py \
+  --phase refactor \
+  --target {ARTIFACT_DIR} \
+  --check unit_test:ok:exit=0,pass={U_PASS},fail=0 \
+  --check lint:ok:exit=0 \
+  --check typecheck:ok:exit=0 \
+  > /tmp/verify-refactor-{ID}.json
+```
+
+`lint`/`typecheck`는 Dev Config에 명령이 정의된 경우에만 첨부. 케이스 (B)(전체 rollback 후 통과) 도 동일 게이트를 통과해야 한다 — refactor.md에 rollback 사실이 기록되어 있고 unit_test가 통과하면 ok.
+
+상세 프로토콜: `${CLAUDE_PLUGIN_ROOT}/references/verification-protocol.md`.
+
+### 상태 전이
+
+verification 통과 시에만 `refactor.ok` 발행:
 
 **(A) SOURCE=wbs**:
 ```bash
-python3 ${CLAUDE_PLUGIN_ROOT}/scripts/wbs-transition.py {DOCS_DIR}/wbs.md {TSK-ID} refactor.ok
-# 실패 시: refactor.fail
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/wbs-transition.py {DOCS_DIR}/wbs.md {TSK-ID} refactor.ok \
+  --verification /tmp/verify-refactor-{ID}.json
+# 실패 시: refactor.fail (footer 그대로 첨부)
 ```
 
 **(B) SOURCE=feat**:
 ```bash
-python3 ${CLAUDE_PLUGIN_ROOT}/scripts/wbs-transition.py --feat {FEAT_DIR} refactor.ok
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/wbs-transition.py --feat {FEAT_DIR} refactor.ok \
+  --verification /tmp/verify-refactor-{ID}.json
 # 실패 시: refactor.fail
 ```
 
-> 상태 전이 규칙은 `${CLAUDE_PLUGIN_ROOT}/references/state-machine.json`에 정의되어 있으며 두 모드가 동일한 DFA를 공유한다.
+> 상태 전이 규칙은 `${CLAUDE_PLUGIN_ROOT}/references/state-machine.json`에 정의되어 있으며 두 모드가 동일한 DFA를 공유한다. verification footer는 phase_history 항목에 합성된다.
 
 ### 4. 완료 보고
-- 성공: 리팩토링 내역 요약과 작업 완료(`status=[xx]`, `last.event=refactor.ok`)를 사용자에게 출력.
+- 성공: 리팩토링 내역 요약과 작업 완료(`status=[xx]`, `last.event=refactor.ok`)를 사용자에게 출력. phase_history 최신 항목에 verification footer 합성됨.
 - 실패: 실패 원인과 `last.event=refactor.fail`을 보고. status는 `[ts]` 유지. 사용자가 수동 개입 필요.
+
+### 자율 결정 기록
+
+리팩토링 중 비자명한 자율 결정(rollback 결정, 우선순위 trade-off, 추출 단위 등)은 `${CLAUDE_PLUGIN_ROOT}/scripts/decision-log.py append --target {ARTIFACT_DIR} --phase refactor ...`로 `decisions.md`에 적재한다.
