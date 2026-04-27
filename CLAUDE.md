@@ -36,6 +36,7 @@ Skills delegate deterministic work to Python scripts (cross-platform: Mac/Linux/
 | `scripts/leader-watchdog.py` | WP별 백그라운드 데몬으로 WP 리더 pane을 주기적 감시(기본 30초). 사망 확정 시 `leader-autopsy.py` 호출 → 팀원 settle 대기 → `{WT_NAME}.needs-restart` 시그널 생성. **폴링당 토큰 0** — 팀리더 LLM은 시그널 본문(<1 KB)만 한 번 Read. 팀리더는 `.needs-restart` 감지 시 `wp-setup.py`로 WP resume하여 자동 재시작 | dev-team (WP spawn 직후 기동, 재시작마다 재기동) |
 | `scripts/monitor-launcher.py` | dev-monitor 서버 기동/정지/상태 관리 헬퍼. PID 파일로 idempotent 기동, `--stop`/`--status` 서브커맨드, macOS·Linux·Windows 플랫폼별 프로세스 detach | dev-monitor |
 | `scripts/monitor-server.py` | HTTP 대시보드 서버 라우팅·스캔 함수. `--port`/`--docs` 인자, on-demand 상태 조회 API 구현 (monitor-launcher.py가 subprocess로 호출) | dev-monitor |
+| `scripts/decision-log.py` | 자율 결정 감사 로그 헬퍼 — `decisions.md`(task/feature/project 단위)에 (Phase / Decision needed / Decision made / Rationale) 4-필드를 append-only 기록. `append`/`list`/`validate` 서브커맨드. 자세한 호출 규약: `references/decisions-template.md` | dev-design, dev-build, dev-test, dev-refactor, wbs, feat, dev-team merge |
 | `scripts/_platform.py` | Cross-platform utilities (temp dir, JSON escape) | available for scripts |
 
 All scripts use `${CLAUDE_PLUGIN_ROOT}/scripts/` as base path. Python 3 standard library only — no pip dependencies.
@@ -106,6 +107,23 @@ Test commands, design guidance, and cleanup process names are **project-configur
 | `references/state-machine.json` | DFA definition shared by WBS and Feature modes |
 | `references/default-dev-config.md` | Global default Dev Config (final fallback for feat mode) |
 | `references/status-notation.md` | 외부 도구 연동용 상태 코드 매핑표 (`[xx]`→✅ 등). 플러그인 내부는 raw 코드 유지, 외부 통합 시에만 참조 |
+| `references/decisions-template.md` | 자율 결정 감사 로그(`decisions.md`) 스키마 + 호출 규약 + 비자명 결정 판별 휴리스틱 |
+
+## 자율 결정과 감사 로그 (Autonomous Decisions & Audit Log)
+
+dev-plugin은 모호한 상황에서 **사용자에게 묻지 않고 합리적 결정을 자율적으로 내린다** (예외: `/feat` 진입 시점의 intake 단계만 적극 질문). 자율성을 유지하면서도 사후 감사가 가능하도록, 비자명한 자율 결정은 task/feature/project 디렉터리의 `decisions.md`에 append-only 기록한다.
+
+**기록 의무**: 다음 중 하나라도 해당하면 `decisions.md`에 entry를 append한다.
+1. PRD/TRD/spec에 명시되지 않은 항목을 가정으로 채워야 한다
+2. 같은 요구를 만족하는 둘 이상의 구현 방식 중 하나를 선택해야 한다
+3. 요구가 모순되거나 모호해서 한쪽으로 해석을 고정해야 한다
+4. 라이브러리·프레임워크·런타임 선택 자유도가 있다
+5. 에러 처리·타임아웃·리트라이·캐시 등 정책 파라미터를 정해야 한다
+6. 모델 선택, 의존성 해석, 스코프 추정 같은 운영 결정을 한다
+
+**기록 도구**: `scripts/decision-log.py` (스키마/호출 예시는 `references/decisions-template.md`).
+
+**예외 — 적극 질문 모드**: `/feat` 진입 직후 spec.md 생성 전에 한해 `AskUserQuestion`으로 목적/성공기준/범위/제약을 적극적으로 물어 요구를 끌어낸다. intake 완료 후 즉시 자율 모드로 전환한다. 다른 진입점(`/wbs`, `/dev`, `/dev-team`, …)에서는 질문하지 않고 자율 진행한다.
 
 ## Target Project Requirements
 
