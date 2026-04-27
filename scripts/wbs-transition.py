@@ -132,7 +132,7 @@ def save_state_json(state_path, data):
         return f"failed to write state.json: {e}"
 
 
-def apply_transition(sm, state_data, event, bypass_reason=""):
+def apply_transition(sm, state_data, event, bypass_reason="", verification=None):
     """Apply an event to state_data in-place.
 
     Returns (previous_status, next_status, no_change).
@@ -144,6 +144,10 @@ def apply_transition(sm, state_data, event, bypass_reason=""):
       - elapsed_seconds: per phase_history entry (delta from previous event)
       - completed_at: set when status reaches [xx] (top-level)
       - elapsed_seconds: total from started_at to completed_at (top-level)
+
+    If ``verification`` (dict) is provided, it is merged into the new
+    phase_history entry as a ``verification`` field. See
+    references/verification-protocol.md for footer schema.
     """
     current = state_data.get("status", "[ ]")
     ts = now_iso()
@@ -163,6 +167,8 @@ def apply_transition(sm, state_data, event, bypass_reason=""):
         entry = {"event": "bypass", "from": current, "to": current, "at": ts}
         if phase_elapsed is not None:
             entry["elapsed_seconds"] = phase_elapsed
+        if verification is not None:
+            entry["verification"] = verification
         state_data["phase_history"].append(entry)
         state_data["last"] = {"event": "bypass", "at": ts}
         state_data["bypassed"] = True
@@ -185,6 +191,8 @@ def apply_transition(sm, state_data, event, bypass_reason=""):
     entry = {"event": event, "from": current, "to": next_status, "at": ts}
     if phase_elapsed is not None:
         entry["elapsed_seconds"] = phase_elapsed
+    if verification is not None:
+        entry["verification"] = verification
     state_data["phase_history"].append(entry)
     state_data["last"] = {"event": event, "at": ts}
     state_data["status"] = next_status
@@ -407,21 +415,66 @@ def feat_resolve_initial_state(feat_dir, state_path):
 
 
 def parse_args(argv):
-    args = argv[1:]
+    """Parse argv into (mode, args_dict).
+
+    Supports an optional ``--verification PATH`` flag (JSON file produced by
+    verify-phase.py) anywhere after the positional args. Removed before
+    positional parsing so existing callers see no change.
+    """
+    args = list(argv[1:])
     if not args:
         print(__doc__)
         sys.exit(1)
+
+    # Extract --verification PATH if present
+    verification_path = None
+    out = []
+    i = 0
+    while i < len(args):
+        if args[i] == "--verification":
+            if i + 1 >= len(args):
+                print("ERROR: --verification requires a path argument", file=sys.stderr)
+                sys.exit(1)
+            verification_path = args[i + 1]
+            i += 2
+            continue
+        out.append(args[i])
+        i += 1
+    args = out
 
     if args[0] == "--feat":
         if len(args) < 3:
             print("ERROR: --feat requires <feat-dir> <event>", file=sys.stderr)
             sys.exit(1)
-        return "feat", {"feat_dir": args[1], "event": args[2], "reason": args[3] if len(args) > 3 else ""}
+        return "feat", {
+            "feat_dir": args[1],
+            "event": args[2],
+            "reason": args[3] if len(args) > 3 else "",
+            "verification_path": verification_path,
+        }
 
     if len(args) < 3:
         print(__doc__)
         sys.exit(1)
-    return "wbs", {"wbs_path": args[0], "tsk_id": args[1], "event": args[2], "reason": args[3] if len(args) > 3 else ""}
+    return "wbs", {
+        "wbs_path": args[0],
+        "tsk_id": args[1],
+        "event": args[2],
+        "reason": args[3] if len(args) > 3 else "",
+        "verification_path": verification_path,
+    }
+
+
+def _load_verification(path):
+    if not path:
+        return None, None
+    if not os.path.isfile(path):
+        return None, f"verification file not found: {path}"
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f), None
+    except (OSError, json.JSONDecodeError) as e:
+        return None, f"failed to load verification JSON: {e}"
 
 
 def main():
@@ -434,6 +487,10 @@ def main():
 
     event = a["event"]
     reason = a.get("reason", "")
+    verification, verr = _load_verification(a.get("verification_path"))
+    if verr:
+        print(json.dumps({"error": verr, "ok": False}, ensure_ascii=False))
+        sys.exit(1)
 
     # bypass is a special meta-event handled outside the DFA events dict
     if event != "bypass" and event not in sm.get("events", {}):
@@ -455,7 +512,7 @@ def main():
             print(json.dumps({"source": "wbs", "id": tsk_id, "error": err, "ok": False}, ensure_ascii=False))
             sys.exit(1)
 
-        previous, current, no_change = apply_transition(sm, data, event, bypass_reason=reason)
+        previous, current, no_change = apply_transition(sm, data, event, bypass_reason=reason, verification=verification)
 
         err = save_state_json(state_path, data)
         if err:
@@ -496,7 +553,7 @@ def main():
         print(json.dumps({"source": "feat", "error": err, "ok": False}, ensure_ascii=False))
         sys.exit(1)
 
-    previous, current, no_change = apply_transition(sm, data, event, bypass_reason=reason)
+    previous, current, no_change = apply_transition(sm, data, event, bypass_reason=reason, verification=verification)
 
     err = save_state_json(state_path, data)
     if err:
