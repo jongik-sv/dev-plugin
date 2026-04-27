@@ -255,5 +255,80 @@ class TestPR3Integration(unittest.TestCase):
             self.assertIn("debug_evidence", bypass_entry)
 
 
+class TestPR4Integration(unittest.TestCase):
+    """PR-4: PRD/WBS validator + decisions.md auto-resolve flow."""
+
+    def test_prd_validator_then_decision_log(self):
+        env = os.environ.copy()
+        env["CLAUDE_PLUGIN_ROOT"] = str(_PLUGIN_ROOT)
+        prd_script = _THIS_DIR / "prd-validate.py"
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            docs = tmp_path / "docs"
+            docs.mkdir()
+            prd = docs / "PRD.md"
+            prd.write_text(
+                "# PRD\n\n## 목적\nAPI는 fast해야 하고 TBD 항목 있음.\n",
+                encoding="utf-8",
+            )
+
+            r = _run([str(prd_script), "validate", "--target", str(prd)], env=env)
+            self.assertEqual(r.returncode, 1)
+            payload = json.loads(r.stdout)
+            self.assertFalse(payload["ok"])
+            self.assertGreater(payload["summary"]["total"], 0)
+
+            # 자율 보강 시뮬레이션 — decisions.md 적재
+            r = _run([
+                str(_DECISION), "append",
+                "--target", str(docs),
+                "--phase", "prd-resolve",
+                "--decision-needed", "PRD에 fast / TBD 모호 표현",
+                "--decision-made", "fast → 200ms p95 / TBD → MVP 범위 한정",
+                "--rationale", "TRD §2.1 성능 기준 + MVP 범위 합의 (이전 회의록)",
+                "--reversible", "yes",
+                "--source", "docs/PRD.md:3",
+            ], env=env)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertTrue((docs / "decisions.md").is_file())
+
+    def test_wbs_validator_clean_and_dirty(self):
+        env = os.environ.copy()
+        env["CLAUDE_PLUGIN_ROOT"] = str(_PLUGIN_ROOT)
+        wbs_script = _THIS_DIR / "wbs-validate.py"
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            wbs_clean = tmp_path / "wbs_clean.md"
+            wbs_clean.write_text(
+                "## WP-01: x\n\n### TSK-01-01: 응답 처리\n"
+                "- domain: backend\n"
+                "- depends: -\n"
+                "- status: [ ]\n"
+                "- acceptance: 응답 200ms 이하\n",
+                encoding="utf-8",
+            )
+            r = _run([str(wbs_script), "validate", "--wbs", str(wbs_clean)], env=env)
+            self.assertEqual(r.returncode, 0, r.stderr)
+
+            wbs_dirty = tmp_path / "wbs_dirty.md"
+            wbs_dirty.write_text(
+                "## WP-01: x\n\n### TSK-01-01: 검색\n"
+                "- domain: backend\n"
+                "- depends: TSK-99-99\n"
+                "- status: [ ]\n\n"
+                "API 구현 진행.\n",
+                encoding="utf-8",
+            )
+            r = _run([str(wbs_script), "validate", "--wbs", str(wbs_dirty)], env=env)
+            self.assertEqual(r.returncode, 1)
+            payload = json.loads(r.stdout)
+            self.assertFalse(payload["ok"])
+            types = {i["type"] for i in payload["issues"]}
+            self.assertIn("missing_acceptance", types)
+            self.assertIn("depends_unknown", types)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -37,6 +37,10 @@ Skills delegate deterministic work to Python scripts (cross-platform: Mac/Linux/
 | `scripts/monitor-launcher.py` | dev-monitor 서버 기동/정지/상태 관리 헬퍼. PID 파일로 idempotent 기동, `--stop`/`--status` 서브커맨드, macOS·Linux·Windows 플랫폼별 프로세스 detach | dev-monitor |
 | `scripts/monitor-server.py` | HTTP 대시보드 서버 라우팅·스캔 함수. `--port`/`--docs` 인자, on-demand 상태 조회 API 구현 (monitor-launcher.py가 subprocess로 호출) | dev-monitor |
 | `scripts/decision-log.py` | 자율 결정 감사 로그 헬퍼 — `decisions.md`(task/feature/project 단위)에 (Phase / Decision needed / Decision made / Rationale) 4-필드를 append-only 기록. `append`/`list`/`validate` 서브커맨드. 자세한 호출 규약: `references/decisions-template.md` | dev-design, dev-build, dev-test, dev-refactor, wbs, feat, dev-team merge |
+| `scripts/verify-phase.py` | DDTR phase 종료 verification 게이트 — design/build/test/refactor 각 phase의 산출물 구조 검사 + 동적 체크(`--check NAME:ok|fail:KEY=VAL,...`)를 합성하여 footer JSON 출력. 자세한 호출 흐름: `references/verification-protocol.md` | dev-design, dev-build, dev-test, dev-refactor, dev-team merge |
+| `scripts/debug-evidence.py` | systematic-debugging 4단계 evidence 수집기 — dev-test 실패 시 escalation/bypass 진입 전 (에러 raw / 재현 가능성 / 최근 변경 / 컴포넌트 경계)를 수집. `collect`/`bypass-reason` 서브커맨드. wbs-transition.py `--debug-evidence` 플래그로 phase_history.debug_evidence 필드에 합성 | dev-test failure path |
+| `scripts/prd-validate.py` | PRD/TRD 정합성 검사 — placeholder(TBD/TODO/???/<...>) / vague metric(fast/scalable 등 정량 hint 부재) / missing section(acceptance/NFR/constraints) 검출. `validate`/`assumptions-template` 서브커맨드 | wbs |
+| `scripts/wbs-validate.py` | WBS Task 품질 검사 — Task별 acceptance 누락 / depends 미지정 / domain 미매핑 / 모호 동사(구현·배포·검증) 검출 | wbs |
 | `scripts/_platform.py` | Cross-platform utilities (temp dir, JSON escape) | available for scripts |
 
 All scripts use `${CLAUDE_PLUGIN_ROOT}/scripts/` as base path. Python 3 standard library only — no pip dependencies.

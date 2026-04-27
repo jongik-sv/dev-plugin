@@ -102,6 +102,89 @@ JSON 출력에서 먼저 `ok` 필드를 확인한다:
 | `mode="created"` | `"Feature '{feat_name}' 생성됨. 설계를 시작합니다."` |
 | `mode="resume"` | `"Feature '{feat_name}' 재개. 현재 상태에 따라 적절한 Phase부터 진행합니다."` |
 
+## 1-3. Intake (신규 Feature 한정 — 적극 질문 모드)
+
+> ⚠️ **이 단계만 dev-plugin의 자율 결정 정책 예외**다. 다른 모든 진입점은 묻지 않고 자율 진행한다.
+
+`feat-init.py`가 `mode="created"`를 반환하면(신규 Feature) **spec.md 본문 작성 직전에** AskUserQuestion 도구로 요구사항을 적극적으로 끌어낸다. `mode="resume"`면 이 단계를 **완전히 건너뛴다** (spec.md가 이미 있고 사용자가 이전에 의도를 지정했음).
+
+### 권장 질문 시퀀스 (순차 실행, 3~5개)
+
+1. **목적 (kind)** — 무엇을 하려는가
+   - feature (신규 기능)
+   - bugfix (버그 수정)
+   - refactor (구조 개선, 동작 보존)
+   - perf (성능 개선)
+   - docs (문서/주석)
+   - Other (자유 입력 시 사용자가 선택)
+
+2. **성공 기준 (acceptance)** — 완료를 어떻게 판단하는가
+   - 단위 테스트 + E2E 모두 통과
+   - 특정 정량 지표 충족 (사용자가 Other로 명시)
+   - UI 시각 확인 (frontend 한정)
+   - 기존 회귀 없음 (refactor 한정)
+
+3. **범위 경계 (scope, multiSelect=true)** — 어떤 영역을 건드리는가
+   - backend
+   - frontend
+   - database / migration
+   - config / 인프라
+   - docs / 주석
+   - tests only
+
+4. **제약 (constraints)** — 절대 어겨선 안 되는 항목
+   - 외부 의존성 추가 금지
+   - 기존 API 호환성 유지
+   - 특정 성능 임계값 (사용자가 Other로 명시)
+   - 보안·권한 변경 금지
+
+5. (조건부) **유사 기존 기능 (similar_existing)** — 코드 일부를 검색해 후보가 1개 이상이면 보여주고 "신규 vs 재사용" 선택. 0개면 이 질문을 건너뛴다.
+
+> 질문은 한 번에 하나씩(`questions` 배열에 1~2개)만 보내는 것을 권장한다. 사용자 응답이 명확하면 다음 질문으로 진행, 모호하면 같은 주제로 보조 질문 1회 추가.
+
+### Intake 결과 반영
+
+응답을 받은 즉시 두 곳에 기록한다:
+
+1. **spec.md 갱신** — feat-init.py가 만든 초기 spec.md를 다음 골격으로 덮어쓴다 (Edit 도구 사용):
+   ```markdown
+   # {feat_name}
+
+   ## 목적
+   {kind}: {feat_description}
+
+   ## 성공 기준
+   {acceptance}
+
+   ## 도메인
+   {scope의 첫 항목 — frontend/backend/fullstack 매핑}
+
+   ## 범위 경계
+   - 포함: {scope multiSelect 결과}
+   - 제외: (intake에서 명시되지 않은 모든 영역)
+
+   ## 제약
+   {constraints}
+
+   ## (선택) 유사 기존 기능
+   {similar_existing 응답}
+   ```
+
+2. **decisions.md 적재** — intake 자체를 결정 entry로 남긴다:
+   ```bash
+   python3 ${CLAUDE_PLUGIN_ROOT}/scripts/decision-log.py append \
+     --target {feat_dir} \
+     --phase feat-intake \
+     --decision-needed "사용자 의도·범위·제약 명확화 (신규 Feature)" \
+     --decision-made "kind={kind}, acceptance={acceptance}, scope={scope}, constraints={constraints}" \
+     --rationale "AskUserQuestion intake 응답 그대로 반영" \
+     --reversible yes
+   ```
+
+### Intake 종료 후
+
+Intake가 끝나면 **즉시 자율 모드로 전환**한다. 이후 단계(2 Phase 재개 판단 → 4 실행 절차)는 사용자에게 더 묻지 않고 자율 진행한다. 모호 상황 발생 시 `decisions.md`에 적재만 하고 흐름을 멈추지 않는다.
+
 ## 2. Phase 재개 판단
 
 Bash 도구로 실행:
