@@ -141,3 +141,14 @@
 - 의존성 그래프에서 방향을 나타내는 삼각형 머리가 없는 선이 있어
 - Task 스피너 돌아갈때 Task명의 정렬문제(오른쪽? 중앙? 정렬됨)
 - WP의 작업에 대해서도 스피너가 돌아야지.
+
+  Phase 2 권고
+
+  서브에이전트가 phase2-decision.md로 3개 sub-feature 분리 제안 — 단일 feature로는 과대:
+  1. core-http-split — MonitorHandler + 7 route handlers → handlers.py (≈−500 LOC)
+  2. core-dashboard-asset-split — 인라인 DASHBOARD_CSS/_DASHBOARD_JS → 외부 static 파일 (≈−3,000
+  LOC, 시각 QA 필수)
+  3. core-renderer-split — _render_*/_section_* → renderers/ (≈−1,000 LOC)
+
+  완료 후 core.py가 ~2,000 LOC 이하로 내려올 것. 지금 바로 Phase 2에 들어갈지, 다른 작업 먼저 할지
+  결정 필요합니다.
