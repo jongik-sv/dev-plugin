@@ -9,3 +9,6 @@ docs/todo.md                    merge=union
 docs/**/state.json              merge=state-json-smart
 docs/**/tasks/**/state.json     merge=state-json-smart
 docs/**/wbs.md                  merge=wbs-status-smart
+
+# Plugin packaging — exclude self-tests from marketplace archive (git archive uses export-ignore)
+scripts/test_*.py               export-ignore

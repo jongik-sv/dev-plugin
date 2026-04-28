@@ -98,82 +98,27 @@ description: "Trigger description — also used for natural language matching"
 
 The `description` field doubles as NL trigger keywords (e.g., "팀모드", "team mode", "에이전트 풀"). Arguments are passed via `$ARGUMENTS`.
 
-## Domain-Specific Test Commands
-
-Test commands, design guidance, and cleanup process names are **project-configured**. WBS mode reads `{DOCS_DIR}/wbs.md` `## Dev Config` section. Feature mode uses a fallback chain (feat-local → wbs → default) resolved by `wbs-parse.py --feat ... --dev-config`. See `references/test-commands.md` for the config loading protocol.
-
 ### Shared Reference Files
 
 | File | Purpose |
 |------|---------|
-| `references/test-commands.md` | Domain-specific unit/E2E test commands + Dev Config loading protocol |
+| `references/test-commands.md` | Dev Config loading protocol (feat-local → wbs → default) — domain test command 출처 |
 | `references/signal-protocol.md` | Signal file protocol (`.running`/`.done`/`.failed`) |
 | `references/state-machine.json` | DFA definition shared by WBS and Feature modes |
 | `references/default-dev-config.md` | Global default Dev Config (final fallback for feat mode) |
-| `references/status-notation.md` | 외부 도구 연동용 상태 코드 매핑표 (`[xx]`→✅ 등). 플러그인 내부는 raw 코드 유지, 외부 통합 시에만 참조 |
+| `references/status-notation.md` | 외부 도구 연동용 상태 코드 매핑표 (`[xx]`→✅ 등). 플러그인 내부는 raw 코드 유지 |
 | `references/decisions-template.md` | 자율 결정 감사 로그(`decisions.md`) 스키마 + 호출 규약 + 비자명 결정 판별 휴리스틱 |
 
-## 자율 결정과 감사 로그 (Autonomous Decisions & Audit Log)
+자율 결정 로그 정책의 본문(언제 기록할지, intake 예외 등)은 사용자 런타임 동작이므로 각 phase SKILL.md(`dev-design`, `dev-build`, …)와 `references/decisions-template.md`에서 관리한다. CLAUDE.md는 "비자명 자율 결정은 `decisions.md`에 append-only — 상세는 `references/decisions-template.md`"라는 계약만 기억하면 된다.
 
-dev-plugin은 모호한 상황에서 **사용자에게 묻지 않고 합리적 결정을 자율적으로 내린다** (예외: `/feat` 진입 시점의 intake 단계만 적극 질문). 자율성을 유지하면서도 사후 감사가 가능하도록, 비자명한 자율 결정은 task/feature/project 디렉터리의 `decisions.md`에 append-only 기록한다.
+## Cross-Platform 코딩 규칙
 
-**기록 의무**: 다음 중 하나라도 해당하면 `decisions.md`에 entry를 append한다.
-1. PRD/TRD/spec에 명시되지 않은 항목을 가정으로 채워야 한다
-2. 같은 요구를 만족하는 둘 이상의 구현 방식 중 하나를 선택해야 한다
-3. 요구가 모순되거나 모호해서 한쪽으로 해석을 고정해야 한다
-4. 라이브러리·프레임워크·런타임 선택 자유도가 있다
-5. 에러 처리·타임아웃·리트라이·캐시 등 정책 파라미터를 정해야 한다
-6. 모델 선택, 의존성 해석, 스코프 추정 같은 운영 결정을 한다
+플러그인 사용자(macOS / Linux / WSL / 네이티브 Windows+psmux) 안내는 README.md 소관. 여기서는 **plugin 코드를 작성·수정할 때 지켜야 하는 규칙**만 둔다.
 
-**기록 도구**: `scripts/decision-log.py` (스키마/호출 예시는 `references/decisions-template.md`).
-
-**예외 — 적극 질문 모드**: `/feat` 진입 직후 spec.md 생성 전에 한해 `AskUserQuestion`으로 목적/성공기준/범위/제약을 적극적으로 물어 요구를 끌어낸다. intake 완료 후 즉시 자율 모드로 전환한다. 다른 진입점(`/wbs`, `/dev`, `/dev-team`, …)에서는 질문하지 않고 자율 진행한다.
-
-## Target Project Requirements
-
-**WBS mode** (`/dev`, `/dev-team`, etc.):
-- `docs/PRD.md`, `docs/TRD.md`, `docs/wbs.md`
-- WBS Tasks formatted as `### TSK-XX-XX:` with metadata (category, domain, status, depends, etc.)
-- Task artifacts go to `docs/tasks/{TSK-ID}/` (design.md, test-report.md, refactor.md)
-
-**Feature mode** (`/feat`):
-- `docs/` directory must exist (parent of `docs/features/`)
-- Individual features are created on demand via `feat-init.py` under `docs/features/{name}/`
-- Each feature has `spec.md` (user requirements), `state.json` (state tracker — same schema as WBS `state.json`), and DDTR artifacts (design.md, test-report.md, refactor.md). Legacy `status.json` is auto-renamed to `state.json` on first resume.
-- **Dev Config fallback chain** (resolved by `wbs-parse.py --feat {FEAT_DIR} --dev-config {DOCS_DIR}`):
-  1. `{FEAT_DIR}/dev-config.md` — per-feature override (whole file is parsed as a Dev Config section)
-  2. `{DOCS_DIR}/wbs.md` `## Dev Config` section — project-shared setup
-  3. `references/default-dev-config.md` — global default bundled with the plugin
-  The result JSON includes a `source` field (`feat-local`/`wbs`/`default`) so callers can verify which config was applied.
-
-## dev-team Execution Modes
-
-- **tmux required**: `/dev-team` only runs inside a tmux session. Creates a git worktree per WP, spawns the WP leader as a tmux window, and the leader manages worker panes via the team-mode protocol. Supports early merge (merge completed WPs while others are still running).
-- **tmux missing**: The skill aborts immediately with a guidance message directing users to run `/dev {TSK-ID}` sequentially for each Task. Parallel development requires installing tmux and starting a session (`tmux new -s dev`). The non-tmux Agent-tool fallback was removed because its merge/recovery procedure was undefined.
-
-### Skill-Local References (dev-team)
-
-`skills/dev-team/references/` 하위는 dev-team 스킬이 런타임에 Read하는 프롬프트 템플릿 및 절차 문서다. 최상위 `references/`와 달리 dev-team 전용이며 다른 스킬에서 참조하지 않는다.
-
-| File | Purpose |
-|------|---------|
-| `wp-leader-prompt.md` | WP 리더 tmux window 스폰 시 주입되는 프롬프트 템플릿. `{WP-ID}`, `{WT_NAME}`, `{TEAM_SIZE}`, `{SHARED_SIGNAL_DIR}` 등 치환 |
-| `wp-leader-cleanup.md` | WP 리더 종료 시 팀리더에 완료 보고 + 워크트리 정리 절차 |
-| `ddtr-prompt-template.md` | Worker pane에 투입되는 DDTR 사이클(설계→TDD→테스트→리팩토링) 프롬프트 |
-| `ddtr-design-template.md` | DDTR의 Design phase 전용 단축 프롬프트 (설계 한정 워커용) |
-| `merge-procedure.md` | 팀리더의 WP 머지 절차 (early merge + full merge) |
-| `config-schema.md` | wp-setup.py의 JSON config 스키마 |
-
-## Platform Support
-
-`/dev-team`, `/team-mode`, `/agent-pool` need Python 3 + a `tmux`-compatible process manager (first two skills).
-
-| Environment | Status | Temp dir | Notes |
-|-------------|--------|----------|-------|
-| macOS / Linux | ✅ Native support | `$TMPDIR` or `/tmp` | tmux from package manager. Shell is bash/zsh. |
-| WSL2 (Windows) | ✅ Native support | `/tmp` | tmux inside WSL. Shell is bash. |
-| Native Windows | ✅ Supported via **psmux** (dev-team 경로) | `%TEMP%` | psmux를 `tmux` alias로 등록하면 `detect_mux()`가 `tmux -V` 프로브로 psmux를 식별하여 별도 분기 없이 동작한다. `/dev-team` 런처는 bash 스크립트가 아닌 **Python 런처**(`{WT_NAME}-run.py`, `{WT_NAME}-worker.py`)를 생성하므로 pane 기본 쉘이 cmd.exe/PowerShell/bash 무엇이든 무관하다. 런처는 `__file__` + `pathlib`로 경로를 해석하여 `C:\`, `/c/`, `/mnt/c/` 규칙 차이를 흡수한다. 단 **team-mode·agent-pool 스킬의 bash 예제**(`cd {dir} && claude ...`)는 아직 POSIX 의존이며 psmux 환경에서 cmd.exe pane으로 보내지면 실패한다 — 이 두 스킬은 `/dev-team` 처럼 Python 런처로 이관이 필요하다. |
-
-**Shared signal directory** resolves from `tempfile.gettempdir()` via `scripts/_platform.py:TEMP_DIR`. All three platforms produce a per-user local path, so cross-WP signal sharing works automatically — there is no need for NFS/SMB. **Do not override this with a network-mounted path**: signal file atomicity (create → rename → check) is not guaranteed on NFS v3, SMB, or sshfs. Keep `SHARED_SIGNAL_DIR` on local disk.
-
-**Windows 네이티브 지원 원칙** — `detect_mux()`가 psmux를 명시적으로 식별하고, 모든 pane-측 런처는 Python으로 생성된다. `python3` 하드코딩 금지 (MS Store App Execution Alias가 가로채 rc=9009를 흘림) — 내부 서브프로세스에는 `sys.executable`을, tmux/psmux에 전달하는 명령에는 `"{sys.executable}" "{abs_path}"` 형태를 사용한다. 모든 파일 쓰기는 `open(..., "w", encoding="utf-8", newline="\n")` — 기본 text 모드가 Windows에서 `\n`→`\r\n`으로 바꿔 bash 런처가 CRLF로 깨지는 문제 방지.
+- **Mux 추상화**: `detect_mux()`가 `tmux -V` 프로브로 tmux/psmux를 식별 → 호출부는 분기 없이 동일 명령을 사용한다.
+- **Python 런처**: pane에 투입되는 런처(예: `{WT_NAME}-run.py`)는 bash가 아니라 Python으로 생성한다. cmd.exe / PowerShell / bash 어느 기본 쉘에서도 동일하게 동작해야 하기 때문.
+- **`python3` 하드코딩 금지**: 내부 subprocess에는 `sys.executable`을, mux로 전달하는 명령에는 `"{sys.executable}" "{abs_path}"` 형태를 쓴다. (Windows에서 MS Store App Execution Alias가 `python3.exe`를 가로채 rc=9009를 반환)
+- **파일 쓰기 newline**: 모든 파일 출력은 `open(..., "w", encoding="utf-8", newline="\n")`. 기본 text 모드가 Windows에서 `\n`→`\r\n`으로 변환해 bash 런처가 CRLF로 깨지는 회귀 방지.
+- **경로 해석**: `__file__` + `pathlib`로 경로를 산출해 `C:\`, `/c/`, `/mnt/c/` 규칙 차이를 흡수한다.
+- **Shared signal directory**: `tempfile.gettempdir()` (via `scripts/_platform.py:TEMP_DIR`)만 사용한다. NFS v3 / SMB / sshfs는 `create → rename → check` 원자성이 보장되지 않으므로 네트워크 마운트로 override 금지.
+- **POSIX 잔재**: `team-mode`, `agent-pool` 스킬의 bash 예제(`cd {dir} && claude ...`)는 아직 POSIX 의존 — Windows pane 호환을 위해 점진적으로 Python 런처로 이관해야 한다(개선 백로그).
